@@ -1,0 +1,73 @@
+#
+# $Id: GNUmakefile.os4,v 1.1.1.1 2005-05-24 13:22:06 obarthel Exp $
+#
+# :ts=8
+#
+# SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
+#
+# Copyright (C) 2000-2004 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+
+.c.o:
+	@echo "Compiling $<"
+	@$(CC) -c $(CFLAGS) -o $*.o $<
+
+###########################################################################
+
+PROJECT = smbfs
+
+###########################################################################
+
+CC = ppc-amigaos-gcc
+
+###########################################################################
+
+#WARNINGS = \
+#	-Wall -W -Wshadow -Wpointer-arith -Wsign-compare -Wmissing-prototypes \
+#	-Wundef -Wbad-function-cast -Wmissing-declarations -Wconversion
+
+WARNINGS = \
+	-Wall -W -Wshadow -Wpointer-arith -Wsign-compare -Wmissing-prototypes \
+	-Wundef -Wbad-function-cast -Wmissing-declarations
+
+CPU = -mcpu=604e -msoft-float
+OPTIONS = -DNDEBUG -fno-builtin
+OPTIMIZE = -O2 -fomit-frame-pointer -fstrength-reduce -finline-functions
+DEBUG = -g
+
+###########################################################################
+
+CFLAGS = $(WARNINGS) $(OPTIMIZE) $(DEBUG) $(CPU) $(OPTIONS) \
+         -I. -I/V/include -I/usr/local/amiga/ppc-amigaos/sys-include -Iinclude -Inetinclude
+LFLAGS = -nostartfiles -nostdlib -L.
+
+###########################################################################
+
+OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o
+
+###########################################################################
+
+LIBS = -lc
+
+###########################################################################
+
+all: $(PROJECT)
+
+$(PROJECT): $(OBJS)
+	@echo "Linking $@"
+	@$(CC) -o $@.debug $(CFLAGS) $(LFLAGS) $(OBJS) $(LIBS) -Wl,--cref,-M,-Map=$@.map
+	ppc-amigaos-strip -R.comment -o $@ $@.debug
