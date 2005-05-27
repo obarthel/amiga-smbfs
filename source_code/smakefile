@@ -1,11 +1,11 @@
 #
-# $Id: smakefile,v 1.1.1.1 2005-05-24 13:22:12 obarthel Exp $
+# $Id: smakefile,v 1.2 2005-05-27 09:48:26 obarthel Exp $
 #
 # :ts=8
 #
 # SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
 #
-# Copyright (C) 2000-2004 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
+# Copyright (C) 2000-2005 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,6 +20,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#
+# NOTE: In order to build smbfs you will need to obtain the AmiTCP
+#       SDK, or the equivalent for Miami/Miami Deluxe or Roadshow.
+#       From that SDK, copy the "netinclude" directory to the same
+#       directory you find this "smakefile" in. Next, modify this
+#       "smakefile", removing the "@ctags >tagfiles/$* $<" and
+#       "@type tagfiles/\#? >t:tags", "@copy t:tags """ and
+#       "@delete >nil: t:tags" lines if you don't have the "ctags"
+#       command installed.
 #
 
 .c.o:
@@ -46,23 +56,23 @@ VERSION = 1
 ###############################################################################
 
  OPTIMIZE =	optimize opttime optinline optinlocal optschedule
- CPU =		any
-#CPU =		060
- DEBUG =	line
-#DEBUG =	symbolflush noopt define=DEBUG
+#CPU =		any
+ CPU =		060
+#DEBUG =	line
+ DEBUG =	symbolflush noopt define=DEBUG
 
 ###############################################################################
 
 CFLAGS =	idlen=64 comnest streq strmerge nostkchk \
 		$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) data=faronly \
 		params=register idir=netinclude idir=include \
-		gst=system_headers.gst
+		ignore=306 gst=system_headers.gst
 
 LFLAGS =	smallcode smalldata noicons batch
 
 ###############################################################################
 
-OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o
+OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o
 
 ###############################################################################
 
@@ -89,6 +99,16 @@ system_headers.gst: system_headers.h system_headers.c
 
 ###############################################################################
 
+assert.o : assert.c
+crypt.o : crypt.c system_headers.h assert.h smbfs.h
+main.o : main.c system_headers.h assert.h smbfs.h smb_abstraction.h smbfs_rev.h
+proc.o : proc.c system_headers.h assert.h smbfs.h quad_math.h
+quad_math.o : quad_math.c quad_math.h
+smb_abstraction.o : smb_abstraction.c system_headers.h assert.h smbfs.h smb_abstraction.h
+sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h
+
+###############################################################################
+
 clean:
 	-delete \#?.o $(PROJECT)(%|.debug)
 
@@ -98,10 +118,7 @@ realclean: clean
 ###############################################################################
 
 mkid:
-	mkid -v \#?.(c|h|a|asm|i) include/smb/\#?.h \
-
-#		netinclude/\#?/\#?.h \
-#		netinclude/\#?.h
+	mkid -v \#?.(c|h|a|asm|i) include/smb/\#?.h
 
 update:
 	mkid -v -u

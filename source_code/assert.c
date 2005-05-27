@@ -1,11 +1,11 @@
 /*
- * $Id: assert.c,v 1.1.1.1 2005-05-24 13:22:06 obarthel Exp $
+ * $Id: assert.c,v 1.2 2005-05-27 09:48:26 obarthel Exp $
  *
  * :ts=8
  *
  * SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
  *
- * Copyright (C) 2000-2004 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
+ * Copyright (C) 2000-2005 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

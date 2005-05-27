@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.1.1.1 2005-05-24 13:22:12 obarthel Exp $
+ * $Id: proc.c,v 1.2 2005-05-27 09:48:26 obarthel Exp $
  *
  * :ts=8
  *
@@ -14,6 +14,7 @@
  */
 
 #include "smbfs.h"
+#include "quad_math.h"
 
 /*****************************************************************************/
 
@@ -626,6 +627,21 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, struct 
   entry->size = DVAL (buf, smb_vwv4);
   entry->opened = 1;
 
+  #if DEBUG
+  {
+    struct tm tm;
+
+    LocalTime(entry->ctime,&tm);
+    LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->atime,&tm);
+    LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->mtime,&tm);
+    LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+  }
+  #endif /* DEBUG */
+
  out:
 
   return error;
@@ -1072,6 +1088,21 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 
   LOG (("smb_decode_dirent: path = %s\n", entry->complete_path));
 
+  #if DEBUG
+  {
+    struct tm tm;
+
+    LocalTime(entry->ctime,&tm);
+    LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->atime,&tm);
+    LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->mtime,&tm);
+    LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+  }
+  #endif /* DEBUG */
+
   return p + 22;
 }
 
@@ -1217,94 +1248,6 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 
 /*****************************************************************************/
 
-#define MAX_DIGITS 4 /* NOTE: this is actually a hard-coded value (see below) */
-
-/* Multiprecision arithmetics for beginners; we use 64 bits, chopped
- * into 16 bit pieces each. That allows us to comfortably execute all
- * calculations with 'long' arguments and not get into trouble because
- * of overflows and carry bits that don't exist. The assumption is that
- * the size of a 'long' is twice as large as that of a 'short'.
- */
-struct digits
-{
-  unsigned short d[MAX_DIGITS];
-};
-
-/* Divide a multiprecision number by a positive integer. This is
- * essentially the division by a single "digit", as described in
- * Donald E. Knuth's "The Art of Computer Programming, Volume 2
- * Seminumerical Algorithms", 3rd edition, page 625 as the answer
- * to exercise 16 on page 282 in section 4.3.1. We don't really
- * need the more complex version since we just need to divide by
- * 10,000 and then by 1,000. The complex version is much more
- * complex than calling this division routine twice.
- */
-static void
-divide_by(struct digits * q,unsigned long d)
-{
-  int m;
-
-  m = MAX_DIGITS;
-  while(m > 0 && q->d[m-1] == 0)
-    m--;
-
-  if(m > 0)
-  {
-    unsigned long r,s;
-    int j;
-
-    r = 0;
-    j = m - 1;
-
-    do
-    {
-      r <<= 16;
-
-      s = (r + q->d[j]);
-
-      q->d[j] = s / d;
-      r = s % d;
-    }
-    while(--j >= 0);
-  }
-}
-
-/* This is an application of algorithm S ('Subtraction of
- * non-negative integers') described in Donald E. Knuth's
- * "The Art of Computer Programming, Volume 2 / Seminumerical
- * Algorithms", 3rd edition, page 267.
- */
-static long
-subtract_number(struct digits * u,unsigned long v)
-{
-  long d;
-
-  /* This implementation takes advantage of the fact that
-   * the 'width' of 'v' (64 bits) is just half the size of
-   * 'u' (32 bits), which allows us to unroll the loop and
-   * leave out some of the arguments which would not
-   * contribute to the result anyway.
-   */
-
-  /* First round */
-  d = ((long)u->d[0]) - (long)(v & 0xFFFF);
-  u->d[0] = d;
-
-  /* Second round */
-  d = ((long)u->d[1]) - ((long)((v >> 16) & 0xFFFF)) - (d < 0);
-  u->d[1] = d;
-
-  /* Third round */
-  d = ((long)u->d[2]) - (d < 0);
-  u->d[2] = d;
-
-  /* Fourth round */
-  d = ((long)u->d[3]) - (d < 0);
-  u->d[3] = d;
-
-  return(d < 0);
-}
-
 /* Interpret an 8 byte "filetime" structure to a 'time_t'.
  * It's originally in "100ns units since jan 1st 1601".
  *
@@ -1315,36 +1258,32 @@ subtract_number(struct digits * u,unsigned long v)
 static time_t
 interpret_long_date(char * p)
 {
-  unsigned long hi,lo;
-  struct digits d;
+  QUAD adjust;
+  QUAD long_date;
+  ULONG underflow;
   time_t result;
-  int i,k;
 
   /* Extract the 64 bit time value. */
-  lo = DVAL(p,0);
-  hi = DVAL(p,4);
+  long_date.Low  = DVAL(p,0);
+  long_date.High = DVAL(p,4);
 
-  /* Chop the time into handy 16 bit chunks. */
-  d.d[3] = hi >> 16;
-  d.d[2] = hi & 0xFFFF;
-  d.d[1] = lo >> 16;
-  d.d[0] = lo & 0xFFFF;
+  /* Divide by 10,000,000 to convert the time from 100ns
+     units into seconds. */
+  divide_64_by_32(&long_date,10000000,&long_date);
 
-  /* Divide by 10,000,000 in two easy pieces. */
-  divide_by(&d,10000);
-  divide_by(&d,1000);
+  /* Adjust by 369 years (11,644,473,600 seconds) to convert
+     from the epoch beginning on January 1st 1601 to the one
+     beginning on January 1st 1970 (the Unix epoch). */
+  adjust.Low  = 0xb6109100;
+  adjust.High = 0x00000002;
 
-  /* Adjust by 369 years (11,644,473,600 seconds). */
-  k = 0;
-  for(i = 0 ; k == 0 && i < 4 ; i++)
-    k += subtract_number(&d,2911118400UL);
+  underflow = subtract_64_from_64_to_64(&long_date,&adjust,&long_date);
 
   /* If the result did not produce an underflow or overflow,
-   * return the number of seconds encoded in the two least
-   * significant 'digits'.
-   */
-  if(k == 0 && d.d[3] == 0 && d.d[2] == 0)
-    result = (time_t)((((unsigned long)d.d[1]) << 16) + d.d[0]);
+     return the number of seconds encoded in the least
+     significant word of the result. */
+  if(underflow == 0 && long_date.High == 0)
+    result = (time_t)long_date.Low + GetTimeZoneDelta();
   else
     result = 0;
 
@@ -1366,6 +1305,16 @@ smb_get_dirent_name(char *p,int level,char ** name_ptr,int * len_ptr)
     case 2: /* this is what OS/2 uses */
       (*name_ptr) = p + 31;
       (*len_ptr) = strlen(p + 31);
+      break;
+
+    case 3: /* untested */
+      (*name_ptr) = p + 33;
+      (*len_ptr) = strlen(p + 33);
+      break;
+
+    case 4: /* untested */
+      (*name_ptr) = p + 37;
+      (*len_ptr) = strlen(p + 37);
       break;
 
     case 260: /* NT uses this, but also accepts 2 */
@@ -1413,6 +1362,21 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         finfo->ctime = date_dos2unix (WVAL (p, 6), WVAL (p, 4));
         finfo->atime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
         finfo->mtime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+
+        #if DEBUG
+        {
+          struct tm tm;
+
+          LocalTime(finfo->ctime,&tm);
+          LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->atime,&tm);
+          LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->mtime,&tm);
+          LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+        }
+        #endif /* DEBUG */
       }
 
       result = p + 28 + BVAL (p, 26);
@@ -1441,10 +1405,87 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         finfo->ctime = date_dos2unix (WVAL (p, 6), WVAL (p, 4));
         finfo->atime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
         finfo->mtime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+
+        #if DEBUG
+        {
+          struct tm tm;
+
+          LocalTime(finfo->ctime,&tm);
+          LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->atime,&tm);
+          LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->mtime,&tm);
+          LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+        }
+        #endif /* DEBUG */
       }
 
       result = p + 32 + BVAL (p, 30);
 
+      break;
+
+    case 3: /* untested */
+
+      if (finfo != NULL)
+      {
+        strlcpy (finfo->complete_path, p + 33, finfo->complete_path_size);
+        finfo->len = strlen (finfo->complete_path);
+        finfo->size = DVAL (p, 20);
+        finfo->attr = BVAL (p, 28);
+        finfo->ctime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
+        finfo->atime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+        finfo->mtime = date_dos2unix (WVAL (p, 18), WVAL (p, 16));
+
+        #if DEBUG
+        {
+          struct tm tm;
+
+          LocalTime(finfo->ctime,&tm);
+          LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->atime,&tm);
+          LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->mtime,&tm);
+          LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+        }
+        #endif /* DEBUG */
+      }
+
+      result = p + 4 + WVAL (p, 4);
+      break;
+
+    case 4: /* untested */
+      
+      if (finfo != NULL)
+      {
+        strlcpy (finfo->complete_path, p + 37, finfo->complete_path_size);
+        finfo->len = strlen (finfo->complete_path);
+        finfo->size = DVAL (p, 20);
+        finfo->attr = BVAL (p, 28);
+        finfo->ctime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
+        finfo->atime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+        finfo->mtime = date_dos2unix (WVAL (p, 18), WVAL (p, 16));
+
+        #if DEBUG
+        {
+          struct tm tm;
+
+          LocalTime(finfo->ctime,&tm);
+          LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->atime,&tm);
+          LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->mtime,&tm);
+          LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+        }
+        #endif /* DEBUG */
+      }
+
+      result = p + 4 + WVAL (p, 4);
       break;
 
     case 260: /* NT uses this, but also accepts 2 */
@@ -1495,6 +1536,21 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         memcpy (finfo->complete_path, p, namelen);
         finfo->complete_path[namelen] = '\0';
         finfo->len = namelen;
+
+        #if DEBUG
+        {
+          struct tm tm;
+
+          LocalTime(finfo->ctime,&tm);
+          LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->atime,&tm);
+          LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->mtime,&tm);
+          LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+        }
+        #endif /* DEBUG */
       }
 
       break;
@@ -1886,6 +1942,21 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 
   entry->size = DVAL (buf, smb_vwv3);
 
+  #if DEBUG
+  {
+    struct tm tm;
+
+    LocalTime(entry->ctime,&tm);
+    LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->atime,&tm);
+    LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->mtime,&tm);
+    LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+  }
+  #endif /* DEBUG */
+
  out:
 
   return result;
@@ -1909,6 +1980,21 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
   entry->mtime = date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
   entry->size = DVAL (buf, smb_vwv6);
   entry->attr = WVAL (buf, smb_vwv10);
+
+  #if DEBUG
+  {
+    struct tm tm;
+
+    LocalTime(entry->ctime,&tm);
+    LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->atime,&tm);
+    LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->mtime,&tm);
+    LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+  }
+  #endif /* DEBUG */
 
  out:
 

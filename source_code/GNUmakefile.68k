@@ -1,11 +1,11 @@
 #
-# $Id: GNUmakefile.68k,v 1.1.1.1 2005-05-24 13:22:06 obarthel Exp $
+# $Id: GNUmakefile.68k,v 1.2 2005-05-27 09:48:26 obarthel Exp $
 #
 # :ts=8
 #
 # SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
 #
-# Copyright (C) 2000-2004 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
+# Copyright (C) 2000-2005 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -48,7 +48,7 @@ LFLAGS = -nostartfiles -nostdlib -L.
 
 ###############################################################################
 
-OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o
+OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o
 
 ###############################################################################
 
@@ -62,6 +62,15 @@ $(PROJECT): $(OBJS)
 	gcc -o $@.debug $(OBJS) $(CFLAGS) $(LFLAGS) $(LIBS)
 	strip --strip-all -o $@ $@.debug
 	protect $@ +e
+
+###############################################################################
+
+crypt.o : crypt.c system_headers.h assert.h smbfs.h
+main.o : main.c system_headers.h assert.h smbfs.h smb_abstraction.h smbfs_rev.h
+proc.o : proc.c system_headers.h assert.h smbfs.h quad_math.h
+quad_math.o : quad_math.c quad_math.h
+smb_abstraction.o : smb_abstraction.c system_headers.h assert.h smbfs.h smb_abstraction.h
+sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h
 
 ###############################################################################
 
