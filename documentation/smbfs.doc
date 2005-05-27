@@ -15,9 +15,9 @@ drive.
 2. What do you need to get started?
 
 You need a TCP/IP stack that supports the AmiTCP V3 API, such as 'Miami', the
-original free 'AmiTCP 3.0' release, 'AmiTCP 4.x', 'Miami Deluxe' or 'AmiTCP
-Genesis' and the obligatory networking gear. All these items need to be in
-good shape and properly configured.
+original free 'AmiTCP 3.0' release, 'AmiTCP 4.x', 'Miami Deluxe', 'AmiTCP
+Genesis' or 'Roadshow' and the obligatory networking gear. All these items
+need to be in good shape and properly configured.
 
 Most important, you need a computer which exports file sharing services using
 the SMB protocol.
@@ -441,5 +441,5 @@ SMBFS is distributed under the terms of the GNU General Public License
 (version 2). The source code should have accompanied this program; if it
 hasn't, please contact the author for a copy.
 
-The program was compiled using the SAS/C 6.58 compiler, with the Miami SDK
+The program was compiled using the SAS/C 6.58 compiler, with the Roadshow SDK
 providing for the TCP/IP stack API header files.

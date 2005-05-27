@@ -561,3 +561,15 @@ smbfs 1.66 (10.6.2004)
 
 - Added a paranoia check to the ExAll() implementation which should
   avoid trouble with extremely short data buffers.
+
+
+smbfs 1.67 (27.5.2005)
+
+- Replaced the long NT date conversion code with something hopefully
+  much more robust. The results so far are both encouraging and
+  irritating. Dates that previously came out as "unknown" are now
+  processed, but there are differences between the dates shown in the
+  directory listing and by listing the files by name. Go figure...
+
+- Transplanted some more code from Samba to handle directory entry
+  data conversion.
