@@ -1,5 +1,5 @@
 #
-# $Id: smakefile,v 1.2 2005-05-27 09:48:26 obarthel Exp $
+# $Id: smakefile,v 1.3 2005-05-27 10:35:48 obarthel Exp $
 #
 # :ts=8
 #
@@ -56,10 +56,10 @@ VERSION = 1
 ###############################################################################
 
  OPTIMIZE =	optimize opttime optinline optinlocal optschedule
-#CPU =		any
- CPU =		060
-#DEBUG =	line
- DEBUG =	symbolflush noopt define=DEBUG
+ CPU =		any
+#CPU =		060
+ DEBUG =	line
+#DEBUG =	symbolflush noopt define=DEBUG
 
 ###############################################################################
 

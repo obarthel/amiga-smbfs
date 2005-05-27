@@ -1,5 +1,5 @@
 /*
- * $Id: assert.h,v 1.2 2005-05-27 09:48:26 obarthel Exp $
+ * $Id: assert.h,v 1.3 2005-05-27 10:35:48 obarthel Exp $
  *
  * :ts=8
  *
@@ -33,7 +33,7 @@
  *            all the necessary dependency lines in place).
  */
 
-#define DEBUG
+/*#define DEBUG*/
 
 /****************************************************************************/
 
