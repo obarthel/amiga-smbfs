@@ -432,7 +432,10 @@ Or, alternatively, you might want to contact me via my postal address:
 
 If you want to submit a bug report or an enhancement request, please enclose
 sufficient information to allow me to make sense of the problem. That includes
-debugging logs produced using the DEBUG option.
+debugging logs produced using the DEBUG option. If possible, use the
+facilities for bug reporting and tracking on the sourceforge.net web site
+at <http://sourceforge.net/projects/amiga-smbfs>, which is the new home for
+this file system.
 
 
 9. Source code
