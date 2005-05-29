@@ -1,5 +1,5 @@
 #
-# $Id: GNUmakefile.os4,v 1.2 2005-05-27 09:48:26 obarthel Exp $
+# $Id: GNUmakefile.os4,v 1.3 2005-05-29 08:32:58 obarthel Exp $
 #
 # :ts=8
 #
@@ -36,16 +36,12 @@ CC = ppc-amigaos-gcc
 
 ###########################################################################
 
-#WARNINGS = \
-#	-Wall -W -Wshadow -Wpointer-arith -Wsign-compare -Wmissing-prototypes \
-#	-Wundef -Wbad-function-cast -Wmissing-declarations -Wconversion
-
 WARNINGS = \
 	-Wall -W -Wshadow -Wpointer-arith -Wsign-compare -Wmissing-prototypes \
 	-Wundef -Wbad-function-cast -Wmissing-declarations
 
 CPU = -mcpu=604e -msoft-float
-OPTIONS = -DNDEBUG -fno-builtin
+OPTIONS = -DNDEBUG
 OPTIMIZE = -O3
 DEBUG = -ggdb
 

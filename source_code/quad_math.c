@@ -1,5 +1,5 @@
 /*
- * $Id: quad_math.c,v 1.1 2005-05-27 09:48:26 obarthel Exp $
+ * $Id: quad_math.c,v 1.2 2005-05-29 08:32:58 obarthel Exp $
  *
  * :ts=4
  *
@@ -25,62 +25,6 @@
 #ifndef _QUAD_MATH_H
 #include "quad_math.h"
 #endif /* _QUAD_MATH_H */
-
-/****************************************************************************/
-
-/* Multiply two unsigned 32 bit quantities, yielding a 64 bit product. */
-void
-multiply_32_by_32_to_64(ULONG ab,ULONG cd,QUAD * abcd)
-{
-	ULONG a,b,c,d,ad_plus_bc_low,ad_plus_bc_high,bc,bd,ad;
-
-	/* Split the factors again so that the following is true:
-	 *
-	 * ab = (a * 65536) + b
-	 * cd = (c * 65536) + d
-	 */
-	a = (ab >> 16);
-	b = ab & 0xFFFF;
-	c = (cd >> 16);
-	d = cd & 0xFFFF;
-
-	/* We need to calculate the following product:
-	 *
-	 * ab * cd = (a * 65536 + b) * cd
-	 *         = a * 65536 * cd + b * cd
-	 *         = a * 65536 * (c * 65536 + d) + b * (c * 65536 + d)
-	 *         = a * 65536 * c * 65536 + a * 65536 * d + b + c * 65536 + b * d
-	 *         = ac * 65536 * 65536 + ad * 65536 + bc * 65536 * bd
-	 *         = ac * 65536 * 65536 + (ad + bc) * 65536 + bc
-	 */
-	ad = a * d;
-	bc = b * c;
-	bd = b * d;
-
-	/* We can put the most and least significant components of the
-	 * product right into the result buffer.
-	 */
-	abcd->High	= a * c;
-	abcd->Low	= bd;
-
-	/* Add ad and bc and check if there was an overflow. */
-	ad_plus_bc_low	= ad + bc;
-	ad_plus_bc_high	= (ad_plus_bc_low < ad) ? 1 : 0;
-
-	/* Add the lower 16 bits of the ad+bc sum to the least
-	 * significant component of the result buffer and
-	 * check for overflow.
-	 */
-	abcd->Low += (ad_plus_bc_low << 16);
-	if(abcd->Low < bd)
-		abcd->High++;
-
-	/* Add the upper 16 bits of the ad+bc sum to the most
-	 * significant component of the result buffer. Add
-	 * the overflow bit of the ad+bc sum, too.
-	 */
-	abcd->High += ((ad_plus_bc_low >> 16) & 0xFFFF) + (ad_plus_bc_high << 16);
-}
 
 /****************************************************************************/
 
