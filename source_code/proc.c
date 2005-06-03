@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.2 2005-05-27 09:48:26 obarthel Exp $
+ * $Id: proc.c,v 1.3 2005-06-03 14:34:17 obarthel Exp $
  *
  * :ts=8
  *
@@ -623,7 +623,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, struct 
   /* We should now have data in vwv[0..6]. */
   entry->fileid = WVAL (buf, smb_vwv0);
   entry->attr = WVAL (buf, smb_vwv1);
-  entry->ctime = entry->atime = entry->mtime = local2utc (DVAL (buf, smb_vwv2));
+  entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
   entry->size = DVAL (buf, smb_vwv4);
   entry->opened = 1;
 
@@ -639,6 +639,9 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, struct 
 
     LocalTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->wtime,&tm);
+    LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */
 
@@ -1074,7 +1077,7 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
   p += SMB_STATUS_SIZE; /* reserved (search_status) */
 
   entry->attr = BVAL (p, 0);
-  entry->mtime = entry->atime = entry->ctime = date_dos2unix (WVAL (p, 1), WVAL (p, 3));
+  entry->mtime = entry->atime = entry->ctime = entry->wtime = date_dos2unix (WVAL (p, 1), WVAL (p, 3));
   entry->size = DVAL (p, 5);
 
   name_size = 13;
@@ -1100,6 +1103,9 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 
     LocalTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->wtime,&tm);
+    LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */
 
@@ -1283,7 +1289,7 @@ interpret_long_date(char * p)
      return the number of seconds encoded in the least
      significant word of the result. */
   if(underflow == 0 && long_date.High == 0)
-    result = (time_t)long_date.Low + GetTimeZoneDelta();
+    result = local2utc(long_date.Low);
   else
     result = 0;
 
@@ -1362,6 +1368,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         finfo->ctime = date_dos2unix (WVAL (p, 6), WVAL (p, 4));
         finfo->atime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
         finfo->mtime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+        finfo->wtime = finfo->mtime;
 
         #if DEBUG
         {
@@ -1375,6 +1382,9 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 
           LocalTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->wtime,&tm);
+          LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
       }
@@ -1405,6 +1415,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         finfo->ctime = date_dos2unix (WVAL (p, 6), WVAL (p, 4));
         finfo->atime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
         finfo->mtime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+        finfo->wtime = finfo->mtime;
 
         #if DEBUG
         {
@@ -1418,6 +1429,9 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 
           LocalTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->wtime,&tm);
+          LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
       }
@@ -1437,6 +1451,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         finfo->ctime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
         finfo->atime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
         finfo->mtime = date_dos2unix (WVAL (p, 18), WVAL (p, 16));
+        finfo->wtime = finfo->mtime;
 
         #if DEBUG
         {
@@ -1450,6 +1465,9 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 
           LocalTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->wtime,&tm);
+          LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
       }
@@ -1468,6 +1486,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         finfo->ctime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
         finfo->atime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
         finfo->mtime = date_dos2unix (WVAL (p, 18), WVAL (p, 16));
+        finfo->wtime = finfo->mtime;
 
         #if DEBUG
         {
@@ -1481,6 +1500,9 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 
           LocalTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->wtime,&tm);
+          LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
       }
@@ -1516,7 +1538,8 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         p += 8;
         finfo->atime = interpret_long_date(p);
         p += 8;
-        p += 8;                   /* write time */
+        finfo->wtime = interpret_long_date(p);
+        p += 8;
         finfo->mtime = interpret_long_date(p);
         p += 8;
         finfo->size = DVAL (p, 0);
@@ -1533,6 +1556,11 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         if(namelen > (int)finfo->complete_path_size-1)
           namelen = finfo->complete_path_size-1;
 
+        /* If the modification time is not set, try to
+           substitute the write time for it. */
+        if(finfo->mtime == 0)
+          finfo->mtime = finfo->wtime;
+
         memcpy (finfo->complete_path, p, namelen);
         finfo->complete_path[namelen] = '\0';
         finfo->len = namelen;
@@ -1546,6 +1574,9 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 
           LocalTime(finfo->atime,&tm);
           LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+          LocalTime(finfo->wtime,&tm);
+          LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
           LocalTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
@@ -1561,7 +1592,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
       {
         /* I have to set times to 0 here, because I do not
            have specs about this for all info levels. */
-        finfo->ctime = finfo->mtime = finfo->atime = 0;
+        finfo->ctime = finfo->mtime = finfo->wtime = finfo->atime = 0;
       }
 
       LOG (("Unknown long filename format %ld\n", level));
@@ -1938,7 +1969,7 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
   entry->attr = WVAL (buf, smb_vwv0);
 
   /* The server only tells us 1 time */
-  entry->ctime = entry->atime = entry->mtime = local2utc (DVAL (buf, smb_vwv1));
+  entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv1));
 
   entry->size = DVAL (buf, smb_vwv3);
 
@@ -1954,6 +1985,9 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 
     LocalTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->wtime,&tm);
+    LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */
 
@@ -1978,6 +2012,7 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
   entry->ctime = date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
   entry->atime = date_dos2unix (WVAL (buf, smb_vwv3), WVAL (buf, smb_vwv2));
   entry->mtime = date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
+  entry->wtime = entry->mtime;
   entry->size = DVAL (buf, smb_vwv6);
   entry->attr = WVAL (buf, smb_vwv10);
 
@@ -1993,6 +2028,9 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
 
     LocalTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+    LocalTime(entry->wtime,&tm);
+    LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */
 

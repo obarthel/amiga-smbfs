@@ -573,3 +573,14 @@ smbfs 1.67 (27.5.2005)
 
 - Transplanted some more code from Samba to handle directory entry
   data conversion.
+
+
+smbfs 1.68 (3.6.2005)
+
+- It appears that Windows XP can produce directory listings with
+  file/directory modification times set to 0, indicating that no
+  such information is available, while the associated last file
+  write access data is present. Previously, smbfs only reported
+  the modification. If this data is unavailable and the date of
+  the last write access is, the last write access will be
+  reported instead.

@@ -1,5 +1,5 @@
 /*
- * $Id: smb.h,v 1.1.1.1 2005-05-24 13:22:14 obarthel Exp $
+ * $Id: smb.h,v 1.2 2005-06-03 14:34:17 obarthel Exp $
  *
  * :ts=8
  *
@@ -70,7 +70,8 @@ struct smb_dirent
   word fileid;                  /* What id to handle a file with? */
   word attr;                    /* Attribute fields, DOS value */
 
-  time_t atime, mtime, ctime;   /* Times, as seen by the server, normalized */
+  time_t atime, mtime, 
+         wtime, ctime;          /* Times, as seen by the server, normalized */
                                 /* to UTC. The ugly conversion happens in */
                                 /* proc.c */
 
