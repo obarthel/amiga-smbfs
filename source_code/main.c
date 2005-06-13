@@ -1,5 +1,5 @@
 /*
- * $Id: main.c,v 1.3 2005-05-29 08:32:58 obarthel Exp $
+ * $Id: main.c,v 1.4 2005-06-13 08:04:15 obarthel Exp $
  *
  * :ts=4
  *
@@ -129,7 +129,7 @@ VOID FreeMemory(APTR address);
 APTR AllocateMemory(ULONG size);
 LONG GetTimeZoneDelta(VOID);
 ULONG GetCurrentTime(VOID);
-VOID LocalTime(time_t seconds, struct tm *tm);
+VOID GMTime(time_t seconds, struct tm *tm);
 time_t MakeTime(const struct tm *const tm);
 VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString, ...);
 int BroadcastNameQuery(char *name, char *scope, UBYTE *address);
@@ -1162,11 +1162,9 @@ GetCurrentTime(VOID)
  * in Unix format.
  */
 VOID
-LocalTime(time_t seconds,struct tm * tm)
+GMTime(time_t seconds,struct tm * tm)
 {
 	struct ClockData clock_data;
-
-	seconds -= GetTimeZoneDelta();
 
 	if(seconds < UNIX_TIME_OFFSET)
 		seconds = 0;
@@ -1201,7 +1199,7 @@ MakeTime(const struct tm * const tm)
 	clock_data.month	= tm->tm_mon + 1;
 	clock_data.year		= tm->tm_year + 1900;
 
-	seconds = Date2Amiga(&clock_data) + UNIX_TIME_OFFSET + GetTimeZoneDelta();
+	seconds = Date2Amiga(&clock_data) + UNIX_TIME_OFFSET;
 
 	return(seconds);
 }
@@ -5109,7 +5107,7 @@ Action_SetDate(
 
 	st.atime = -1;
 	st.ctime = -1;
-	st.mtime = UNIX_TIME_OFFSET + seconds + GetTimeZoneDelta();
+	st.mtime = seconds + UNIX_TIME_OFFSET + GetTimeZoneDelta();
 	st.size = -1;
 
 	error = smba_setattr(file,&st);

@@ -584,3 +584,28 @@ smbfs 1.68 (3.6.2005)
   the modification. If this data is unavailable and the date of
   the last write access is, the last write access will be
   reported instead.
+
+
+smbfs 1.69 (13.6.2005)
+
+- The time stamps used in "proc.c", as returned and submitted to
+  the SMB file system on the other end of the wire are apparently
+  all in Universally Coordinated Time already (or at least, this
+  seems to be the case with Samba and Windows XP). Hence no conversion
+  between local time and UTC is necessary, which would otherwise
+  distort all date stamps converted. I modified the file system to
+  leave all time stamps essentially unadjusted for local time in
+  "proc.c". The local time zone adjustments are now performed only
+  where the time in question is known to be Amiga-specific, such as
+  the current system time or the date stamp to set for a file.
+
+  The time conversion appears to be working correctly now, but it
+  does ignore the effects of daylight savings time, which you might
+  want to adjust for manually through the TIMEZONEOFFSET option
+  (careful though: this overrides your current locale-defined time
+  zone settings as far as smbfs is concerned).
+
+  Unsolved problem: at least Windows XP seems to return different
+  time stamps for directory listings and for indidivual files. As
+  far as I can tell, the sets of time stamps returned for either
+  doesn't match anywhere.

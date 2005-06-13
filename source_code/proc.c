@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.3 2005-06-03 14:34:17 obarthel Exp $
+ * $Id: proc.c,v 1.4 2005-06-13 08:04:15 obarthel Exp $
  *
  * :ts=8
  *
@@ -37,8 +37,6 @@
 
 static INLINE byte * smb_encode_word(byte *p, word data);
 static INLINE byte * smb_decode_word(byte *p, word *data);
-static INLINE int utc2local(int time_value);
-static INLINE int local2utc(int time_value);
 static INLINE word smb_bcc(byte *packet);
 static INLINE int smb_verify(byte *packet, int command, int wct, int bcc);
 static byte *smb_encode_dialect(byte *p, const byte *name, int len);
@@ -173,6 +171,13 @@ smb_name_mangle (byte * p, const byte * name)
   return p;
 }
 
+/* Apparently, the time values used here are already relative
+   to UTC and not in the local time zone. Hence the dummy
+   macros and the commented-out conversion functions. */
+#define utc2local(time_value) (time_value)
+#define local2utc(time_value) (time_value)
+
+/*
 static INLINE int
 utc2local (int time_value)
 {
@@ -192,6 +197,7 @@ local2utc (int time_value)
 
   return result;
 }
+*/
 
 /* Convert a MS-DOS time/date pair to a UNIX date (seconds since January 1st 1970). */
 static int
@@ -220,7 +226,7 @@ date_unix2dos (int unix_date, unsigned short *time_value, unsigned short *date)
 {
   struct tm tm;
 
-  LocalTime(unix_date,&tm);
+  GMTime(unix_date,&tm);
 
   (*time_value) = (tm.tm_hour << 11) | (tm.tm_min << 5) | (tm.tm_sec / 2);
   (*date) = ((tm.tm_year - 80) << 9) | ((tm.tm_mon + 1) << 5) | tm.tm_mday;
@@ -631,16 +637,16 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, struct 
   {
     struct tm tm;
 
-    LocalTime(entry->ctime,&tm);
+    GMTime(entry->ctime,&tm);
     LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->atime,&tm);
+    GMTime(entry->atime,&tm);
     LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->mtime,&tm);
+    GMTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->wtime,&tm);
+    GMTime(entry->wtime,&tm);
     LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */
@@ -1095,16 +1101,16 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
   {
     struct tm tm;
 
-    LocalTime(entry->ctime,&tm);
+    GMTime(entry->ctime,&tm);
     LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->atime,&tm);
+    GMTime(entry->atime,&tm);
     LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->mtime,&tm);
+    GMTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->wtime,&tm);
+    GMTime(entry->wtime,&tm);
     LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */
@@ -1374,16 +1380,16 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         {
           struct tm tm;
 
-          LocalTime(finfo->ctime,&tm);
+          GMTime(finfo->ctime,&tm);
           LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->atime,&tm);
+          GMTime(finfo->atime,&tm);
           LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->mtime,&tm);
+          GMTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->wtime,&tm);
+          GMTime(finfo->wtime,&tm);
           LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
@@ -1421,16 +1427,16 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         {
           struct tm tm;
 
-          LocalTime(finfo->ctime,&tm);
+          GMTime(finfo->ctime,&tm);
           LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->atime,&tm);
+          GMTime(finfo->atime,&tm);
           LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->mtime,&tm);
+          GMTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->wtime,&tm);
+          GMTime(finfo->wtime,&tm);
           LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
@@ -1457,16 +1463,16 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         {
           struct tm tm;
 
-          LocalTime(finfo->ctime,&tm);
+          GMTime(finfo->ctime,&tm);
           LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->atime,&tm);
+          GMTime(finfo->atime,&tm);
           LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->mtime,&tm);
+          GMTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->wtime,&tm);
+          GMTime(finfo->wtime,&tm);
           LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
@@ -1492,16 +1498,16 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         {
           struct tm tm;
 
-          LocalTime(finfo->ctime,&tm);
+          GMTime(finfo->ctime,&tm);
           LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->atime,&tm);
+          GMTime(finfo->atime,&tm);
           LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->mtime,&tm);
+          GMTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->wtime,&tm);
+          GMTime(finfo->wtime,&tm);
           LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
@@ -1569,16 +1575,16 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
         {
           struct tm tm;
 
-          LocalTime(finfo->ctime,&tm);
+          GMTime(finfo->ctime,&tm);
           LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->atime,&tm);
+          GMTime(finfo->atime,&tm);
           LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->wtime,&tm);
+          GMTime(finfo->wtime,&tm);
           LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-          LocalTime(finfo->mtime,&tm);
+          GMTime(finfo->mtime,&tm);
           LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
         }
         #endif /* DEBUG */
@@ -1977,16 +1983,16 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
   {
     struct tm tm;
 
-    LocalTime(entry->ctime,&tm);
+    GMTime(entry->ctime,&tm);
     LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->atime,&tm);
+    GMTime(entry->atime,&tm);
     LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->mtime,&tm);
+    GMTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->wtime,&tm);
+    GMTime(entry->wtime,&tm);
     LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */
@@ -2020,16 +2026,16 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
   {
     struct tm tm;
 
-    LocalTime(entry->ctime,&tm);
+    GMTime(entry->ctime,&tm);
     LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->atime,&tm);
+    GMTime(entry->atime,&tm);
     LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->mtime,&tm);
+    GMTime(entry->mtime,&tm);
     LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-    LocalTime(entry->wtime,&tm);
+    GMTime(entry->wtime,&tm);
     LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
   }
   #endif /* DEBUG */

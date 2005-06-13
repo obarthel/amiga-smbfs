@@ -1,5 +1,5 @@
 /*
- * $Id: smbfs.h,v 1.2 2005-05-27 09:48:26 obarthel Exp $
+ * $Id: smbfs.h,v 1.3 2005-06-13 08:04:15 obarthel Exp $
  *
  * :ts=4
  *
@@ -126,7 +126,7 @@ extern STRPTR amitcp_strerror(int error);
 extern STRPTR host_strerror(int error);
 extern time_t MakeTime(const struct tm * const tm);
 extern ULONG GetCurrentTime(VOID);
-extern VOID LocalTime(time_t seconds,struct tm * tm);
+extern VOID GMTime(time_t seconds,struct tm * tm);
 extern VOID VARARGS68K ReportError(STRPTR fmt,...);
 extern VOID StringToUpper(STRPTR s);
 extern VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString,...);
