@@ -1,5 +1,5 @@
 /*
- * $Id: main.c,v 1.6 2005-06-13 13:11:26 obarthel Exp $
+ * $Id: main.c,v 1.7 2005-06-13 19:34:25 obarthel Exp $
  *
  * :ts=4
  *
@@ -84,7 +84,8 @@ struct LockNode
 /****************************************************************************/
 
 /* The minimum operating system version we require to work. */
-#define MINIMUM_OS_VERSION 39
+#define MINIMUM_OS_VERSION 37		/* Kickstart 2.04 or better */
+/*#define MINIMUM_OS_VERSION 39*/	/* Kickstart 3.0 or better */
 
 /****************************************************************************/
 
