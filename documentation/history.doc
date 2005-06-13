@@ -619,3 +619,19 @@ smbfs 1.70 (13.6.2005)
 - Looks like some of the time stamps used in "proc.c" are
   transmitted in local time after all; brought back the
   conversion functions.
+
+
+smbfs 1.71 (13.6.2005)
+
+- The extended directory scanning entry conversion code now swaps
+  the last modification and last write access date stamps. This
+  matches the time of the last modification, as returned by the
+  regular ACTION_EXAMINE_FH/ACTION_EXAMINE packets. Note that the
+  time resolution is a little bit coarser because the modification
+  time as expressed by the SMB getattr function cannot represent
+  60 distinct seconds per minute but only 30. The net effect is
+  that the resulting time stamps in a directory listing and by
+  examining a file can differ by one second.
+
+- The DST option's time offset was added to rather than subtracted
+  from the local time. Fixed.

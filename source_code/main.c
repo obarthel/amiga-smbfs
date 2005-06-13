@@ -1,5 +1,5 @@
 /*
- * $Id: main.c,v 1.5 2005-06-13 08:42:06 obarthel Exp $
+ * $Id: main.c,v 1.6 2005-06-13 13:11:26 obarthel Exp $
  *
  * :ts=4
  *
@@ -2195,7 +2195,7 @@ Setup(
 	}
 
 	if(opt_dst_offset != NULL)
-		DSTOffset = 60 * (*opt_dst_offset);
+		DSTOffset = -60 * (*opt_dst_offset);
 
 	memset(&TimerRequest,0,sizeof(TimerRequest));
 

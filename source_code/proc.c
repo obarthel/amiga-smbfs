@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.5 2005-06-13 08:42:06 obarthel Exp $
+ * $Id: proc.c,v 1.6 2005-06-13 13:11:26 obarthel Exp $
  *
  * :ts=8
  *
@@ -171,12 +171,18 @@ smb_name_mangle (byte * p, const byte * name)
   return p;
 }
 
+/* According to the core protocol documentation times are
+   expressed as seconds past January 1st, 1970, local
+   time zone. */
 static INLINE int
 utc2local (int time_value)
 {
   int result;
 
-  result = time_value - GetTimeZoneDelta();
+  if(time_value > 0)
+    result = time_value - GetTimeZoneDelta();
+  else
+    result = time_value;
 
   return result;
 }
@@ -186,7 +192,10 @@ local2utc (int time_value)
 {
   int result;
 
-  result = time_value + GetTimeZoneDelta();
+  if(time_value > 0)
+    result = time_value + GetTimeZoneDelta();
+  else
+    result = time_value;
 
   return result;
 }
@@ -1459,6 +1468,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
       if (finfo != NULL)
       {
         int namelen;
+        time_t swap;
 
         p += 4;                   /* next entry offset */
         p += 4;                   /* fileindex */
@@ -1488,6 +1498,11 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
            substitute the write time for it. */
         if(finfo->mtime == 0)
           finfo->mtime = finfo->wtime;
+
+        /* Swap last modification time and last write time. */
+        swap = finfo->mtime;
+        finfo->mtime = finfo->wtime;
+        finfo->wtime = swap;
 
         memcpy (finfo->complete_path, p, namelen);
         finfo->complete_path[namelen] = '\0';
