@@ -1,5 +1,5 @@
 /*
- * $Id: main.c,v 1.4 2005-06-13 08:04:15 obarthel Exp $
+ * $Id: main.c,v 1.5 2005-06-13 08:42:06 obarthel Exp $
  *
  * :ts=4
  *
@@ -153,7 +153,7 @@ STATIC BOOL IsReservedName(STRPTR name);
 STATIC LONG MapErrnoToIoErr(int error);
 STATIC VOID TranslateBName(UBYTE *name, UBYTE *map);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, LONG *opt_time_zone_offset, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, LONG *opt_time_zone_offset, LONG *opt_dst_offset, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, APTR bstring);
 STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
 STATIC LONG Action_DeleteObject(struct FileLock *parent, APTR bcpl_name, LONG *error_ptr);
@@ -248,6 +248,7 @@ STATIC BOOL					Quiet;
 STATIC BOOL					CaseSensitive;
 STATIC BOOL					OmitHidden;
 
+STATIC LONG					DSTOffset;
 STATIC LONG					TimeZoneOffset;
 STATIC BOOL					OverrideLocaleTimeZone;
 
@@ -293,6 +294,7 @@ _start(VOID)
 		NUMBER	CacheSize;
 		NUMBER	DebugLevel;
 		NUMBER	TimeZoneOffset;
+		NUMBER	DSTOffset;
 		KEY		TranslationFile;
 		KEY		Service;
 	} args;
@@ -312,6 +314,7 @@ _start(VOID)
 		"CACHE=CACHESIZE/N/K,"
 		"DEBUGLEVEL=DEBUG/N/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
+		"DST=DSTOFFSET/N/K,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
 		"SERVICE/A";
 
@@ -610,6 +613,21 @@ _start(VOID)
 			args.TimeZoneOffset = &other_number;
 		}
 
+		str = FindToolType(Icon->do_ToolTypes,"DST");
+		if(str == NULL)
+			str = FindToolType(Icon->do_ToolTypes,"DSTOFFSET");
+
+		if(str != NULL)
+		{
+			if(StrToLong(str,&other_number) == -1)
+			{
+				ReportError("Invalid number '%s' for 'DSTOFFSET' parameter.",str);
+				goto out;
+			}
+
+			args.DSTOffset = &other_number;
+		}
+
 		str = FindToolType(Icon->do_ToolTypes,"CACHE");
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"CACHESIZE");
@@ -728,6 +746,7 @@ _start(VOID)
 		args.ServerName,
 		cache_size,
 		args.TimeZoneOffset,
+		args.DSTOffset,
 		args.DeviceName,
 		args.VolumeName,
 		args.TranslationFile))
@@ -1134,7 +1153,7 @@ GetTimeZoneDelta(VOID)
 		seconds = 0;
 	}
 
-	return(seconds);
+	return(seconds + DSTOffset);
 }
 
 /****************************************************************************/
@@ -2124,6 +2143,7 @@ Setup(
 	STRPTR	opt_servername,
 	int		opt_cachesize,
 	LONG *	opt_time_zone_offset,
+	LONG *	opt_dst_offset,
 	STRPTR	device_name,
 	STRPTR	volume_name,
 	STRPTR	translation_file)
@@ -2173,6 +2193,9 @@ Setup(
 		TimeZoneOffset			= (*opt_time_zone_offset);
 		OverrideLocaleTimeZone	= TRUE;
 	}
+
+	if(opt_dst_offset != NULL)
+		DSTOffset = 60 * (*opt_dst_offset);
 
 	memset(&TimerRequest,0,sizeof(TimerRequest));
 

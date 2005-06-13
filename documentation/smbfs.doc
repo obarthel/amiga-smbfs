@@ -138,7 +138,7 @@ described below. The command template looks like this:
    CASE=CASESENSITIVE/S,OMITHIDDEN/S,QUIET/S,CLIENT=CLIENTNAME/K,
    SERVER=SERVERNAME/K,DEVICE=DEVICENAME/K,VOLUME=VOLUMENAME/K,
    CACHE=CACHESIZE/N/K,DEBUGLEVEL=DEBUG/N/K,TZ=TIMEZONEOFFSET/N/K,
-   TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
+   DST=DSTOFFSET/N/K,TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
 
 The individual options serve the following purposes:
 
@@ -324,6 +324,15 @@ The individual options serve the following purposes:
       translate it into the corresponding GMT value. For example, in
       central Europe using CET, you would use "TZ=-60" since CET is
       one hour ahead of GMT.
+
+   DST=DSTOFFSET/N/K
+
+      This option can be used to adjust the file date stamps to take
+      local daylight savings time into account. The number to specify here
+      is by how many minutes local time has been moved ahead, which is
+      typically 60. Note that smbfs does not know when daylight savings
+      time begins and ends. It is up to you to select the correct value
+      when appropriate.
 
    TRANSLATE=TRANSLATIONFILE/K
 

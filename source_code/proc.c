@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.4 2005-06-13 08:04:15 obarthel Exp $
+ * $Id: proc.c,v 1.5 2005-06-13 08:42:06 obarthel Exp $
  *
  * :ts=8
  *
@@ -171,13 +171,6 @@ smb_name_mangle (byte * p, const byte * name)
   return p;
 }
 
-/* Apparently, the time values used here are already relative
-   to UTC and not in the local time zone. Hence the dummy
-   macros and the commented-out conversion functions. */
-#define utc2local(time_value) (time_value)
-#define local2utc(time_value) (time_value)
-
-/*
 static INLINE int
 utc2local (int time_value)
 {
@@ -197,7 +190,6 @@ local2utc (int time_value)
 
   return result;
 }
-*/
 
 /* Convert a MS-DOS time/date pair to a UNIX date (seconds since January 1st 1970). */
 static int
@@ -1295,7 +1287,7 @@ interpret_long_date(char * p)
      return the number of seconds encoded in the least
      significant word of the result. */
   if(underflow == 0 && long_date.High == 0)
-    result = local2utc(long_date.Low);
+    result = long_date.Low;
   else
     result = 0;
 
@@ -1444,76 +1436,6 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 
       result = p + 32 + BVAL (p, 30);
 
-      break;
-
-    case 3: /* untested */
-
-      if (finfo != NULL)
-      {
-        strlcpy (finfo->complete_path, p + 33, finfo->complete_path_size);
-        finfo->len = strlen (finfo->complete_path);
-        finfo->size = DVAL (p, 20);
-        finfo->attr = BVAL (p, 28);
-        finfo->ctime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
-        finfo->atime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
-        finfo->mtime = date_dos2unix (WVAL (p, 18), WVAL (p, 16));
-        finfo->wtime = finfo->mtime;
-
-        #if DEBUG
-        {
-          struct tm tm;
-
-          GMTime(finfo->ctime,&tm);
-          LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-
-          GMTime(finfo->atime,&tm);
-          LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-
-          GMTime(finfo->mtime,&tm);
-          LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-
-          GMTime(finfo->wtime,&tm);
-          LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-        }
-        #endif /* DEBUG */
-      }
-
-      result = p + 4 + WVAL (p, 4);
-      break;
-
-    case 4: /* untested */
-      
-      if (finfo != NULL)
-      {
-        strlcpy (finfo->complete_path, p + 37, finfo->complete_path_size);
-        finfo->len = strlen (finfo->complete_path);
-        finfo->size = DVAL (p, 20);
-        finfo->attr = BVAL (p, 28);
-        finfo->ctime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
-        finfo->atime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
-        finfo->mtime = date_dos2unix (WVAL (p, 18), WVAL (p, 16));
-        finfo->wtime = finfo->mtime;
-
-        #if DEBUG
-        {
-          struct tm tm;
-
-          GMTime(finfo->ctime,&tm);
-          LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-
-          GMTime(finfo->atime,&tm);
-          LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-
-          GMTime(finfo->mtime,&tm);
-          LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-
-          GMTime(finfo->wtime,&tm);
-          LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-        }
-        #endif /* DEBUG */
-      }
-
-      result = p + 4 + WVAL (p, 4);
       break;
 
     case 260: /* NT uses this, but also accepts 2 */

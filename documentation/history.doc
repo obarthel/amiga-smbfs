@@ -609,3 +609,13 @@ smbfs 1.69 (13.6.2005)
   time stamps for directory listings and for indidivual files. As
   far as I can tell, the sets of time stamps returned for either
   doesn't match anywhere.
+
+
+smbfs 1.70 (13.6.2005)
+
+- Introduced a new option to account for daylight savings time
+  when appropriate.
+
+- Looks like some of the time stamps used in "proc.c" are
+  transmitted in local time after all; brought back the
+  conversion functions.

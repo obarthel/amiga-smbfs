@@ -149,7 +149,7 @@ DOMAIN=WORKGROUP/K,USER=USERNAME/K,PASSWORD/K,CHANGECASE/S,<br>
 CASE=CASESENSITIVE/S,OMITHIDDEN/S,QUIET/S,CLIENT=CLIENTNAME/K,<br>
 SERVER=SERVERNAME/K,DEVICE=DEVICENAME/K,VOLUME=VOLUMENAME/K,<br>
 CACHE=CACHESIZE/N/K,DEBUGLEVEL=DEBUG/N/K,TZ=TIMEZONEOFFSET/N/K,<br>
-TRANSLATE=TRANSLATIONFILE/K,SERVICE/A</tt></p>
+DST=DSTOFFSET/N/K,TRANSLATE=TRANSLATIONFILE/K,SERVICE/A</tt></p>
 
 <p>The individual options serve the following purposes:</p>
 
@@ -341,6 +341,15 @@ be the number of minutes to add to the local time in order to
 translate it into the corresponding UTC value. For example, in
 central Europe using CET, you would use <kbd>TZ=-60</kbd> since CET is
 one hour ahead of UTC.</p>
+
+<li><p><tt>DST=DSTOFFSET/N/K</tt></p>
+
+<p>This option can be used to adjust the file date stamps to take
+local daylight savings time into account. The number to specify here
+is by how many minutes local time has been moved ahead, which is
+typically 60. Note that <b>smbfs</b> does not know when daylight
+savings time begins and ends. It is up to you to select the correct
+adjustment value when appropriate.</p>
 
 <li><p><tt>TRANSLATE=TRANSLATIONFILE/K</tt></p>
 
