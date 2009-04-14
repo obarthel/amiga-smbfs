@@ -1,5 +1,5 @@
 #
-# $Id: GNUmakefile.os4,v 1.4 2009-04-14 11:32:51 obarthel Exp $
+# $Id: GNUmakefile.os4,v 1.5 2009-04-14 12:16:11 obarthel Exp $
 #
 # :ts=8
 #
@@ -47,7 +47,7 @@ DEBUG = -ggdb
 
 ###########################################################################
 
-CFLAGS = $(WARNINGS) $(OPTIMIZE) $(DEBUG) $(CPU) $(OPTIONS) \
+CFLAGS = -mcrt=clib2 -D__NO_NET_API $(WARNINGS) $(OPTIMIZE) $(DEBUG) $(CPU) $(OPTIONS) \
          -I. -I/V/include -I/usr/local/amiga/ppc-amigaos/sys-include -Iinclude -Inetinclude
 LFLAGS = -nostartfiles -nostdlib -L.
 
