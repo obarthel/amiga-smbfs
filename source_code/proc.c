@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.6 2005-06-13 13:11:26 obarthel Exp $
+ * $Id: proc.c,v 1.7 2009-04-14 11:32:51 obarthel Exp $
  *
  * :ts=8
  *
@@ -10,7 +10,7 @@
  * 28/06/96 - Fixed long file name support (smb_proc_readdir_long) by Yuri Per
  *
  * Modified for big endian support by Christian Starkjohann.
- * Modified for use with AmigaOS by Olaf Barthel <olsen@sourcery.han.de>
+ * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  */
 
 #include "smbfs.h"
@@ -241,7 +241,7 @@ date_unix2dos (int unix_date, unsigned short *time_value, unsigned short *date)
 dword
 smb_len (byte * packet)
 {
-  return (dword)( ((packet[1] & 0x1) << 16L) | (packet[2] << 8L) | (packet[3]) );
+  return (dword)( (((dword)(packet[1] & 0x1)) << 16) | (((dword)packet[2]) << 8) | (packet[3]) );
 }
 
 static INLINE word
@@ -538,7 +538,11 @@ smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
   byte *p = server->packet;
   byte *buf = server->packet;
 
-  p = smb_encode_smb_length (p, xmit_len);
+  /* olsen: we subtract four bytes because smb_encode_smb_length() adds
+            four bytes which are not supposed to be included in the total
+            number of bytes to be sent */
+  p = smb_encode_smb_length (p, xmit_len - 4);
+  /* p = smb_encode_smb_length (p, xmit_len); */
 
   BSET (p, 0, 0xff);
   BSET (p, 1, 'S');
@@ -2517,7 +2521,7 @@ smb_proc_connect (struct smb_server *server)
 }
 
 /* error code stuff - put together by Merik Karman
-   merik@blackadder.dsh.oz.au */
+   merik -at- blackadder -dot- dsh -dot- oz -dot- au */
 typedef struct
 {
   char *name;

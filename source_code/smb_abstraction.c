@@ -1,15 +1,15 @@
 /*
- * $Id: smb_abstraction.c,v 1.1.1.1 2005-05-24 13:22:13 obarthel Exp $
+ * $Id: smb_abstraction.c,v 1.2 2009-04-14 11:32:51 obarthel Exp $
  *
  * :ts=8
  *
  * Name: smb_abstraction.c
  * Description: Smb abstraction layer.
- * Author: Christian Starkjohann <cs@hal.kph.tuwien.ac.at>
+ * Author: Christian Starkjohann <cs -at- hal -dot- kph -dot- tuwien -dot- ac -dot- at>
  * Date: 1996-12-31
  * Copyright: GNU-GPL
  *
- * Modified for use with AmigaOS by Olaf Barthel <olsen@sourcery.han.de>
+ * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  */
 
 #include "smbfs.h"

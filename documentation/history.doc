@@ -475,14 +475,14 @@ smbfs 1.58 (5.9.2002)
   data is read.
 
 
-smbfs 1.59 (10.9.2003)  [Harry Sintonen <sintonen@iki.fi>]
+smbfs 1.59 (10.9.2003)  [Harry Sintonen <sintonen -at- iki -dot- fi>]
 
 - Fixed ACTION_DELETE_OBJECT to restart directory scanning, it
   searched for wrong object. Fixes the problem where every other
   file was skipped when deleting directory.
 
 
-smbfs 1.60 (11.2.2004) [Peter Riede <Noster-Riede@T-Online.de>]
+smbfs 1.60 (11.2.2004) [Peter Riede <Noster-Riede -at- T-Online -dot- de>]
 
 - Fixed ACTION_SEEK, it doesn't works if followed by ACTION_WRITE.
   Fixes the problem by using the SMBlseek packet instead of just
@@ -635,3 +635,13 @@ smbfs 1.71 (13.6.2005)
 
 - The DST option's time offset was added to rather than subtracted
   from the local time. Fixed.
+
+
+smbfs 1.72 (14.4.2009)
+
+- In proc.c, smb_setup_header() initialized the SMB header length
+  field with a number which was too large by four bytes. Consequently,
+  what was later committed to the wire would have four trailing data
+  bytes which could contain random values. This often didn't do much
+  harm, but it seems that Samba 3.2.4 and Windows Vista don't like the
+  looks of the trailing junk bytes.

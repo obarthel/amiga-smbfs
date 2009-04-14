@@ -1,11 +1,11 @@
 /*
- * $Id: quad_math.h,v 1.1 2005-05-27 09:48:26 obarthel Exp $
+ * $Id: quad_math.h,v 1.2 2009-04-14 11:32:51 obarthel Exp $
  *
  * :ts=4
  *
  * SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
  *
- * Copyright (C) 2000-2005 by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
+ * Copyright (C) 2000-2009 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

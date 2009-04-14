@@ -1,13 +1,13 @@
 /*
- * $Id: sock.c,v 1.1.1.1 2005-05-24 13:22:13 obarthel Exp $
+ * $Id: sock.c,v 1.2 2009-04-14 11:32:51 obarthel Exp $
  *
  * :ts=8
  *
  * sock.c
  *
  * Copyright (C) 1995 by Paal-Kr. Engstad and Volker Lendecke
- * Modified by Christian Starkjohann <cs@hal.kph.tuwien.ac.at>
- * Modified for use with AmigaOS by Olaf Barthel <olsen@sourcery.han.de>
+ * Modified by Christian Starkjohann <cs -at- hal -dot- kph -dot- tuwien -dot- ac -dot- at>
+ * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  */
 
 #include "smbfs.h"
