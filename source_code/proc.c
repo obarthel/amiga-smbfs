@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.7 2009-04-14 11:32:51 obarthel Exp $
+ * $Id: proc.c,v 1.8 2009-04-17 11:09:41 obarthel Exp $
  *
  * :ts=8
  *
@@ -259,14 +259,25 @@ smb_valid_packet (byte * packet)
 {
   int result;
 
-  LOG (("len: %ld, wct: %ld, bcc: %ld\n", smb_len (packet), SMB_WCT (packet), SMB_BCC (packet)));
+  LOG (("len: %ld, wct: %ld, bcc: %ld -- SMB_HEADER_LEN[%ld] + SMB_WCT (packet) * 2[%ld] + SMB_BCC (packet)[%ld] + 2 = %ld\n",
+	smb_len (packet),
+	SMB_WCT (packet),
+	SMB_BCC (packet),
+	SMB_HEADER_LEN,
+	SMB_WCT (packet) * 2,
+	SMB_BCC (packet),
+	SMB_HEADER_LEN + SMB_WCT (packet) * 2 + SMB_BCC (packet) + 2));
 
+  /* olsen: During protocol negotiation Samba 3.2.5 may return SMB responses which contain
+            more data than is called for. I'm not sure what the right approach to handle
+            this would be. But for now, I've modified this test to check only if there
+            is less data in a response than required. */
   result = (packet[4] == 0xff
          && packet[5] == 'S'
          && packet[6] == 'M'
          && packet[7] == 'B'
-         && (smb_len (packet) + 4 == (dword)(
-             SMB_HEADER_LEN + SMB_WCT (packet) * 2 + SMB_BCC (packet) + 2))) ? 0 : (-EIO);
+         && (smb_len (packet) + 4 >= (dword)
+             (SMB_HEADER_LEN + SMB_WCT (packet) * 2 + SMB_BCC (packet) + 2))) ? 0 : (-EIO);
 
   return result;
 }
