@@ -1,5 +1,5 @@
 #
-# $Id: GNUmakefile.os4,v 1.5 2009-04-14 12:16:11 obarthel Exp $
+# $Id: GNUmakefile.os4,v 1.6 2009-07-22 07:52:59 obarthel Exp $
 #
 # :ts=8
 #
@@ -40,14 +40,13 @@ WARNINGS = \
 	-Wall -W -Wshadow -Wpointer-arith -Wsign-compare -Wmissing-prototypes \
 	-Wundef -Wbad-function-cast -Wmissing-declarations
 
-CPU = -mcpu=604e -msoft-float
 OPTIONS = -DNDEBUG
 OPTIMIZE = -O3
 DEBUG = -ggdb
 
 ###########################################################################
 
-CFLAGS = -mcrt=clib2 -D__NO_NET_API $(WARNINGS) $(OPTIMIZE) $(DEBUG) $(CPU) $(OPTIONS) \
+CFLAGS = -mcrt=clib2 -D__NO_NET_API $(WARNINGS) $(OPTIMIZE) $(DEBUG) $(OPTIONS) \
          -I. -I/V/include -I/usr/local/amiga/ppc-amigaos/sys-include -Iinclude -Inetinclude
 LFLAGS = -nostartfiles -nostdlib -L.
 

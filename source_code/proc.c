@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.8 2009-04-17 11:09:41 obarthel Exp $
+ * $Id: proc.c,v 1.9 2009-07-22 07:52:59 obarthel Exp $
  *
  * :ts=8
  *
@@ -806,7 +806,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
   else
     len = count - len;  /* transfer the larger part using the second packet */
 
-  p = smb_setup_header_exclusive (server, SMBwritebraw, 11, len);
+  p = smb_setup_header_exclusive (server, SMBwritebraw, server->protocol > PROTOCOL_COREPLUS ? 12 : 11, len);
 
   WSET (buf, smb_vwv0, finfo->fileid);
   DSET (buf, smb_vwv1, count);

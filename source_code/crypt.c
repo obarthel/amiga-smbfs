@@ -1,5 +1,5 @@
 /*
- * $Id: crypt.c,v 1.1.1.1 2005-05-24 13:22:06 obarthel Exp $
+ * $Id: crypt.c,v 1.2 2009-07-22 07:52:59 obarthel Exp $
  *
  * :ts=8
  *
@@ -440,7 +440,7 @@ smb_encrypt (unsigned char *passwd, unsigned char *c8, unsigned char *p24)
   memset (p21, '\0', sizeof(p21));
   memset (p14, '\0', sizeof(p14));
 
-  len = strlen(passwd);
+  len = strlen((const char *)passwd);
   if(len > (int)sizeof(p14)-1)
     len = sizeof(p14)-1;
 
