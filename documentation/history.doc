@@ -653,3 +653,10 @@ smbfs 1.73 (17.4.2009)
   received is smaller than expected, not whether the length matches
   exactly. This seems to fix the protocol negotiation with Samba 3.2.5
   for now. Haven't checked Vista yet, though...
+
+
+smbfs 1.74 (31.8.2009)
+
+- Integrated Harry Sintonen's fix for the problem caused by large
+  writes to files. The respective packet size was off by one byte.
+  Thank you very much!
