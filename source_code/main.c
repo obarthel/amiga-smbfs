@@ -1,5 +1,5 @@
 /*
- * $Id: main.c,v 1.9 2009-04-14 12:16:11 obarthel Exp $
+ * $Id: main.c,v 1.10 2011-01-06 11:27:18 obarthel Exp $
  *
  * :ts=4
  *
@@ -3765,7 +3765,7 @@ Action_Info(
 
 	SHOWVALUE(lock);
 
-	if(lock == NULL || lock->fl_Volume != MKBADDR(VolumeNode))
+	if(lock != NULL && lock->fl_Volume != MKBADDR(VolumeNode))
 	{
 		SHOWMSG("volume node does not match");
 
