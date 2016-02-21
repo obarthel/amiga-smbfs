@@ -1,5 +1,10 @@
 /*
- * $Id: main.c,v 1.10 2011-01-06 11:27:18 obarthel Exp $
+ * cpr smbfs.debug domain=workgroup user=olsen password=bazong volume=olsen //felix/olsen
+ * break smba_connect
+ */
+
+/*
+ * $Id: main.c,v 1.10 2011/01/06 11:27:18 obarthel Exp $
  *
  * :ts=4
  *
@@ -177,7 +182,7 @@ STATIC BOOL IsReservedName(STRPTR name);
 STATIC LONG MapErrnoToIoErr(int error);
 STATIC VOID TranslateBName(UBYTE *name, UBYTE *map);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, LONG *opt_time_zone_offset, LONG *opt_dst_offset, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, APTR bstring);
 STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
 STATIC LONG Action_DeleteObject(struct FileLock *parent, APTR bcpl_name, LONG *error_ptr);
@@ -213,6 +218,13 @@ STATIC LONG Action_SetComment(struct FileLock *parent, APTR bcpl_name, APTR bcpl
 STATIC LONG Action_LockRecord(struct FileNode *fn, LONG offset, LONG length, LONG mode, ULONG timeout, LONG *error_ptr);
 STATIC LONG Action_FreeRecord(struct FileNode *fn, LONG offset, LONG length, LONG *error_ptr);
 STATIC VOID HandleFileSystem(STRPTR device_name, STRPTR volume_name, STRPTR service_name);
+
+/****************************************************************************/
+
+/* This is in sock.c and controls whether SMB packets sent/received are
+ * decoded and printed in the shell.
+ */
+void control_smb_dump(int enable);
 
 /****************************************************************************/
 
@@ -319,6 +331,8 @@ _start(VOID)
 		NUMBER	DebugLevel;
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
+		SWITCH	NetBIOSTransport;
+		SWITCH	DumpSMB;
 		KEY		TranslationFile;
 		KEY		Service;
 	} args;
@@ -339,6 +353,8 @@ _start(VOID)
 		"DEBUGLEVEL=DEBUG/N/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
+		"NETBIOS/S,"
+		"DUMPSMB/S,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
 		"SERVICE/A";
 
@@ -641,6 +657,9 @@ _start(VOID)
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"DSTOFFSET");
 
+		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
+			args.NetBIOSTransport = TRUE;
+
 		if(str != NULL)
 		{
 			if(StrToLong(str,&other_number) == -1)
@@ -757,6 +776,10 @@ _start(VOID)
 	else
 		SETDEBUGLEVEL(0);
 
+	/* Enable SMB packet decoding, but only if not started from Workbench. */
+	if(args.DumpSMB && WBStartup == NULL)
+		control_smb_dump(TRUE);
+
 	D(("%s (%s)",VERS,DATE));
 
 	if(Setup(
@@ -771,6 +794,7 @@ _start(VOID)
 		cache_size,
 		args.TimeZoneOffset,
 		args.DSTOffset,
+		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
 		args.DeviceName,
 		args.VolumeName,
 		args.TranslationFile))
@@ -1320,7 +1344,7 @@ SPrintf(STRPTR buffer, STRPTR formatString,...)
 /****************************************************************************/
 
 /* NetBIOS broadcast name query code courtesy of Christopher R. Hertel.
- * Thanks much, Chris!
+ * Thanks very much, Chris!
  */
 struct addr_entry
 {
@@ -2168,6 +2192,7 @@ Setup(
 	int		opt_cachesize,
 	LONG *	opt_time_zone_offset,
 	LONG *	opt_dst_offset,
+	BOOL	opt_raw_smb,
 	STRPTR	device_name,
 	STRPTR	volume_name,
 	STRPTR	translation_file)
@@ -2333,7 +2358,7 @@ Setup(
 		}
 	}
 
-	error = smba_start(service,workgroup,username,opt_password,opt_clientname,opt_servername,opt_cachesize,&ServerData);
+	error = smba_start(service,workgroup,username,opt_password,opt_clientname,opt_servername,opt_cachesize,opt_raw_smb,&ServerData);
 	if(error < 0)
 		goto out;
 

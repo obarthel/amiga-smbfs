@@ -660,3 +660,42 @@ smbfs 1.74 (31.8.2009)
 - Integrated Harry Sintonen's fix for the problem caused by large
   writes to files. The respective packet size was off by one byte.
   Thank you very much!
+
+
+smbfs 1.75 (1.6.2011)
+
+- The ACTION_INFO packet is now handled correctly if a ZERO lock
+  is provided. Previously, it would return failure, prompting DOS
+  to show its "please insert disk" requester.
+
+
+smbfs 1.76 (10.12.2012)
+
+- Added SMB over TCP support (port 445). smbfs now ignores the NetBIOS
+  transport and uses the raw SMB transport. This seems to work both
+  better with Windows 7 (and presumably Vista; it does work with Mac OS X
+  Snow Leopard and beyond), and still works with Windows XP. Currently,
+  this is enabled by default and still needs a command line switch to
+  disable it.
+
+
+smbfs 1.77 (21.2.2016)
+
+- Added command line switch/tool type "NETBIOS" which disables the
+  raw SMB transport mode, which is now the default.
+
+
+smbfs 1.78 (21.2.2016)
+
+- SMB packet decoding (and printing the results) can now be enabled
+  with a command line option. The decoding functions, however, must
+  be built into the program at compile time through the DUMP_SMB
+  preprocessor definition.
+
+
+smbfs 1.79 (21.2.2016)
+
+- SMB packet decoding now includes the contents of the two
+  packet buffers in the output, as well as the origin of the
+  packet (which is relevant because the data has different
+  meanings even if it shares the same command code).
