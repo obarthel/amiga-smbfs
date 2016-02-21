@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.9 2009-07-22 07:52:59 obarthel Exp $
+ * $Id: proc.c,v 1.9 2009/07/22 07:52:59 obarthel Exp $
  *
  * :ts=8
  *
@@ -564,6 +564,7 @@ smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
   p += 5;
   memset (p, '\0', 19);
   p += 19;
+  memset (p, '\0', 8); /* zap the signature */
   p += 8;
 
   WSET (buf, smb_tid, server->tid);
@@ -573,8 +574,8 @@ smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
 
   if (server->protocol > PROTOCOL_CORE)
   {
-    BSET (buf, smb_flg, 0x8);
-    WSET (buf, smb_flg2, 0x3);
+    BSET (buf, smb_flg, 0x8);	/* path names are caseless */
+    WSET (buf, smb_flg2, 0x3);	/* extended attributes supported, long names supported */
   }
 
   (*p++) = wct; /* wct */
@@ -2137,7 +2138,7 @@ smb_proc_reconnect (struct smb_server *server)
   if (server->max_recv <= 0)
     server->max_recv = given_max_xmit > 8000 ? given_max_xmit : 8000;
 
-  if ((result = smb_connect (server)) < 0)
+  if ((result = smb_connect (server)) < 0) /* this is really a plain connect() call */
   {
     LOG (("smb_proc_reconnect: could not smb_connect\n"));
     goto fail;
@@ -2162,37 +2163,40 @@ smb_proc_reconnect (struct smb_server *server)
 
   server->max_xmit = max_xmit;
 
-  /* Start with an RFC1002 session request packet. */
-  p = packet + 4;
-
-  p = smb_name_mangle (p, server->mount_data.server_name);
-  p = smb_name_mangle (p, server->mount_data.client_name);
-
-  smb_encode_smb_length (packet, (byte *) p - (byte *) (packet));
-
-  packet[0] = 0x81; /* SESSION REQUEST */
-
-  if ((result = smb_request (server)) < 0)
+  if(!server->raw_smb)
   {
-    LOG (("smb_proc_connect: Failed to send SESSION REQUEST.\n"));
-    goto fail;
-  }
+    /* Start with an RFC1002 session request packet. */
+    p = packet + 4;
 
-  if (packet[0] != 0x82)
-  {
-    LOG (("smb_proc_connect: Did not receive positive response (err = %lx)\n",packet[0]));
+    p = smb_name_mangle (p, server->mount_data.server_name);
+    p = smb_name_mangle (p, server->mount_data.client_name);
 
-    #if DEBUG
+    smb_encode_smb_length (packet, (byte *) p - (byte *) (packet));
+
+    packet[0] = 0x81; /* SESSION REQUEST */
+
+    if ((result = smb_request (server)) < 0)
     {
-      smb_dump_packet (packet);
+      LOG (("smb_proc_connect: Failed to send SESSION REQUEST.\n"));
+      goto fail;
     }
-    #endif /* DEBUG */
 
-    result = -EIO;
-    goto fail;
+    if (packet[0] != 0x82)
+    {
+      LOG (("smb_proc_connect: Did not receive positive response (err = %lx)\n",packet[0]));
+
+      #if DEBUG
+      {
+        smb_dump_packet (packet);
+      }
+      #endif /* DEBUG */
+
+      result = -EIO;
+      goto fail;
+    }
+
+    LOG (("smb_proc_connect: Passed SESSION REQUEST.\n"));
   }
-
-  LOG (("smb_proc_connect: Passed SESSION REQUEST.\n"));
 
   /* Now we are ready to send a SMB Negotiate Protocol packet. */
   memset (packet, 0, SMB_HEADER_LEN);
