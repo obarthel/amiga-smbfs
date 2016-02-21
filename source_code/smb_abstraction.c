@@ -1,5 +1,5 @@
 /*
- * $Id: smb_abstraction.c,v 1.2 2009-04-14 11:32:51 obarthel Exp $
+ * $Id: smb_abstraction.c,v 1.2 2009/04/14 11:32:51 obarthel Exp $
  *
  * :ts=8
  *
@@ -67,7 +67,7 @@ struct smba_file
 
 /*****************************************************************************/
 
-static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name, int cache_size, smba_server_t **result);
+static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name, int cache_size, int opt_raw_smb, smba_server_t **result);
 static INLINE int make_open(smba_file_t *f, int need_fid);
 static int write_attr(smba_file_t *f);
 static void invalidate_dircache(struct smba_server *server, char *path);
@@ -79,7 +79,7 @@ static int extract_service (char *service, char *server, size_t server_size, cha
 /*****************************************************************************/
 
 static int
-smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name, int cache_size, smba_server_t ** result)
+smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name, int cache_size, int opt_raw_smb, smba_server_t ** result)
 {
   smba_server_t *res;
   struct smb_mount_data data;
@@ -101,6 +101,10 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
   memset (&data, 0, sizeof (data));
   memset (hostname, 0, sizeof (hostname));
 
+  /* Olaf (2012-12-10): force raw SMB over TCP rather than NetBIOS. */
+  if(opt_raw_smb)
+    res->server.raw_smb = 1;
+
   errnum = smba_setup_dircache (res,cache_size);
   if(errnum < 0)
   {
@@ -120,11 +124,22 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
   data.addr.sin_family = AF_INET;
   data.addr.sin_addr.s_addr = ip_addr;
 
-  servent = getservbyname("netbios-ssn","tcp");
-  if(servent != NULL)
-    data.addr.sin_port = htons (servent->s_port);
+  if(res->server.raw_smb)
+  {
+    servent = getservbyname("microsoft-ds","tcp");
+    if(servent != NULL)
+      data.addr.sin_port = htons (servent->s_port);
+    else
+      data.addr.sin_port = htons (445);
+  }
   else
-    data.addr.sin_port = htons (SMB_PORT);
+  {
+    servent = getservbyname("netbios-ssn","tcp");
+    if(servent != NULL)
+      data.addr.sin_port = htons (servent->s_port);
+    else
+      data.addr.sin_port = htons (139);
+  }
 
   data.fd = socket (AF_INET, SOCK_STREAM, 0);
   if (data.fd < 0)
@@ -1226,7 +1241,7 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 }
 
 int
-smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,char *opt_servername,int opt_cachesize,smba_server_t ** result)
+smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,char *opt_servername,int opt_cachesize,int opt_raw_smb,smba_server_t ** result)
 {
   smba_connect_parameters_t par;
   smba_server_t *the_server = NULL;
@@ -1372,7 +1387,7 @@ smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_passw
   par.password = password;
   par.max_xmit = max_xmit;
 
-  error = smba_connect (&par, ipAddr, use_extended, workgroup, opt_cachesize, &the_server);
+  error = smba_connect (&par, ipAddr, use_extended, workgroup, opt_cachesize, opt_raw_smb, &the_server);
   if(error < 0)
   {
     ReportError("Could not connect to server (%ld, %s).",-error,amitcp_strerror(-error));

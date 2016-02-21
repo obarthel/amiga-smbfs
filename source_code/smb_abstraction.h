@@ -1,5 +1,5 @@
 /*
- * $Id: smb_abstraction.h,v 1.2 2009-04-14 11:32:51 obarthel Exp $
+ * $Id: smb_abstraction.h,v 1.2 2009/04/14 11:32:51 obarthel Exp $
  *
  * :ts=8
  *
@@ -76,7 +76,7 @@ int smba_rmdir(smba_server_t *s, char *path);
 int smba_rename(smba_server_t *s, char *from, char *to);
 int smba_statfs(smba_server_t *s, long *bsize, long *blocks, long *bfree);
 void smb_invalidate_all_inodes(struct smb_server *server);
-int smba_start(char *service, char *opt_workgroup, char *opt_username, char *opt_password, char *opt_clientname, char *opt_servername, int opt_cachesize, smba_server_t **result);
+int smba_start(char *service, char *opt_workgroup, char *opt_username, char *opt_password, char *opt_clientname, char *opt_servername, int opt_cachesize, int opt_raw_smb, smba_server_t **result);
 void smba_disconnect(smba_server_t *server);
 int smba_get_dircache_size(struct smba_server * server);
 int smba_change_dircache_size(struct smba_server * server,int cache_size);
