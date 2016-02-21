@@ -1,18 +1,17 @@
 /*
- * $Id: smb.h,v 1.2 2005-06-03 14:34:17 obarthel Exp $
+ * $Id: smb.h,v 1.2 2005/06/03 14:34:17 obarthel Exp $
  *
  * :ts=8
  *
  * smb.h
  *
  * Copyright (C) 1995 by Paal-Kr. Engstad and Volker Lendecke
- * Modified for use with AmigaOS by Olaf Barthel <olsen@sourcery.han.de>
+ * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  */
 
 #ifndef _LINUX_SMB_H
 #define _LINUX_SMB_H
 
-#define SMB_PORT 139
 #define SMB_MAXNAMELEN 255
 
 typedef unsigned char byte;
