@@ -1,12 +1,12 @@
 /*
- * $Id: smb_fs_sb.h,v 1.1.1.1 2005-05-24 13:22:14 obarthel Exp $
+ * $Id: smb_fs_sb.h,v 1.1.1.1 2005/05/24 13:22:14 obarthel Exp $
  *
  * :ts=8
  *
  * smb_fs_sb.h
  *
  * Copyright (C) 1995 by Paal-Kr. Engstad and Volker Lendecke
- * Modified for use with AmigaOS by Olaf Barthel <olsen@sourcery.han.de>
+ * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  */
 
 #ifndef _SMB_FS_SB
@@ -45,6 +45,9 @@ struct smb_server
   word maxxmt;
   word blkmode;
   dword sesskey;
+
+  /* olsen (2012-12-10): raw SMB over TCP instead of NBT transport? */
+  int raw_smb;
 };
 
 #endif
