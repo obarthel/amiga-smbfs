@@ -1,6 +1,9 @@
 /*
  * cpr smbfs.debug domain=workgroup user=olsen password=bazong volume=olsen //felix/olsen
  * break smba_connect
+ * break smb_receive_raw
+ *
+ * smbfs.debug user=guest  volume=sicherung //192.168.1.76/sicherung-smb
  */
 
 /*
@@ -3790,6 +3793,9 @@ Action_Info(
 
 	SHOWVALUE(lock);
 
+	/* We need to check if the lock matches the volume node. However,
+	 * a NULL lock is valid, too.
+	 */
 	if(lock != NULL && lock->fl_Volume != MKBADDR(VolumeNode))
 	{
 		SHOWMSG("volume node does not match");
@@ -4029,7 +4035,8 @@ dir_scan_callback_func_exnext(
 		if(st->is_system)
 			fib->fib_Protection |= FIBF_PURE;
 
-		seconds = st->mtime - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+		/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
+		seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
 		if(seconds < 0)
 			seconds = 0;
 
@@ -4244,7 +4251,8 @@ dir_scan_callback_func_exall(
 		{
 			LONG seconds;
 
-			seconds = st->mtime - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+			/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
+			seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
 			if(seconds < 0)
 				seconds = 0;
 
@@ -5270,7 +5278,8 @@ Action_ExamineFH(
 	if(st.is_system)
 		fib->fib_Protection |= FIBF_PURE;
 
-	seconds = st.mtime - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
+	seconds = (st.mtime == 0 ? st.ctime : st.mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
 	if(seconds < 0)
 		seconds = 0;
 
@@ -5953,7 +5962,9 @@ Action_FreeRecord (
 STATIC VOID
 HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 {
+	struct Process * this_process = (struct Process *)FindTask(NULL);
 	BOOL sign_off = FALSE;
+	BYTE old_priority;
 	ULONG signals;
 	BOOL done;
 
@@ -5968,13 +5979,10 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 		cli = Cli();
 		if(NOT cli->cli_Background)
 		{
-			struct Process * this_process;
 			UBYTE name[MAX_FILENAME_LEN];
 			LONG max_cli;
 			LONG which;
 			LONG i;
-
-			this_process = (struct Process *)FindTask(NULL);
 
 			Forbid();
 
@@ -6016,6 +6024,17 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 	Quiet = TRUE;
 
 	done = FALSE;
+
+	/* Raise the Task priority of the file system to 10
+	 * unless it already running at priority 10 or higher.
+	 */
+	Forbid();
+
+	old_priority = this_process->pr_Task.tc_Node.ln_Pri;
+	if(old_priority < 10)
+		SetTaskPri((struct Task *)this_process, 10);
+	
+	Permit();
 
 	do
 	{
@@ -6285,19 +6304,23 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 
 					case ACTION_LOCK_RECORD:
 						/* FileHandle->fh_Arg1,position,length,mode,time-out -> Bool */
-						res1 =  Action_LockRecord((struct FileNode *)dp->dp_Arg1,dp->dp_Arg2,dp->dp_Arg3,dp->dp_Arg4,(ULONG)dp->dp_Arg5,&res2);
+						res1 = Action_LockRecord((struct FileNode *)dp->dp_Arg1,dp->dp_Arg2,dp->dp_Arg3,dp->dp_Arg4,(ULONG)dp->dp_Arg5,&res2);
 						break;
 
 					case ACTION_FREE_RECORD:
 						/* FileHandle->fh_Arg1,position,length -> Bool */
-						res1 =  Action_FreeRecord((struct FileNode *)dp->dp_Arg1,dp->dp_Arg2,dp->dp_Arg3,&res2);
+						res1 = Action_FreeRecord((struct FileNode *)dp->dp_Arg1,dp->dp_Arg2,dp->dp_Arg3,&res2);
 						break;
 
 					default:
 
 						D(("Anything goes: dp->dp_Action=%ld (0x%lx)",dp->dp_Action,dp->dp_Action));
 
-						res1 = DOSFALSE;
+						/* Return -1 for ACTION_READ_LINK, for which DOSFALSE (= 0)
+						 * would otherwise be a valid response. Bug fix contributed
+						 * by Harry 'Piru' Sintonen.
+						 */
+						res1 = (dp->dp_Action == ACTION_READ_LINK) ? -1 : DOSFALSE;
 						res2 = ERROR_ACTION_NOT_KNOWN;
 
 						break;
@@ -6361,6 +6384,16 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 		}
 	}
 	while(NOT done);
+
+	/* Restore the priority of the file system, unless the priority
+	 * has already been changed.
+	 */
+	Forbid();
+	
+	if(old_priority < 10 && this_process->pr_Task.tc_Node.ln_Pri == 10)
+		SetTaskPri((struct Task *)this_process, old_priority);
+	
+	Permit();
 
 	if(sign_off)
 		LocalPrintf("stopped.\n");
