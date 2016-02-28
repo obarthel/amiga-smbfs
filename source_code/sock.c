@@ -908,7 +908,7 @@ smb_receive (struct smb_server *server, int sock_fd)
   int result;
 
   result = smb_receive_raw (sock_fd, packet,
-                            server->max_recv,
+                            server->max_recv - 4,  /* max_xmit in server includes NB header */
                             1); /* We want the header */
   if (result < 0)
   {
