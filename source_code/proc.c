@@ -761,9 +761,9 @@ smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t of
 
   WSET (buf, smb_vwv0, finfo->fileid);
   DSET (buf, smb_vwv1, offset);
-  WSET (buf, smb_vwv3, count);
-  WSET (buf, smb_vwv4, 0);
-  DSET (buf, smb_vwv5, 0);
+  WSET (buf, smb_vwv3, count); /* maxcnt */
+  WSET (buf, smb_vwv4, 0); /* mincnt */
+  DSET (buf, smb_vwv5, 0); /* timeout */
 
   result = smb_request_read_raw (server, data, count);
 
@@ -2163,6 +2163,7 @@ smb_proc_reconnect (struct smb_server *server)
 
   server->max_xmit = max_xmit;
 
+  /* Prepend a NetBIOS header? */
   if(!server->raw_smb)
   {
     /* Start with an RFC1002 session request packet. */
@@ -2567,6 +2568,7 @@ static const err_code_struct dos_msgs[] =
   {"ERRnofiles", 18, "A File Search command can find no more files matching the specified criteria"},
   {"ERRbadshare", 32, "The sharing mode specified for an Open conflicts with existing  FIDs  on the file"},
   {"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an  invalid mode,  or an Unlock requested attempted to remove a lock held by another process"},
+  {"ERRnosuchshare", 67, "Share name not found"},
   {"ERRfilexists", 80, "The file named in a Create Directory, Make  New  File  or  Link  request already exists"},
   {"ERRbadpipe", 230, "Pipe invalid"},
   {"ERRpipebusy", 231, "All instances of the requested pipe are busy"},
