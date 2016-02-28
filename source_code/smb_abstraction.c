@@ -157,7 +157,7 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
   if (p->max_xmit > 0)
     data.max_xmit = p->max_xmit;
   else
-    data.max_xmit = 65530 /*8300*/;
+    data.max_xmit = 65534; /* 2014/10/4 fm: use 65534 since some NASs report -1 but return max of 65534 bytes */
 
   strlcpy (data.server_name, p->server_name, sizeof(data.server_name));
   strlcpy (data.client_name, p->client_name, sizeof(data.client_name));
@@ -396,7 +396,6 @@ int
 smba_read (smba_file_t * f, char *data, long len, long offset)
 {
   int maxsize, count, totalcount, result;
-  int bytes_read = 0;
   char *rpos;
 
   result = make_open (f, 1);
@@ -456,6 +455,8 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 
   if (result <= 0)
   {
+    int bytes_read = 0;
+
     totalcount = len;
     rpos = data;
 
