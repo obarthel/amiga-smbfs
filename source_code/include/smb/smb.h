@@ -25,8 +25,8 @@ typedef unsigned long dword;
 #define PVAL(buf,pos)   ((unsigned)BVAL(buf,pos))
 
 #define BVAL(buf,pos)   (((unsigned char *)(buf))[pos])
-#define WVAL(buf,pos)   (PVAL(buf,pos)|PVAL(buf,(pos)+1)<<8)
-#define DVAL(buf,pos)   (WVAL(buf,pos)|WVAL(buf,(pos)+2)<<16)
+#define WVAL(buf,pos)   (((word)PVAL(buf,pos))|((word)PVAL(buf,(pos)+1))<<8)
+#define DVAL(buf,pos)   (((dword)WVAL(buf,pos))|((dword)WVAL(buf,(pos)+2))<<16)
 
 #define BSET(buf,pos,val)     (BVAL(buf,pos)=((val) & 0xFF))
 #define WSET(buf,pos,val) do { BVAL(buf,pos)=((val) & 0xFF); BVAL(buf,(pos)+1)=(((unsigned)(val))>>8) & 0xFF; } while (0)
