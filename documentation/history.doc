@@ -699,3 +699,55 @@ smbfs 1.79 (21.2.2016)
   packet buffers in the output, as well as the origin of the
   packet (which is relevant because the data has different
   meanings even if it shares the same command code).
+
+
+smbfs 1.80 (28.2.2016)
+
+This is the first release which incorporates changes from the MorphOS
+smbfs version 50.3, which was kindly provided by Frank Mariak. The individual
+changes came from Harry Sintonen, David Gerber and Frank Mariak. Thank
+you very much!
+
+- When converting the server's modification time for a FileInfoBlock->fib_Date
+  we now prefer the creation time record if the modification time is not
+  provided.
+
+- When the file system enters its packet dispach loop, its Task priority
+  is increased to 10 unless it already uses a higher priority level;
+  the priority is restored when the dispatch loop terminates.
+
+- The ACTION_READ_LINK packet is now properly rejected as being
+  unsupported.
+
+- The default maximum transmission buffer size has been increased by 4 bytes.
+
+- Added another error message ("ERRnosuchshare").
+
+
+smbfs 1.81 (6.3.2016)
+
+- There used to be four different "max_xmit" variables which shared either
+  the same name or were slightly different (e.g. "maxxmt"). It was hard
+  to tell which was which, and which type (some were 'int', some were
+  'word'). Turns out there were just two types which were relevant for
+  the operation of the file system.
+
+- The maximum transmission buffer size is now a parameter which can be
+  preset through command line options or icon tool types. The file
+  system now respects this upper limit and never sends packets
+  larger than this number.
+
+- Size of the packet buffer as allocated is now printed along with the
+  SMB dump output.
+
+- Reworked several word/dword decoding and encoding macros and functions
+  which lacked proper casting from byte quantities to word/dword
+  quantities.
+
+
+smbfs 1.82 (6.3.2016)
+
+- More rework in the word/dword decoding code and type casting.
+
+- In smb_proc_reconnect() the server session key is now a
+  local variable which is initialized as needed.
