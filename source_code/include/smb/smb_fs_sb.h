@@ -42,9 +42,7 @@ struct smb_server
 
   /* The following are LANMAN 1.0 options transferred to us in
      SMBnegprot */
-  word maxxmt;
   word blkmode;
-  dword sesskey;
 
   /* olsen (2012-12-10): raw SMB over TCP instead of NBT transport? */
   int raw_smb;
