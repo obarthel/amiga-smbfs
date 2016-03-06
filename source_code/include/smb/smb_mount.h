@@ -1,12 +1,12 @@
 /*
- * $Id: smb_mount.h,v 1.1.1.1 2005-05-24 13:22:14 obarthel Exp $
+ * $Id: smb_mount.h,v 1.1.1.1 2005/05/24 13:22:14 obarthel Exp $
  *
  * :ts=8
  *
  * smb_mount.h
  *
  * Copyright (C) 1995 by Paal-Kr. Engstad and Volker Lendecke
- * Modified for use with AmigaOS by Olaf Barthel <olsen@sourcery.han.de>
+ * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  */
 
 #ifndef _SMB_MOUNT_H
@@ -28,7 +28,7 @@ struct smb_mount_data
   char username[64];
   char password[64];
 
-  unsigned short max_xmit;
+  int given_max_xmit;
 };
 
 #endif
