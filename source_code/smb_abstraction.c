@@ -67,7 +67,7 @@ struct smba_file
 
 /*****************************************************************************/
 
-static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name, int cache_size, int opt_raw_smb, smba_server_t **result);
+static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name, int cache_size, int max_transmit, int opt_raw_smb, smba_server_t **result);
 static INLINE int make_open(smba_file_t *f, int need_fid);
 static int write_attr(smba_file_t *f);
 static void invalidate_dircache(struct smba_server *server, char *path);
@@ -79,7 +79,7 @@ static int extract_service (char *service, char *server, size_t server_size, cha
 /*****************************************************************************/
 
 static int
-smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name, int cache_size, int opt_raw_smb, smba_server_t ** result)
+smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name, int cache_size, int max_transmit, int opt_raw_smb, smba_server_t ** result)
 {
   smba_server_t *res;
   struct smb_mount_data data;
@@ -128,7 +128,7 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
   {
     servent = getservbyname("microsoft-ds","tcp");
     if(servent != NULL)
-      data.addr.sin_port = htons (servent->s_port);
+      data.addr.sin_port = servent->s_port;
     else
       data.addr.sin_port = htons (445);
   }
@@ -136,7 +136,7 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
   {
     servent = getservbyname("netbios-ssn","tcp");
     if(servent != NULL)
-      data.addr.sin_port = htons (servent->s_port);
+      data.addr.sin_port = servent->s_port;
     else
       data.addr.sin_port = htons (139);
   }
@@ -154,10 +154,17 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
   strlcpy (data.username, p->username, sizeof(data.username));
   strlcpy (data.password, p->password, sizeof(data.password));
 
-  if (p->max_xmit > 0)
-    data.max_xmit = p->max_xmit;
+  /* Minimum receive buffer size is 8000 bytes, and the
+   * maximum transmit buffer size should be of the same
+   * order.
+   */
+  if (0 < max_transmit && max_transmit < 8000)
+    max_transmit = 8000;
+
+  if (0 < max_transmit && max_transmit < 65535)
+    data.given_max_xmit = max_transmit;
   else
-    data.max_xmit = 65534; /* 2014/10/4 fm: use 65534 since some NASs report -1 but return max of 65534 bytes */
+    data.given_max_xmit = 65534; /* 2014/10/4 fm: use 65534 since some NASs report -1 but return max of 65534 bytes */
 
   strlcpy (data.server_name, p->server_name, sizeof(data.server_name));
   strlcpy (data.client_name, p->client_name, sizeof(data.client_name));
@@ -1242,13 +1249,12 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 }
 
 int
-smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,char *opt_servername,int opt_cachesize,int opt_raw_smb,smba_server_t ** result)
+smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,char *opt_servername,int opt_cachesize,int opt_max_transmit,int opt_raw_smb,smba_server_t ** result)
 {
   smba_connect_parameters_t par;
   smba_server_t *the_server = NULL;
   int i;
   struct hostent *h;
-  int max_xmit = -1;
   int use_extended = 0;
   char server_name[17], client_name[17];
   char username[64], password[64];
@@ -1386,9 +1392,8 @@ smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_passw
   strlcpy(par.service,share,sizeof(par.service));
   par.username = username;
   par.password = password;
-  par.max_xmit = max_xmit;
 
-  error = smba_connect (&par, ipAddr, use_extended, workgroup, opt_cachesize, opt_raw_smb, &the_server);
+  error = smba_connect (&par, ipAddr, use_extended, workgroup, opt_cachesize, opt_max_transmit, opt_raw_smb, &the_server);
   if(error < 0)
   {
     ReportError("Could not connect to server (%ld, %s).",-error,amitcp_strerror(-error));
