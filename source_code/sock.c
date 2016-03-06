@@ -521,7 +521,7 @@ print_smb_contents(const struct smb_header * header)
 }
 
 static void
-print_smb_header(const struct smb_header * header,int header_length,int packet_size,enum smb_packet_source_t smb_packet_source)
+print_smb_header(const struct smb_header * header,int header_length,int packet_size,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
 {
 	const char * command_name;
 	struct line_buffer lb;
@@ -650,7 +650,7 @@ print_smb_header(const struct smb_header * header,int header_length,int packet_s
 
 		for(i = 0 ; i < header->num_parameter_words ; i++)
 		{
-			word_value = ((header->parameters[i] >> 8) & 0xff) | ((header->parameters[i] & 0xff) << 8);
+			word_value = ((header->parameters[i] >> 8) & 0xff) | (((int)(header->parameters[i] & 0xff)) << 8);
 
 			Printf("                  %04lx: %04lx (byte order = %04lx)\n",i,word_value,header->parameters[i]);
 		}
@@ -747,13 +747,13 @@ print_smb_header(const struct smb_header * header,int header_length,int packet_s
 		}
 	}
 
-	Printf("length = %ld (packet size:%ld)\n",header_length,packet_size);
+	Printf("length = %ld (packet size:%ld, buffer size:%ld)\n",header_length,packet_size,max_buffer_size);
 
 	print_smb_contents(header);
 }
 
 static void
-dump_smb(const char *file_name,int line_number,const void * packet,int length,enum smb_packet_source_t smb_packet_source)
+dump_smb(const char *file_name,int line_number,const void * packet,int length,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
 {
 	if(dump_smb_enabled && length > 4 && memcmp(packet,"\xffSMB",4) == 0)
 	{
@@ -766,7 +766,7 @@ dump_smb(const char *file_name,int line_number,const void * packet,int length,en
 			Printf("---\n");
 			Printf("%s:%ld\n",file_name,line_number);
 
-			print_smb_header(&header,num_bytes_read,length,smb_packet_source);
+			print_smb_header(&header,num_bytes_read,length,smb_packet_source,max_buffer_size);
 
 			Printf("---\n\n");
 		}
@@ -800,7 +800,7 @@ void control_smb_dump(int enable)
    fs points to the correct segment, sock != NULL, target != NULL
    The smb header is only stored if want_header != 0. */
 static int
-smb_receive_raw (int sock_fd, unsigned char *target, int max_raw_length, int want_header)
+smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *target, int max_raw_length, int want_header)
 {
   int len, result;
   int already_read;
@@ -848,7 +848,7 @@ smb_receive_raw (int sock_fd, unsigned char *target, int max_raw_length, int wan
   }
 
   /* The length in the RFC NB header is the raw data length (17 bits) */
-  len = smb_len (peek_buf);
+  len = (int)smb_len (peek_buf);
   if (len > max_raw_length)
   {
     LOG (("smb_receive_raw: Received length (%ld) > max_xmit (%ld)!\n", len, max_raw_length));
@@ -889,7 +889,7 @@ smb_receive_raw (int sock_fd, unsigned char *target, int max_raw_length, int wan
   }
 
   #if defined(DUMP_SMB)
-  dump_smb(__FILE__,__LINE__,target,already_read,smb_packet_to_consumer);
+  dump_smb(__FILE__,__LINE__,target,already_read,smb_packet_to_consumer,server->max_recv);
   #endif /* defined(DUMP_SMB) */
 
   result = already_read;
@@ -907,7 +907,7 @@ smb_receive (struct smb_server *server, int sock_fd)
   byte * packet = server->packet;
   int result;
 
-  result = smb_receive_raw (sock_fd, packet,
+  result = smb_receive_raw (server, sock_fd, packet,
                             server->max_recv - 4,  /* max_xmit in server includes NB header */
                             1); /* We want the header */
   if (result < 0)
@@ -1002,7 +1002,7 @@ smb_receive_trans2 (struct smb_server *server, int sock_fd, int *data_len, int *
 
   while (1)
   {
-    if (WVAL (inbuf, smb_prdisp) + WVAL (inbuf, smb_prcnt) > (unsigned int)total_param)
+    if (WVAL (inbuf, smb_prdisp) + WVAL (inbuf, smb_prcnt) > total_param)
     {
       LOG (("smb_receive_trans2: invalid parameters\n"));
       result = -EIO;
@@ -1014,7 +1014,7 @@ smb_receive_trans2 (struct smb_server *server, int sock_fd, int *data_len, int *
 
     (*param_len) += WVAL (inbuf, smb_prcnt);
 
-    if (WVAL (inbuf, smb_drdisp) + WVAL (inbuf, smb_drcnt) > (unsigned int)total_data)
+    if (WVAL (inbuf, smb_drdisp) + WVAL (inbuf, smb_drcnt) > total_data)
     {
       LOG (("smb_receive_trans2: invalid data block\n"));
       result = -EIO;
@@ -1029,7 +1029,7 @@ smb_receive_trans2 (struct smb_server *server, int sock_fd, int *data_len, int *
     LOG (("smb_rec_trans2: drcnt/prcnt: %ld/%ld\n", WVAL (inbuf, smb_drcnt), WVAL (inbuf, smb_prcnt)));
 
     /* parse out the total lengths again - they can shrink! */
-    if ((WVAL (inbuf, smb_tdrcnt) > (unsigned int)total_data) || (WVAL (inbuf, smb_tprcnt) > (unsigned int)total_param))
+    if ((WVAL (inbuf, smb_tdrcnt) > total_data) || (WVAL (inbuf, smb_tprcnt) > total_param))
     {
       LOG (("smb_receive_trans2: data/params grew!\n"));
       result = -EIO;
@@ -1145,7 +1145,7 @@ smb_request (struct smb_server *server)
   LOG (("smb_request: len = %ld cmd = 0x%lx\n", len, buffer[8]));
 
   #if defined(DUMP_SMB)
-  dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer);
+  dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
   #endif /* defined(DUMP_SMB) */
 
   result = send (sock_fd, (void *) buffer, len, 0);
@@ -1193,7 +1193,7 @@ smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, ch
   LOG (("smb_request: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
 
   #if defined(DUMP_SMB)
-  dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer);
+  dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
   #endif /* defined(DUMP_SMB) */
 
   result = send (sock_fd, (void *) buffer, len, 0);
@@ -1242,7 +1242,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
   LOG (("smb_request_read_raw: buffer=%lx, sock=%lx\n", (unsigned int) buffer, (unsigned int) sock_fd));
 
   #if defined(DUMP_SMB)
-  dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer);
+  dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
   #endif /* defined(DUMP_SMB) */
 
   result = send (sock_fd, (void *) buffer, len, 0);
@@ -1257,7 +1257,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
   }
   else
   {
-    result = smb_receive_raw (sock_fd, target, max_len, 0);
+    result = smb_receive_raw (server, sock_fd, target, max_len, 0);
   }
 
  out:
@@ -1295,7 +1295,7 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
   if (result == 4)
   {
     #if defined(DUMP_SMB)
-    dump_smb(__FILE__,__LINE__,source,length,smb_packet_from_consumer);
+    dump_smb(__FILE__,__LINE__,source,length,smb_packet_from_consumer,server->max_recv);
     #endif /* defined(DUMP_SMB) */
 
     result = send (sock_fd, (void *) source, length, 0);
