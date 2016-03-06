@@ -79,7 +79,7 @@ smb_encode_word (byte * p, word data)
 static INLINE byte *
 smb_decode_word (byte * p, word * data)
 {
-  (*data) = (word) p[0] | p[1] << 8;
+  (*data) = (word) (p[0] | ((word)p[1]) << 8);
   return &(p[2]);
 }
 
@@ -249,7 +249,7 @@ smb_bcc (byte * packet)
 {
   int pos = SMB_HEADER_LEN + SMB_WCT (packet) * sizeof (word);
 
-  return (word)(packet[pos] | packet[pos + 1] << 8);
+  return (word)(packet[pos] | ((word)packet[pos + 1]) << 8);
 }
 
 /* smb_valid_packet: We check if packet fulfills the basic
@@ -419,7 +419,7 @@ smb_dump_packet (byte * packet)
   int errcls, error;
 
   errcls = (int) packet[9];
-  error = (int) (int) (packet[11] | packet[12] << 8);
+  error = (int) (int) (packet[11] | ((int)packet[12]) << 8);
 
   LOG (("smb_len = %ld  valid = %ld    \n", len = smb_len (packet), smb_valid_packet (packet)));
   LOG (("smb_cmd = %ld  smb_wct = %ld  smb_bcc = %ld\n", packet[8], SMB_WCT (packet), SMB_BCC (packet)));
@@ -2123,7 +2123,7 @@ smb_proc_reconnect (struct smb_server *server)
   char dev[] = "A:";
   int i, plength;
   int max_xmit = 1024; /* Space needed for first request. */
-  int given_max_xmit = server->mount_data.max_xmit;
+  int given_max_xmit = server->mount_data.given_max_xmit;
   int result;
   word any_word;
   byte *p;
@@ -2134,9 +2134,14 @@ smb_proc_reconnect (struct smb_server *server)
   unsigned char full_share[SMB_MAXNAMELEN+1];
   int full_share_len;
   byte *packet;
+  word server_maxxmt;
 
+  /* Reception buffer size (buffer is allocated below) is always as large as the
+   * maximum transmission buffer size, and could be larger if the transmission
+   * buffer size is smaller than 8000 bytes.
+   */
   if (server->max_recv <= 0)
-    server->max_recv = given_max_xmit > 8000 ? given_max_xmit : 8000;
+    server->max_recv = given_max_xmit < 8000 ? 8000 : given_max_xmit;
 
   if ((result = smb_connect (server)) < 0) /* this is really a plain connect() call */
   {
@@ -2151,7 +2156,6 @@ smb_proc_reconnect (struct smb_server *server)
     free (server->packet);
 
   server->packet = malloc (server->max_recv);
-
   if (server->packet == NULL)
   {
     LOG (("smb_proc_connect: No memory! Bailing out.\n"));
@@ -2233,6 +2237,7 @@ smb_proc_reconnect (struct smb_server *server)
   if (server->protocol > PROTOCOL_LANMAN1)
   {
     int user_len = strlen (server->mount_data.username)+1;
+    dword server_sesskey;
 
     LOG (("smb_proc_connect: password = %s\n",server->mount_data.password));
     LOG (("smb_proc_connect: usernam = %s\n",server->mount_data.username));
@@ -2240,9 +2245,9 @@ smb_proc_reconnect (struct smb_server *server)
 
     if (server->protocol >= PROTOCOL_NT1)
     {
-      server->maxxmt = DVAL (packet, smb_vwv3 + 1);
+      server_maxxmt = DVAL (packet, smb_vwv3 + 1);
       server->blkmode = DVAL (packet, smb_vwv9 + 1);
-      server->sesskey = DVAL (packet, smb_vwv7 + 1);
+      server_sesskey = DVAL (packet, smb_vwv7 + 1);
 
       server->security_mode = BVAL(packet, smb_vwv1);
 
@@ -2250,9 +2255,9 @@ smb_proc_reconnect (struct smb_server *server)
     }
     else
     {
-      server->maxxmt = WVAL (packet, smb_vwv2);
+      server_maxxmt = WVAL (packet, smb_vwv2);
       server->blkmode = WVAL (packet, smb_vwv5);
-      server->sesskey = DVAL (packet, smb_vwv6);
+      server_sesskey = DVAL (packet, smb_vwv6);
 
       server->security_mode = BVAL(packet, smb_vwv1);
 
@@ -2331,7 +2336,7 @@ smb_proc_reconnect (struct smb_server *server)
       WSET (packet, smb_vwv2, given_max_xmit);
       WSET (packet, smb_vwv3, 2);
       WSET (packet, smb_vwv4, 0); /* server->pid */
-      DSET (packet, smb_vwv5, server->sesskey);
+      DSET (packet, smb_vwv5, server_sesskey);
       WSET (packet, smb_vwv7, password_len);
       WSET (packet, smb_vwv8, nt_password_len);
 
@@ -2375,7 +2380,7 @@ smb_proc_reconnect (struct smb_server *server)
       WSET (packet, smb_vwv2, given_max_xmit);
       WSET (packet, smb_vwv3, 2);
       WSET (packet, smb_vwv4, 0); /* server->pid */
-      DSET (packet, smb_vwv5, server->sesskey);
+      DSET (packet, smb_vwv5, server_sesskey);
       WSET (packet, smb_vwv7, password_len);
       WSET (packet, smb_vwv8, 0);
       WSET (packet, smb_vwv9, 0);
@@ -2396,9 +2401,8 @@ smb_proc_reconnect (struct smb_server *server)
   }
   else
   {
-    server->maxxmt = 0;
+    server_maxxmt = 0;
     server->blkmode = 0;
-    server->sesskey = 0;
 
     password_len = strlen(server->mount_data.password)+1;
 
@@ -2458,13 +2462,15 @@ smb_proc_reconnect (struct smb_server *server)
     SHOWVALUE(SMB_WCT(packet));
 
     /* Changed, max_xmit hasn't been updated if a tconX message was send instead of tcon. */
-    if (server->maxxmt)
-      server->max_xmit = server->maxxmt;
+    if (server_maxxmt != 0)
+      server->max_xmit = server_maxxmt;
 
     server->tid = WVAL(packet,smb_tid);
   }
   else
   {
+    word decoded_max_xmit;
+
     /* Fine! We have a connection, send a tcon message. */
     smb_setup_header (server, SMBtcon, 0, 6 + strlen (server->mount_data.service) + strlen (server->mount_data.password) + strlen (dev));
 
@@ -2482,28 +2488,30 @@ smb_proc_reconnect (struct smb_server *server)
     LOG (("OK! Managed to set up SMBtcon!\n"));
 
     p = SMB_VWV (packet);
-    p = smb_decode_word (p, &server->max_xmit);
+    p = smb_decode_word (p, &decoded_max_xmit);
+
+    server->max_xmit = decoded_max_xmit;
 
     SHOWVALUE(server->max_xmit);
 
     /* Added by Brian Willette - We were ignoring the server's initial
        maxbuf value */
-    if (server->maxxmt != 0 && server->max_xmit > server->maxxmt)
-      server->max_xmit = server->maxxmt;
+    if (server_maxxmt != 0 && server->max_xmit > server_maxxmt)
+      server->max_xmit = server_maxxmt;
 
     (void) smb_decode_word (p, &server->tid);
   }
 
   SHOWVALUE(server->max_xmit);
 
-  /* Changed, max_xmit hasn't been updated if a tconX message was send instead of tcon. */
-  if (server->max_xmit > given_max_xmit)
-    server->max_xmit = given_max_xmit;
-
   /* Ok, everything is fine. max_xmit does not include
      the TCP-SMB header of 4 bytes. */
   if (server->max_xmit < 65535 - 4)
     server->max_xmit += 4;
+
+  /* Changed, max_xmit hasn't been updated if a tconX message was send instead of tcon. */
+  if (server->max_xmit > given_max_xmit)
+    server->max_xmit = given_max_xmit;
 
   LOG (("max_xmit = %ld, tid = %ld\n", server->max_xmit, server->tid));
 
