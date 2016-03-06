@@ -1,5 +1,7 @@
 /*
  * cpr smbfs.debug domain=workgroup user=olsen password=bazong volume=olsen //felix/olsen
+ * cpr smbfs.debug user=guest volume=amiga //windows7-amiga/Users/Public
+ * break smba_start
  * break smba_connect
  * break smb_receive_raw
  *
@@ -185,7 +187,7 @@ STATIC BOOL IsReservedName(STRPTR name);
 STATIC LONG MapErrnoToIoErr(int error);
 STATIC VOID TranslateBName(UBYTE *name, UBYTE *map);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, APTR bstring);
 STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
 STATIC LONG Action_DeleteObject(struct FileLock *parent, APTR bcpl_name, LONG *error_ptr);
@@ -331,6 +333,7 @@ _start(VOID)
 		KEY		DeviceName;
 		KEY		VolumeName;
 		NUMBER	CacheSize;
+		NUMBER	MaxTransmit;
 		NUMBER	DebugLevel;
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
@@ -353,6 +356,7 @@ _start(VOID)
 		"DEVICE=DEVICENAME/K,"
 		"VOLUME=VOLUMENAME/K,"
 		"CACHE=CACHESIZE/N/K,"
+		"MAXTRANSMIT/N/K,"
 		"DEBUGLEVEL=DEBUG/N/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
@@ -367,6 +371,7 @@ _start(VOID)
 	LONG number;
 	LONG other_number;
 	LONG cache_size = 0;
+	LONG max_transmit = -1;
 	char env_workgroup_name[17];
 	char env_user_name[64];
 	char env_password[64];
@@ -689,6 +694,18 @@ _start(VOID)
 			cache_size = number;
 		}
 
+		str = FindToolType(Icon->do_ToolTypes,"MAXTRANSMIT");
+		if(str != NULL)
+		{
+			if(StrToLong(str,&number) == -1)
+			{
+				ReportError("Invalid number '%s' for 'MAXTRANSMIT' parameter.",str);
+				goto out;
+			}
+
+			max_transmit = number;
+		}
+
 		if(args.Workgroup == NULL)
 		{
 			ReportError("Required 'WORKGROUP' parameter was not provided.");
@@ -758,6 +775,9 @@ _start(VOID)
 
 		if(args.CacheSize != NULL)
 			cache_size = (*args.CacheSize);
+
+		if(args.MaxTransmit != NULL)
+			max_transmit = (*args.MaxTransmit);
 	}
 
 	/* Use the default if no user name is given. */
@@ -795,6 +815,7 @@ _start(VOID)
 		args.ClientName,
 		args.ServerName,
 		cache_size,
+		max_transmit,
 		args.TimeZoneOffset,
 		args.DSTOffset,
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
@@ -1485,7 +1506,7 @@ BroadcastNameQuery(char *name, char *scope, UBYTE *address)
 
 	s = getservbyname("netbios-ns","udp");
 	if(s != NULL)
-		sox.sin_port = htons(s->s_port);
+		sox.sin_port = s->s_port;
 	else
 		sox.sin_port = htons(137);
 
@@ -2193,6 +2214,7 @@ Setup(
 	STRPTR	opt_clientname,
 	STRPTR	opt_servername,
 	int		opt_cachesize,
+	int		opt_max_transmit,
 	LONG *	opt_time_zone_offset,
 	LONG *	opt_dst_offset,
 	BOOL	opt_raw_smb,
@@ -2361,7 +2383,7 @@ Setup(
 		}
 	}
 
-	error = smba_start(service,workgroup,username,opt_password,opt_clientname,opt_servername,opt_cachesize,opt_raw_smb,&ServerData);
+	error = smba_start(service,workgroup,username,opt_password,opt_clientname,opt_servername,opt_cachesize,opt_max_transmit,opt_raw_smb,&ServerData);
 	if(error < 0)
 		goto out;
 
