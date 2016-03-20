@@ -1,6 +1,6 @@
 /*
  * cpr smbfs.debug domain=workgroup user=olsen password=bazong volume=olsen //felix/olsen
- * cpr smbfs.debug user=guest volume=amiga //windows7-amiga/Users/Public
+ * cpr smbfs.debug dumpsmb user=guest volume=amiga //windows7-amiga/Users/Public
  * break smba_start
  * break smba_connect
  * break smb_receive_raw
