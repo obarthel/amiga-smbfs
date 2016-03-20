@@ -148,7 +148,7 @@ struct smb_header
 	unsigned short mid;		// Multiplex ID [WORD smb_mid]
 
 	int num_parameter_words;	// Count of parameter words [BYTE smb_wct]
-	unsigned short * parameters;	// Variable number of parameter words [SHORT smb_wvw[..]]
+	unsigned char * parameters;	// Variable number of parameter words [SHORT smb_wvw[..]]
 
 	int num_data_bytes;		// Number of data bytes following [WORD smb_bcc]
 	unsigned char * data;		// Variable number of data bytes [BYTE smb_data[..]]
@@ -216,10 +216,10 @@ next_byte(struct decode_context * dc)
 	return(result);
 }
 
-static const unsigned short *
+static const unsigned char *
 next_words(struct decode_context * dc,int count)
 {
-	return((const unsigned short *)next_bytes(dc,count * 2));
+	return(next_bytes(dc,count * 2));
 }
 
 static unsigned short
@@ -280,7 +280,7 @@ fill_header(const unsigned char * packet,int length,struct smb_header * header)
 	header->mid = next_word(&dc);
 
 	header->num_parameter_words = next_byte(&dc);
-	header->parameters = (unsigned short *)next_words(&dc,header->num_parameter_words);
+	header->parameters = (unsigned char *)next_words(&dc,header->num_parameter_words);
 
 	header->num_data_bytes = next_word(&dc);
 	header->data = (unsigned char *)next_bytes(&dc,header->num_data_bytes);
@@ -515,22 +515,140 @@ add_lb_flag(struct line_buffer *lb,const char * str)
 	}
 }
 
+/* Commands tested in need of documentation:
+ *
+ * CLOSE
+ * CREATE
+ * NEGOTIATE
+ * OPEN
+ * QUERY_INFORMATION
+ * QUERY_INFORMATION_DISK
+ * READ
+ * READ_RAW
+ * SEEK
+ * SESSION_SETUP_ANDX
+ * SET_INFORMATION
+ * TRANSACTION2
+ * TREE_CONNECT_ANDX
+ * WRITE
+ */
 static void
 print_smb_contents(const struct smb_header * header)
 {
 }
 
 static void
-print_smb_header(const struct smb_header * header,int header_length,int packet_size,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
+print_smb_data(struct line_buffer * lb,int num_data_bytes_left,const unsigned char * data_bytes)
+{
+	if(num_data_bytes_left > 0)
+	{
+		extern VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString,...);
+
+		int row_offset = 0;
+		char format_buffer[20];
+		char dword_buffer[20];
+		int num_bytes_per_row,dword_pos;
+		size_t dword_buffer_len;
+		unsigned char c;
+		int c_pos;
+
+		while(num_data_bytes_left > 0)
+		{
+			/* The output line should be filled with blank spaces. */
+			set_line_buffer(lb,' ',60);
+
+			/* Print the row offset (in bytes) at the start of the
+			 * output line.
+			 */
+			SPrintf(format_buffer,"%04lx:",row_offset);
+
+			copy_string_to_line_buffer(lb,format_buffer,5,0);
+
+			/* Print up to 16 bytes per row. */
+			if(num_data_bytes_left > 16)
+				num_bytes_per_row = 16;
+			else
+				num_bytes_per_row = num_data_bytes_left;
+
+			dword_pos = 6;
+			dword_buffer[0] = '\0';
+			dword_buffer_len = 0;
+			c_pos = 45;
+
+			/* Print the bytes in hex format, followed by a column
+			 * of the same data bytes interpreted as printable
+			 * characters.
+			 */
+			while(num_bytes_per_row > 0)
+			{
+				c = (*data_bytes++);
+				num_bytes_per_row--;
+				row_offset++;
+				num_data_bytes_left--;
+
+				/* Convert this data byte to hexadecimal
+				 * representation.
+				 */
+				SPrintf(format_buffer,"%02lx",c);
+
+				strcat(dword_buffer,format_buffer);
+				dword_buffer_len += 2;
+
+				/* Is this not a printable character? If so,
+				 * substitute it with '.'.
+				 */
+				if(c < ' ' || c == 127 || (128 <= c && c <= 160))
+					c = '.';
+
+				copy_string_to_line_buffer(lb,(char *)&c,1,c_pos);
+				c_pos++;
+
+				/* If we have converted four bytes to hexadecimal
+				 * format, put them into the output buffer.
+				 */
+				if(dword_buffer_len >= 8)
+				{
+					copy_string_to_line_buffer(lb,dword_buffer,8,dword_pos);
+					dword_pos += 9;
+
+					dword_buffer[0] = '\0';
+					dword_buffer_len = 0;
+				}
+			}
+
+			/* If we did not convert a multiple of 32 bytes per row,
+			 * add the last conversion buffer contents.
+			 */
+			if(dword_buffer_len > 0)
+				copy_string_to_line_buffer(lb,dword_buffer,dword_buffer_len,dword_pos);
+
+			Printf("             %s\n",lb->line);
+		}
+	}
+}
+
+static void
+print_smb_parameters(int num_parameter_words,const unsigned char *parameters)
+{
+	if(num_parameter_words > 0)
+	{
+		int word_value;
+		int i,j;
+
+		for(i = j = 0 ; i < num_parameter_words ; i++, j++)
+		{
+			word_value = parameters[j] + (((int)parameters[j+1]) << 8);
+
+			Printf("                  %04lx: %04lx (bytes: %02lx%02lx)\n",i,word_value,parameters[j],parameters[j+1]);
+		}
+	}
+}
+
+static void
+print_smb_header(const struct smb_header * header,int header_length,const unsigned char *packet,int packet_size,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
 {
 	const char * command_name;
 	struct line_buffer lb;
-
-	command_name = get_smb_command_name(header->command);
-	if(command_name != NULL)
-		Printf("command = %s\n",command_name);
-	else
-		Printf("command = 0x%02lx\n",header->command);
 
 	if(smb_packet_source == smb_packet_from_consumer)
 		Printf("source = from consumer (client --> server)\n");
@@ -641,115 +759,64 @@ print_smb_header(const struct smb_header * header,int header_length,int packet_s
 	Printf("uid = %04lx\n",header->uid);
 	Printf("mid = %04lx\n",header->mid);
 
+	Printf("length = %ld (packet size:%ld, buffer size:%ld)\n",header_length,packet_size,max_buffer_size);
+
+	command_name = get_smb_command_name(header->command);
+
+	if(command_name != NULL)
+		Printf("command = %s\n",command_name);
+	else
+		Printf("command = 0x%02lx\n",header->command);
+
 	Printf("parameter words = %ld\n",header->num_parameter_words);
-
+	
 	if(header->num_parameter_words > 0)
-	{
-		int i;
-		int word_value;
-
-		for(i = 0 ; i < header->num_parameter_words ; i++)
-		{
-			word_value = ((header->parameters[i] >> 8) & 0xff) | (((int)(header->parameters[i] & 0xff)) << 8);
-
-			Printf("                  %04lx: %04lx (byte order = %04lx)\n",i,word_value,header->parameters[i]);
-		}
-	}
+		print_smb_parameters(header->num_parameter_words,(unsigned char *)header->parameters);
 
 	Printf("data bytes = %ld\n",header->num_data_bytes);
 
 	/* If there are any data bytes, print them like "type hex .." would. */
 	if(header->num_data_bytes > 0)
-	{
-		extern VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString,...);
-
-		const unsigned char * data_bytes = header->data;
-		int num_data_bytes_left = header->num_data_bytes;
-		int row_offset = 0;
-		char format_buffer[20];
-		char dword_buffer[20];
-		int num_bytes_per_row,dword_pos;
-		size_t dword_buffer_len;
-		unsigned char c;
-		int c_pos;
-
-		while(num_data_bytes_left > 0)
-		{
-			/* The output line should be filled with blank spaces. */
-			set_line_buffer(&lb,' ',60);
-
-			/* Print the row offset (in bytes) at the start of the
-			 * output line.
-			 */
-			SPrintf(format_buffer,"%04lx:",row_offset);
-
-			copy_string_to_line_buffer(&lb,format_buffer,5,0);
-
-			/* Print up to 16 bytes per row. */
-			if(num_data_bytes_left > 16)
-				num_bytes_per_row = 16;
-			else
-				num_bytes_per_row = num_data_bytes_left;
-
-			dword_pos = 6;
-			dword_buffer[0] = '\0';
-			dword_buffer_len = 0;
-			c_pos = 45;
-
-			/* Print the bytes in hex format, followed by a column
-			 * of the same data bytes interpreted as printable
-			 * characters.
-			 */
-			while(num_bytes_per_row > 0)
-			{
-				c = (*data_bytes++);
-				num_bytes_per_row--;
-				row_offset++;
-				num_data_bytes_left--;
-
-				/* Convert this data byte to hexadecimal
-				 * representation.
-				 */
-				SPrintf(format_buffer,"%02lx",c);
-
-				strcat(dword_buffer,format_buffer);
-				dword_buffer_len += 2;
-
-				/* Is this not a printable character? If so,
-				 * substitute it with '.'.
-				 */
-				if(c < ' ' || c == 127 || (128 <= c && c <= 160))
-					c = '.';
-
-				copy_string_to_line_buffer(&lb,(char *)&c,1,c_pos);
-				c_pos++;
-
-				/* If we have converted four bytes to hexadecimal
-				 * format, put them into the output buffer.
-				 */
-				if(dword_buffer_len >= 8)
-				{
-					copy_string_to_line_buffer(&lb,dword_buffer,8,dword_pos);
-					dword_pos += 9;
-
-					dword_buffer[0] = '\0';
-					dword_buffer_len = 0;
-				}
-			}
-
-			/* If we did not convert a multiple of 32 bytes per row,
-			 * add the last conversion buffer contents.
-			 */
-			if(dword_buffer_len > 0)
-				copy_string_to_line_buffer(&lb,dword_buffer,dword_buffer_len,dword_pos);
-
-			Printf("             %s\n",lb.line);
-		}
-	}
-
-	Printf("length = %ld (packet size:%ld, buffer size:%ld)\n",header_length,packet_size,max_buffer_size);
+		print_smb_data(&lb,header->num_data_bytes,header->data);
 
 	print_smb_contents(header);
+
+	if(is_smb_andx_command(header->command))
+	{
+		const unsigned char * andx_header = (const unsigned char *)header->parameters;
+		int offset = andx_header[2] + (((int)andx_header[3]) << 8);
+		int num_parameter_words,num_data_bytes;
+
+		while(andx_header[0] != 0xff && offset > 0 && offset < packet_size)
+		{
+			andx_header = &packet[offset];
+
+			num_parameter_words = (*andx_header++);
+
+			command_name = get_smb_command_name(andx_header[0]);
+
+			if(command_name != NULL)
+				Printf("command = %s (ANDX)\n",command_name);
+			else
+				Printf("command = 0x%02lx (ANDX)\n",header->command);
+
+			Printf("andx_offset = 0x%02lx\n",andx_header[2] + (((int)andx_header[3]) << 8));
+
+			Printf("parameter words = %ld\n",num_parameter_words);
+	
+			if(num_parameter_words > 0)
+				print_smb_parameters(num_parameter_words,&andx_header[4]);
+
+			num_data_bytes = andx_header[4 + num_parameter_words * 2] + (((int)andx_header[4 + num_parameter_words * 2 + 1]) << 8);
+
+			Printf("data bytes = %ld\n",num_data_bytes);
+
+			if(num_data_bytes > 0)
+				print_smb_data(&lb,num_data_bytes,&andx_header[4 + num_parameter_words * 2 + 2]);
+
+			offset = andx_header[2] + (((int)andx_header[3]) << 8);
+		}
+	}
 }
 
 static void
@@ -766,7 +833,7 @@ dump_smb(const char *file_name,int line_number,const void * packet,int length,en
 			Printf("---\n");
 			Printf("%s:%ld\n",file_name,line_number);
 
-			print_smb_header(&header,num_bytes_read,length,smb_packet_source,max_buffer_size);
+			print_smb_header(&header,num_bytes_read,packet,length,smb_packet_source,max_buffer_size);
 
 			Printf("---\n\n");
 		}
