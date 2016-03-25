@@ -758,3 +758,10 @@ smbfs 1.83 (20.3.2016)
 - Reworked the SMB decoding so that the ANDX commands can be
   handled properly. Not that I have actually seen any of these
   commands at work, mind you.
+
+
+smbfs 1.84 (25.3.2016)
+
+- Major rework of the code which decodes individual commands,
+  their parameters and the responses. This is still incomplete,
+  but it's a lot more useful now than before.
