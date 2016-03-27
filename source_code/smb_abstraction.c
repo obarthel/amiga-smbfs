@@ -1,5 +1,5 @@
 /*
- * :ts=8
+ * :ts=4
  *
  * Name: smb_abstraction.c
  * Description: Smb abstraction layer.
@@ -406,6 +406,15 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	result = make_open (f, 1);
 	if (result < 0)
 		goto out;
+
+	/* make_open() will return the number of bytes read
+	   from the server, or a negative number if an error
+	   occured. We just reset "result" to 0 here because
+	   it might otherwise cause the number of data bytes
+	   read to be off, which in turn causes the first
+	   few bytes read from a file to contain random
+	   junk. */
+	result = 0;
 
 	D(("read %ld bytes from offset %ld",len,offset));
 
