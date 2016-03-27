@@ -37,6 +37,7 @@
 /****************************************************************************/
 
 #include "smb_abstraction.h"
+#include "dump_smb.h"
 
 /****************************************************************************/
 
@@ -800,8 +801,12 @@ _start(VOID)
 		SETDEBUGLEVEL(0);
 
 	/* Enable SMB packet decoding, but only if not started from Workbench. */
-	if(args.DumpSMB && WBStartup == NULL)
-		control_smb_dump(TRUE);
+	#if defined(DUMP_SMB)
+	{
+		if(args.DumpSMB && WBStartup == NULL)
+			control_smb_dump(TRUE);
+	}
+	#endif /* DUMP_SMB */
 
 	D(("%s (%s)",VERS,DATE));
 
