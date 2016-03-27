@@ -350,6 +350,9 @@ smb_connect (struct smb_server *server)
  *
  ****************************************************************************/
 
+/* Returns number of bytes received (>= 0) or a negative value in
+ * case of error.
+ */
 int
 smb_request (struct smb_server *server)
 {
@@ -475,6 +478,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
+	/* Request that data should be read in raw mode. */
 	result = send (sock_fd, (void *) buffer, len, 0);
 
 	LOG (("smb_request_read_raw: send returned %ld\n", result));
@@ -487,6 +491,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	}
 	else
 	{
+		/* Wait for the raw data to be sent by the server. */
 		result = smb_receive_raw (server, sock_fd, target, max_len, 0);
 	}
 
@@ -519,15 +524,13 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 		goto out;
 	}
 
+	/* Send the NetBIOS header. */
 	smb_encode_smb_length (nb_header, length);
 
 	result = send (sock_fd, (void *) nb_header, 4, 0);
 	if (result == 4)
 	{
-		#if defined(DUMP_SMB)
-		dump_smb(__FILE__,__LINE__,source,length,smb_packet_from_consumer,server->max_recv);
-		#endif /* defined(DUMP_SMB) */
-
+		/* Now send the data to be written. */
 		result = send (sock_fd, (void *) source, length, 0);
 		if(result < 0)
 			result = (-errno);
@@ -542,6 +545,10 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 
 	LOG (("smb_request_write_raw: send returned %ld\n", result));
 
+	/* If the write operation succeeded, wait for the
+	 * server to confirm it.
+	 * ZZZ server may respond with *two* different messages.
+	 */
 	if (result == length)
 		result = smb_receive (server, sock_fd);
 
