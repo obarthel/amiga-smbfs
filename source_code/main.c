@@ -1,16 +1,4 @@
 /*
- * cpr smbfs.debug domain=workgroup user=olsen password=bazong volume=olsen //felix/olsen
- * cpr smbfs.debug dumpsmb user=guest volume=amiga //windows7-amiga/Users/Public
- * break smba_start
- * break smba_connect
- * break smb_receive_raw
- *
- * smbfs.debug user=guest  volume=sicherung //192.168.1.76/sicherung-smb
- */
-
-/*
- * $Id: main.c,v 1.10 2011/01/06 11:27:18 obarthel Exp $
- *
  * :ts=4
  *
  * SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
@@ -30,6 +18,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ */
+
+/*
+ * cpr smbfs.debug domain=workgroup user=olsen password=bazong volume=olsen //felix/olsen
+ * cpr smbfs.debug dumpsmb user=guest volume=amiga //windows7-amiga/Users/Public
+ * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
+ * break smba_start
+ * break smba_connect
+ * break smb_receive_raw
+ *
+ * smbfs.debug user=guest  volume=sicherung //192.168.1.76/sicherung-smb
  */
 
 #include "smbfs.h"
