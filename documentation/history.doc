@@ -774,3 +774,11 @@ smbfs 1.85 (27.3.2016)
 
 - The SMB decoding code should be functionally complete now,
   covering all the commands which smbfs uses.
+
+
+smbfs 1.86 (27.3.2016)
+
+- Figured why Action_Read->smba_read() could end up returning
+  random junk in the first few bytes of the file being read and
+  fixed it. All the work on the SMB message decoder has finally
+  paid off :-)
