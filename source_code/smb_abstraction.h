@@ -1,7 +1,5 @@
 /*
- * $Id: smb_abstraction.h,v 1.2 2009/04/14 11:32:51 obarthel Exp $
- *
- * :ts=8
+ * :ts=4
  *
  * Name: smb_abstraction.h
  * Description: Interface to the smb abstraction layer.
@@ -27,25 +25,25 @@ struct smb_server;
 
 typedef struct smba_connect_parameters
 {
-  char server_ipname[64];
-  char service[64];
-  char *server_name;
-  char *client_name;
-  char *username;
-  char *password;
+	char server_ipname[64];
+	char service[64];
+	char *server_name;
+	char *client_name;
+	char *username;
+	char *password;
 } smba_connect_parameters_t;
 
 typedef struct smba_stat
 {
-  unsigned is_dir:1;
-  unsigned is_wp:1;
-  unsigned is_hidden:1;
-  unsigned is_system:1;
-  unsigned is_archive:1;
-  int size;
-  long atime;
-  long ctime;
-  long mtime;
+	unsigned is_dir:1;
+	unsigned is_wp:1;
+	 unsigned is_hidden:1;
+	unsigned is_system:1;
+	unsigned is_archive:1;
+	int size;
+	long atime;
+	long ctime;
+	long mtime;
 } smba_stat_t;
 
 /****************************************************************************/
