@@ -64,15 +64,15 @@ VERSION = 1
 ###############################################################################
 
 CFLAGS =	idlen=64 comnest streq strmerge nostkchk \
-		$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) data=faronly \
+		$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) code=far data=faronly \
 		params=register idir=netinclude idir=include \
 		ignore=306 gst=system_headers.gst
 
-LFLAGS =	smallcode smalldata noicons batch
+LFLAGS =	noicons batch
 
 ###############################################################################
 
-OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o
+OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o
 
 ###############################################################################
 
@@ -101,11 +101,12 @@ system_headers.gst: system_headers.h system_headers.c
 
 assert.o : assert.c
 crypt.o : crypt.c system_headers.h assert.h smbfs.h
-main.o : main.c system_headers.h assert.h smbfs.h smb_abstraction.h smbfs_rev.h
+main.o : main.c system_headers.h assert.h smbfs.h smb_abstraction.h smbfs_rev.h dump_smb.h
 proc.o : proc.c system_headers.h assert.h smbfs.h quad_math.h
 quad_math.o : quad_math.c quad_math.h
 smb_abstraction.o : smb_abstraction.c system_headers.h assert.h smbfs.h smb_abstraction.h
-sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h
+sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h dump_smb.h
+dump_smb.o : dump_smb.c system_headers.h assert.h smbfs.h dump_smb.h
 
 ###############################################################################
 
