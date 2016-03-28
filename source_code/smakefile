@@ -58,7 +58,7 @@ VERSION = 1
  OPTIMIZE =	optimize opttime optinline optinlocal optschedule
  CPU =		any
 #CPU =		060
-#DEBUG =	line
+#DEBUG =	line define=DUMP_SMB
  DEBUG =	symbolflush noopt define=DEBUG define=DUMP_SMB
 
 ###############################################################################
@@ -106,7 +106,7 @@ proc.o : proc.c system_headers.h assert.h smbfs.h quad_math.h
 quad_math.o : quad_math.c quad_math.h
 smb_abstraction.o : smb_abstraction.c system_headers.h assert.h smbfs.h smb_abstraction.h
 sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h dump_smb.h
-dump_smb.o : dump_smb.c system_headers.h assert.h smbfs.h dump_smb.h
+dump_smb.o : dump_smb.c system_headers.h assert.h smbfs.h dump_smb.h quad_math.h
 
 ###############################################################################
 
