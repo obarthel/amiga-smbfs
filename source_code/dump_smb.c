@@ -11,6 +11,7 @@
 /*****************************************************************************/
 
 #include "dump_smb.h"
+#include "quad_math.h"
 
 /*****************************************************************************/
 
@@ -105,110 +106,19 @@ static const unsigned char * next_data_bytes(const unsigned char * data,int num_
 	return(result);
 }
 
-/*****************************************************************************/
-
-struct decode_context
+static const unsigned char * next_data_words(const unsigned char * data,int num_words,int * offset_ptr)
 {
-	const unsigned char *	data;
-	int						offset;
-	int						length;
-	int						overflow;
-};
-
-/*****************************************************************************/
-
-static void
-init_decode_context(const unsigned char * data,int length,struct decode_context * dc)
-{
-	dc->data		= data;
-	dc->offset		= 0;
-	dc->length		= length;
-	dc->overflow	= 0;
+	return(next_data_bytes(data,2 * num_words,offset_ptr));
 }
 
-static void
-skip_bytes(struct decode_context * dc,int count)
+static void skip_data_bytes(const unsigned char * data,int num_bytes,int * offset_ptr)
 {
-	if(dc->offset + count <= dc->length)
-		dc->offset += count;
-	else
-		dc->overflow = 1;
+	(*offset_ptr) = (*offset_ptr) + num_bytes;
 }
 
-static void
-skip_words(struct decode_context * dc,int count)
+static void skip_data_words(const unsigned char * data,int num_words,int * offset_ptr)
 {
-	skip_bytes(dc,count * 2);
-}
-
-static const unsigned char *
-next_bytes(struct decode_context * dc,int count)
-{
-	const unsigned char * result;
-	
-	result = &dc->data[dc->offset];
-
-	if(dc->offset + count <= dc->length)
-		dc->offset += count;
-	else
-		dc->overflow = 1;
-		
-	return(result);
-}
-
-static unsigned char
-next_byte(struct decode_context * dc)
-{
-	unsigned char result;
-	
-	result = dc->data[dc->offset];
-
-	if(dc->offset <= dc->length)
-		dc->offset++;
-	else
-		dc->overflow = 1;
-		
-	return(result);
-}
-
-static const unsigned char *
-next_words(struct decode_context * dc,int count)
-{
-	return(next_bytes(dc,count * 2));
-}
-
-static unsigned short
-next_word(struct decode_context * dc)
-{
-	unsigned short result;
-	
-	result = dc->data[dc->offset] | (((unsigned short)dc->data[dc->offset+1]) << 8);
-
-	if(dc->offset + 2 <= dc->length)
-		dc->offset += 2;
-	else
-		dc->overflow = 1;
-		
-	return(result);
-}
-
-static unsigned long
-next_dword(struct decode_context * dc)
-{
-	unsigned short result;
-	
-	result =
-		dc->data[dc->offset] |
-		(((unsigned long)dc->data[dc->offset+1]) << 8) |
-		(((unsigned long)dc->data[dc->offset+2]) << 16) |
-		(((unsigned long)dc->data[dc->offset+3]) << 24);
-
-	if(dc->offset + 4 <= dc->length)
-		dc->offset += 4;
-	else
-		dc->overflow = 1;
-		
-	return(result);
+	skip_data_bytes(data,2 * num_words,offset_ptr);
 }
 
 /*****************************************************************************/
@@ -216,38 +126,36 @@ next_dword(struct decode_context * dc)
 static int
 fill_header(const unsigned char * packet,int length,struct smb_header * header)
 {
-	struct decode_context dc;
 	int num_bytes_read;
+	int offset = 0;
 	
 	memset(header,0,sizeof(header));
 
 	header->raw_packet_size = length;
 	header->raw_packet = (char *)packet;
-	
-	init_decode_context(packet,length,&dc);
-	
-	memcpy(header->signature,next_bytes(&dc,4),4);
-	header->command = next_byte(&dc);
-	header->status = next_dword(&dc);
-	header->flags = next_byte(&dc);
-	header->flags2 = next_word(&dc);
-	header->extra.pid_high = next_word(&dc);
-	memcpy(header->extra.signature,next_words(&dc,4),sizeof(unsigned short) * 4);
-	skip_words(&dc,1);
-	header->tid = next_word(&dc);
-	header->pid = next_word(&dc);
-	header->uid = next_word(&dc);
-	header->mid = next_word(&dc);
 
-	header->num_parameter_words = next_byte(&dc);
-	header->parameter_offset = dc.offset;
-	header->parameters = (unsigned char *)next_words(&dc,header->num_parameter_words);
+	memcpy(header->signature,next_data_bytes(packet,4,&offset),4);
+	header->command = next_data_byte(packet,&offset);
+	header->status = next_data_dword(packet,&offset);
+	header->flags = next_data_byte(packet,&offset);
+	header->flags2 = next_data_word(packet,&offset);
+	header->extra.pid_high = next_data_word(packet,&offset);
+	memcpy(header->extra.signature,next_data_words(packet,4,&offset),sizeof(unsigned short) * 4);
+	skip_data_words(packet,1,&offset);
+	header->tid = next_data_word(packet,&offset);
+	header->pid = next_data_word(packet,&offset);
+	header->uid = next_data_word(packet,&offset);
+	header->mid = next_data_word(packet,&offset);
 
-	header->num_data_bytes = next_word(&dc);
-	header->data_offset = dc.offset;
-	header->data = (unsigned char *)next_bytes(&dc,header->num_data_bytes);
+	header->num_parameter_words = next_data_byte(packet,&offset);
+	header->parameter_offset = offset;
+	header->parameters = (unsigned char *)next_data_words(packet,header->num_parameter_words,&offset);
 
-	num_bytes_read = dc.offset;
+	header->num_data_bytes = next_data_word(packet,&offset);
+	header->data_offset = offset;
+	header->data = (unsigned char *)next_data_bytes(packet,header->num_data_bytes,&offset);
+
+	num_bytes_read = offset;
 
 	return(num_bytes_read);
 }
@@ -598,8 +506,138 @@ print_smb_data(struct line_buffer * lb,int num_data_bytes_left,const unsigned ch
 
 /*****************************************************************************/
 
+static const struct tm *
+convert_smb_date_time_to_tm(unsigned short smb_date,unsigned short smb_time)
+{
+	struct tm tm;
+
+	memset(&tm,0,sizeof(tm));
+
+	tm.tm_sec	= (smb_time & 0x001f) * 2;
+	tm.tm_min	= (smb_time & 0x07e0) >> 5;
+	tm.tm_hour	= (smb_time & 0xf800) >> 11;
+
+	tm.tm_mday	= smb_date & 0x001f;
+	tm.tm_mon	= ((smb_date & 0x01e0) >> 5) - 1;
+	tm.tm_year	= 80 + ((smb_date & 0xfe00) >> 9);
+
+	return(&tm);
+}
+
+/*****************************************************************************/
+
+static const struct tm *
+convert_filetime_to_tm(const unsigned long * qword)
+{
+	const QUAD adjust_by_369_years = { 0x00000002,0xb6109100 };
+	QUAD long_date;
+	time_t when;
+
+	long_date.High = qword[0];
+	long_date.Low = qword[1];
+
+	/* Divide by 10,000,000 to convert the time from 100ns
+     * units into seconds.
+	 */
+	divide_64_by_32(&long_date,10000000,&long_date);
+
+	/* Adjust by 369 years (11,644,473,600 seconds) to convert
+	 * from the epoch beginning on January 1st 1601 to the one
+	 * beginning on January 1st 1970 (the Unix epoch).
+	 */
+	if(subtract_64_from_64_to_64(&long_date,&adjust_by_369_years,&long_date) == 0)
+		when = (time_t)long_date.Low;
+	else
+		when = (time_t)0;
+
+	return(gmtime(&when));
+}
+
+/*****************************************************************************/
+
+static const char *
+convert_filetime_to_string(const unsigned long * qword)
+{
+	static char string[40];
+	const struct tm * tm;
+
+	tm = convert_filetime_to_tm(qword);
+
+	SPrintf(string,"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
+		tm->tm_year+1900,tm->tm_mon+1,tm->tm_mday,
+		tm->tm_hour,tm->tm_min,tm->tm_sec);
+
+	return(string);
+}
+
+/*****************************************************************************/
+
+static const char *
+convert_smb_date_time_to_string(unsigned short smb_date,unsigned short smb_time)
+{
+	static char string[40];
+	const struct tm * tm;
+
+	tm = convert_smb_date_time_to_tm(smb_date,smb_time);
+
+	SPrintf(string,"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
+		tm->tm_year+1900,tm->tm_mon+1,tm->tm_mday,
+		tm->tm_hour,tm->tm_min,tm->tm_sec);
+
+	return(string);
+}
+
+/*****************************************************************************/
+
+static const char *
+convert_utime_to_string(unsigned long utime)
+{
+	static char string[40];
+	const struct tm * tm;
+	time_t when = (time_t)utime;
+
+	tm = gmtime(&when);
+
+	SPrintf(string,"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
+		tm->tm_year+1900,tm->tm_mon+1,tm->tm_mday,
+		tm->tm_hour,tm->tm_min,tm->tm_sec);
+
+	return(string);
+}
+
+/*****************************************************************************/
+
+static const char *
+convert_qword_to_string(const unsigned long *qword)
+{
+	static char string[40];
+	QUAD number;
+	unsigned long n;
+	int len;
+
+	number.High = qword[0];
+	number.Low = qword[1];
+	
+	memset(string,0,sizeof(string));
+
+	for(len = sizeof(string)-2 ; len >= 0 ; )
+	{
+		n = divide_64_by_32(&number,10,&number);
+
+		string[len--] = '0'+n;
+
+		if(number.High == 0 && number.Low == 0)
+			break;
+	}
+
+	return(&string[len+1]);
+}
+
+/*****************************************************************************/
+
 static void
-print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packet_source,int num_parameter_bytes,const unsigned char * parameters,int num_data_bytes,const unsigned char * data)
+print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packet_source,int num_parameter_bytes,
+	const unsigned char * parameters,int num_data_bytes,const unsigned char * data)
 {
 	if(command == TRANS2_FIND_FIRST2 && smb_packet_source == smb_packet_from_consumer)
 	{
@@ -834,10 +872,13 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 				Printf("\tnext entry offset = %ld\n",next_entry_offset);
 				Printf("\tfile index = 0x%08lx\n",file_index);
 				Printf("\tcreation time = 0x%08lx%08lx\n",creation_time[0],creation_time[1]);
+				Printf("\t                %s\n",convert_filetime_to_string(creation_time));
 				Printf("\tlast access time = 0x%08lx%08lx\n",last_access_time[0],last_access_time[1]);
+				Printf("\t                   %s\n",convert_filetime_to_string(last_access_time));
 				Printf("\tlast change time = 0x%08lx%08lx\n",last_change_time[0],last_change_time[1]);
-				Printf("\tend of file = %lu (0x%08lx%08lx)\n",end_of_file[1],end_of_file[0],end_of_file[1]);
-				Printf("\tallocation size = %lu (0x%08lx%08lx)\n",allocation_size[1],allocation_size[0],allocation_size[1]);
+				Printf("\t                   %s\n",convert_filetime_to_string(last_change_time));
+				Printf("\tend of file = %ls (0x%08lx%08lx)\n",convert_qword_to_string(end_of_file),end_of_file[0],end_of_file[1]);
+				Printf("\tallocation size = %s (0x%08lx%08lx)\n",convert_qword_to_string(allocation_size),allocation_size[0],allocation_size[1]);
 
 				Printf("\text file attributes = 0x%08lx\n",ext_file_attributes);
 
@@ -968,10 +1009,13 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 				Printf("\tresume key = 0x%08lx\n",resume_key);
 				Printf("\tcreation date = 0x%04lx\n",creation_date);
 				Printf("\tcreation time = 0x%04lx\n",creation_time);
+				Printf("\tcreation = %s\n",convert_smb_date_time_to_string(creation_date,creation_time));
 				Printf("\tlast access date = 0x%04lx\n",last_access_date);
 				Printf("\tlast access time = 0x%04lx\n",last_access_time);
+				Printf("\tlast access = %s\n",convert_smb_date_time_to_string(last_access_date,last_access_time));
 				Printf("\tlast write date = 0x%04lx\n",last_write_date);
 				Printf("\tlast write time = 0x%04lx\n",last_write_time);
+				Printf("\tlast write = %s\n",convert_smb_date_time_to_string(last_write_date,last_write_time));
 				Printf("\tfile data size = %lu\n",file_data_size);
 				Printf("\tallocation size = %lu\n",allocation_size);
 				Printf("\tfile attributes = 0x%08lx\n",file_attributes);
@@ -1037,7 +1081,6 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 #define SMBlockingX		0x24	// lock/unlock byte ranges and X
 #define SMBsesssetupX	0x73	// Session Set Up & X (including User Logon)
 
-
 // Extended 2.0 protocol
 #define SMBtrans2		0x32	// TRANS2 protocol set
 
@@ -1077,7 +1120,8 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
  * SEARCH (SMBsearch, 0x81)
  */
 static void
-print_smb_contents(const struct smb_header * header,int command,enum smb_packet_source_t smb_packet_source,int num_parameter_words,const unsigned char * parameters,int num_data_bytes,const unsigned char * data)
+print_smb_contents(const struct smb_header * header,int command,enum smb_packet_source_t smb_packet_source,
+	int num_parameter_words,const unsigned char * parameters,int num_data_bytes,const unsigned char * data)
 {
 	unsigned short vwv[256];
 	int i,j;
@@ -1283,7 +1327,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			if(file_attributes & 0x0020)
 				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
-			Printf("last modified = 0x%04lx%04lx\n",vwv[3],vwv[2]);
+			Printf("last modified = 0x%08lx\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
+			Printf("                %s\n",convert_utime_to_string((((unsigned long)vwv[3]) << 16) | vwv[2]));
+
 			Printf("file size = %lu\n",(((unsigned long )vwv[5]) << 16) | vwv[4]);
 
 			access_mode = vwv[6];
@@ -1422,6 +1468,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
 			Printf("creation time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			Printf("                %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
 			Printf("buffer format = %ld\n",filename[0]);
 			Printf("file pathname = '%s'\n",filename+1);
 		}
@@ -1435,7 +1482,8 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
 			Printf("file handle = 0x%04lx\n",vwv[0]);
-			Printf("last time modified = 0x%04lx%04lx\n",vwv[2],vwv[1]);
+			Printf("last time modified = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			Printf("                     %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
 		}
 	}
 	else if (command == SMB_COM_DELETE)
@@ -1556,6 +1604,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
 			Printf("last write time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			Printf("                  %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
 			Printf("file size = %lu\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
 		}
 	}
@@ -1597,6 +1646,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
 			Printf("creation time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			Printf("                %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
 			Printf("file pathname = '%s'\n",filename+1);
 		}
 	}
@@ -1742,12 +1792,15 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
 			Printf("fid = %ld\n",vwv[0]);
-			Printf("create date = 0x%04lx\n",vwv[1]);
+			Printf("creation date = 0x%04lx\n",vwv[1]);
 			Printf("creation time = 0x%04lx\n",vwv[2]);
+			Printf("creation = %s\n",convert_smb_date_time_to_string(vwv[1],vwv[2]));
 			Printf("last access date = 0x%04lx\n",vwv[3]);
 			Printf("last access time = 0x%04lx\n",vwv[4]);
+			Printf("last access = %s\n",convert_smb_date_time_to_string(vwv[3],vwv[4]));
 			Printf("last write date = 0x%04lx\n",vwv[5]);
 			Printf("last write time = 0x%04lx\n",vwv[6]);
+			Printf("last write = %s\n",convert_smb_date_time_to_string(vwv[5],vwv[6]));
 		}
 	}
 	else if (command == SMB_COM_QUERY_INFORMATION2)
@@ -1757,12 +1810,15 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int file_attributes;
 
 			Printf("fid = %ld\n",vwv[0]);
-			Printf("create date = 0x%04lx\n",vwv[1]);
+			Printf("creation date = 0x%04lx\n",vwv[1]);
 			Printf("creation time = 0x%04lx\n",vwv[2]);
+			Printf("creation = %s\n",convert_smb_date_time_to_string(vwv[1],vwv[2]));
 			Printf("last access date = 0x%04lx\n",vwv[3]);
 			Printf("last access time = 0x%04lx\n",vwv[4]);
+			Printf("last access = %s\n",convert_smb_date_time_to_string(vwv[3],vwv[4]));
 			Printf("last write date = 0x%04lx\n",vwv[5]);
 			Printf("last write time = 0x%04lx\n",vwv[6]);
+			Printf("last write = %s\n",convert_smb_date_time_to_string(vwv[5],vwv[6]));
 			Printf("file data size = %lu\n",(((unsigned long)vwv[8]) << 16) | vwv[7]);
 			Printf("file allocation size = %lu\n",(((unsigned long)vwv[10]) << 16) | vwv[9]);
 
@@ -2080,6 +2136,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				struct line_buffer lb;
 				int unicode_char;
 				int output_offset;
+				unsigned long system_time[2];
 
 				Printf("dialect index = %ld\n",next_data_word(parameters,&offset));
 
@@ -2155,7 +2212,10 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				if(capabilities & 0x00004000)
 					Printf("               CAP_LARGE_READX\n");
 
-				Printf("system time = 0x%08lx%08lx\n",next_data_dword(parameters,&offset),next_data_dword(parameters,&offset));
+				next_data_qword(parameters,system_time,&offset);
+
+				Printf("system time = 0x%08lx%08lx\n",system_time[0],system_time[1]);
+				Printf("              %s\n",convert_filetime_to_string(system_time));
 				Printf("server time zone = %ld\n",next_data_word(parameters,&offset));
 
 				challenge_length = next_data_byte(parameters,&offset);
@@ -2530,6 +2590,8 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			const unsigned char * server_state;
 			const unsigned char * client_state;
 
+			unsigned short last_write_date;
+			unsigned short last_write_time;
 			int count;
 			int offset;
 			int buffer_format;
@@ -2601,8 +2663,12 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				if(file_attributes & 0x0020)
 					Printf("\t                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
-				Printf("\tlast write time = 0x%04lx\n",next_data_word(data,&offset));
-				Printf("\tlast write date = 0x%04lx\n",next_data_word(data,&offset));
+				last_write_time = next_data_word(data,&offset);
+				last_write_date = next_data_word(data,&offset);
+
+				Printf("\tlast write time = 0x%04lx\n",last_write_time);
+				Printf("\tlast write date = 0x%04lx\n",last_write_date);
+				Printf("\tlast write = %s\n",convert_smb_date_time_to_string(last_write_date,last_write_time));
 				Printf("\tfile size = %lu\n",next_data_dword(data,&offset));
 
 				file_name = (const char *)next_data_bytes(data,13,&offset);
@@ -2635,7 +2701,8 @@ print_smb_parameters(int num_parameter_words,const unsigned char *parameters)
 /*****************************************************************************/
 
 static void
-print_smb_header(const struct smb_header * header,int header_length,const unsigned char *packet,int packet_size,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
+print_smb_header(const struct smb_header * header,int header_length,const unsigned char *packet,
+	int packet_size,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
 {
 	enum errdos_t
 	{
@@ -3892,7 +3959,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 			}
 		}
 
-		Printf("status = [%08lx] level:%s (%ld), facility:%s (%ld), code:%s (%ld)\n",header->status,level,level_name,facility,facility_name,error_code,error_code_name);
+		Printf("status = [%08lx] level:%s (%ld), facility:%s (%ld), code:%s (%ld)\n",header->status,level,
+			level_name,facility,facility_name,error_code,error_code_name);
 	}
 	else
 	{
@@ -3964,7 +4032,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 				break;
 		}
 
-		Printf("status = error:%s (%ld), code:%s (%ld)\n",error_class_name,error_class_value,error_code_name,error_code_value);
+		Printf("status = error:%s (%ld), code:%s (%ld)\n",error_class_name,error_class_value,
+			error_code_name,error_code_value);
 	}
 
 	Printf("flags = ");
@@ -4059,7 +4128,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 
 	Printf("%s\n",lb.line);
 
-	Printf("signature = %04lx%04lx%04lx%04lx\n",header->extra.signature[0],header->extra.signature[1],header->extra.signature[2],header->extra.signature[3]);
+	Printf("signature = %04lx%04lx%04lx%04lx\n",header->extra.signature[0],header->extra.signature[1],
+		header->extra.signature[2],header->extra.signature[3]);
 
 	Printf("tid = %04lx\n",header->tid);
 	Printf("pid = %04lx\n",header->pid);
@@ -4092,7 +4162,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 		if(header->num_data_bytes > 0)
 			print_smb_data(&lb,header->num_data_bytes,header->data);
 
-		print_smb_contents(header, header->command, smb_packet_source, header->num_parameter_words - 2, &header->parameters[4], header->num_data_bytes, header->data);
+		print_smb_contents(header, header->command, smb_packet_source, header->num_parameter_words - 2,
+			&header->parameters[4], header->num_data_bytes, header->data);
 
 		while(andx_header[0] != 0xff && offset > 0 && offset < packet_size)
 		{
@@ -4121,7 +4192,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 			if(num_data_bytes > 0)
 				print_smb_data(&lb,num_data_bytes,&andx_header[4 + num_parameter_words * 2 + 2]);
 
-			print_smb_contents(header, andx_header[0], smb_packet_source, num_parameter_words, &andx_header[4], num_data_bytes, &andx_header[4 + num_parameter_words * 2 + 2]);
+			print_smb_contents(header, andx_header[0], smb_packet_source, num_parameter_words, &andx_header[4],
+				num_data_bytes, &andx_header[4 + num_parameter_words * 2 + 2]);
 
 			offset = (((int)andx_header[3]) << 8) + andx_header[2];
 		}
@@ -4146,14 +4218,16 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 		if(header->num_data_bytes > 0)
 			print_smb_data(&lb,header->num_data_bytes,header->data);
 
-		print_smb_contents(header, header->command, smb_packet_source, header->num_parameter_words, header->parameters, header->num_data_bytes, header->data);
+		print_smb_contents(header, header->command, smb_packet_source, header->num_parameter_words, header->parameters,
+			header->num_data_bytes, header->data);
 	}
 }
 
 /*****************************************************************************/
 
 void
-dump_smb(const char *file_name,int line_number,const void * packet,int length,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
+dump_smb(const char *file_name,int line_number,const void * packet,int length,
+	enum smb_packet_source_t smb_packet_source,int max_buffer_size)
 {
 	if(dump_smb_enabled && length > 4 && memcmp(packet,"\xffSMB",4) == 0)
 	{
