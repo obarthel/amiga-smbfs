@@ -36,7 +36,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
  re_recv:
 
 	/* Read the NetBIOS session header (rfc-1002) */
-	result = recvfrom (sock_fd, (void *) peek_buf, 4, 0, NULL, NULL);
+	result = recvfrom (sock_fd, peek_buf, 4, 0, NULL, NULL);
 	if (result < 0)
 	{
 		LOG (("smb_receive_raw: recv error = %ld\n", errno));
@@ -101,9 +101,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 		target += 4;
 	}
 
-	already_read = 0;
-
-	while (already_read < len)
+	for(already_read = 0 ; already_read < len ; already_read += result)
 	{
 		result = recvfrom (sock_fd, (void *) (target + already_read), len - already_read, 0, NULL, NULL);
 		if (result < 0)
@@ -114,8 +112,6 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 
 			goto out;
 		}
-
-		already_read += result;
 	}
 
 	#if defined(DUMP_SMB)
