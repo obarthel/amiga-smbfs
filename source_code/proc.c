@@ -207,11 +207,11 @@ date_dos2unix (unsigned short time_value, unsigned short date)
 
 	memset(&tm,0,sizeof(tm));
 
-	tm.tm_sec	 = 2 * (time_value & 0x1F);
-	tm.tm_min	 = (time_value >> 5) & 0x3F;
+	tm.tm_sec = 2 * (time_value & 0x1F);
+	tm.tm_min = (time_value >> 5) & 0x3F;
 	tm.tm_hour = (time_value >> 11) & 0x1F;
 	tm.tm_mday = date & 0x1F;
-	tm.tm_mon	 = ((date >> 5) & 0xF) - 1;
+	tm.tm_mon = ((date >> 5) & 0xF) - 1;
 	tm.tm_year = ((date >> 9) & 0x7F) + 80;
 
 	seconds = MakeTime(&tm);
@@ -1294,12 +1294,12 @@ interpret_long_date(char * p)
 	long_date.High = DVAL(p,4);
 
 	/* Divide by 10,000,000 to convert the time from 100ns
-       units into seconds. */
+	   units into seconds. */
 	divide_64_by_32(&long_date,10000000,&long_date);
 
 	/* Adjust by 369 years (11,644,473,600 seconds) to convert
-       from the epoch beginning on January 1st 1601 to the one
-       beginning on January 1st 1970 (the Unix epoch). */
+	   from the epoch beginning on January 1st 1601 to the one
+	   beginning on January 1st 1970 (the Unix epoch). */
 	adjust.Low	= 0xb6109100;
 	adjust.High = 0x00000002;
 
