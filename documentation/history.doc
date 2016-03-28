@@ -782,3 +782,12 @@ smbfs 1.86 (27.3.2016)
   random junk in the first few bytes of the file being read and
   fixed it. All the work on the SMB message decoder has finally
   paid off :-)
+
+
+smbfs 1.87 (28.3.2016)
+
+- The SMB message decoder now converts date and time formats
+  for display.
+
+- The SMB message decoder now prints 64 bit numbers in
+  decimal format, too.
