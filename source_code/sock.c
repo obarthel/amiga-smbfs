@@ -35,7 +35,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 
  re_recv:
 
-	/* Read the NetBIOS session header (rfc-1002) */
+	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
 	result = recvfrom (sock_fd, peek_buf, 4, 0, NULL, NULL);
 	if (result < 0)
 	{
@@ -115,7 +115,10 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 	}
 
 	#if defined(DUMP_SMB)
-	dump_smb(__FILE__,__LINE__,target,already_read,smb_packet_to_consumer,server->max_recv);
+	{
+		/* If want_header==0 then this is the data returned by SMB_COM_READ_RAW. */
+		dump_smb(__FILE__,__LINE__,peek_buf,!want_header,target,already_read,smb_packet_to_consumer,server->max_recv);
+	}
 	#endif /* defined(DUMP_SMB) */
 
 	result = already_read;
@@ -374,7 +377,7 @@ smb_request (struct smb_server *server)
 	LOG (("smb_request: len = %ld cmd = 0x%lx\n", len, buffer[8]));
 
 	#if defined(DUMP_SMB)
-	dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_smb(__FILE__,__LINE__,buffer,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	result = send (sock_fd, (void *) buffer, len, 0);
@@ -422,7 +425,7 @@ smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, ch
 	LOG (("smb_request: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
 
 	#if defined(DUMP_SMB)
-	dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_smb(__FILE__,__LINE__,buffer,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	result = send (sock_fd, (void *) buffer, len, 0);
@@ -471,7 +474,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	LOG (("smb_request_read_raw: buffer=%lx, sock=%lx\n", (unsigned int) buffer, (unsigned int) sock_fd));
 
 	#if defined(DUMP_SMB)
-	dump_smb(__FILE__,__LINE__,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_smb(__FILE__,__LINE__,buffer,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	/* Request that data should be read in raw mode. */
