@@ -791,3 +791,24 @@ smbfs 1.87 (28.3.2016)
 
 - The SMB message decoder now prints 64 bit numbers in
   decimal format, too.
+
+
+smbfs 1.88 (28.3.2016)
+
+- Added decoding of capabilities described in "Implementing CIFS"
+  which are not described in "Common Internet File System (CIFS)
+  Protocol".
+
+- Integers documented as being signed are now treated as such,
+  with the exception of the creation time field in directory
+  listings.
+
+
+smbfs 1.89 (29.3.2016)
+
+- SMB message decoder now also prints NetBIOS session header
+  information.
+
+- Data transmitted by SMB_COM_WRITE and SMB_COM_WRITE_RAW as well
+  as data received by SMB_COM_READ and SMB_COM_READ_RAW is now
+  printed by the SMB message decoder.
