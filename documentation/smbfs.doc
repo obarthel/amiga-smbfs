@@ -137,8 +137,9 @@ described below. The command template looks like this:
    DOMAIN=WORKGROUP/K,USER=USERNAME/K,PASSWORD/K,CHANGECASE/S,
    CASE=CASESENSITIVE/S,OMITHIDDEN/S,QUIET/S,CLIENT=CLIENTNAME/K,
    SERVER=SERVERNAME/K,DEVICE=DEVICENAME/K,VOLUME=VOLUMENAME/K,
-   CACHE=CACHESIZE/N/K,DEBUGLEVEL=DEBUG/N/K,TZ=TIMEZONEOFFSET/N/K,
-   DST=DSTOFFSET/N/K,TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
+   CACHE=CACHESIZE/N/K,MAXTRANSMIT/N/K,DEBUGLEVEL=DEBUG/N/K,
+   TZ=TIMEZONEOFFSET/N/K,DST=DSTOFFSET/N/K,NETBIOS/S,DUMPSMB/S,
+   TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
 
 The individual options serve the following purposes:
 
@@ -300,6 +301,16 @@ The individual options serve the following purposes:
       this requirement, by making the cache smaller or larger using the
       CACHESIZE parameter. The size of the directory cache cannot be smaller
       than 10 entries.
+      
+   MAXTRANSMIT/N/K
+
+      The file system needs to tell the file server how much data it may
+      safely receive in one single chunk. By default smbfs will tell the
+      server that it can receive up to 65534 bytes. Larger transmissions
+      may be broken down into several smaller chunks by the server. You
+      can restrict the amount of the data which smbfs will report to the
+      server as "safe to send in a single chunk" with the MAXTRANSMIT
+      option. The minimum chunk size is 8000 bytes.
 
    DEBUGLEVEL=DEBUG/N/K
 
@@ -333,6 +344,24 @@ The individual options serve the following purposes:
       typically 60. Note that smbfs does not know when daylight savings
       time begins and ends. It is up to you to select the correct value
       when appropriate.
+
+   NETBIOS/S
+
+      smbfs versions prior to 1.76 (10.12.2012) would use the "SMB over
+      NetBIOS"" data transport method which was deprecated by 2006 as
+      part of "Windows Vista". smbfs now uses "SMB over TCP" transport
+      by default. This may cause problems with older file servers. When
+      in doubt, try again with the NETBIOS switch.
+      
+   DUMPSMB/S
+
+      As a debugging aid the smbfs command may contain a decoding function
+      which examines all incoming and outgoing network traffic and prints
+      its contents to the shell. The DUMPSMB switch enables this debugging
+      aid -- if you are using it you are advised to redirect the output
+      of smbfs to a protocol file because a lot of output will be generated
+      which is useful only for later analysis and not so much for viewing
+      it scroll by in the shell.
 
    TRANSLATE=TRANSLATIONFILE/K
 
@@ -419,6 +448,10 @@ This file system is based upon prior work by Paal-Kr. Engstad, Volker
 Lendecke, Mark A. Shand, Donald J. Becker, Rick Sladkey, Fred N. van Kempen,
 Eric Kasten and Rudolf Koenig. It is a direct descendant of the
 'Sharity-Light' file system written by Christian Starkjohann.
+
+Version 1.80 incorporates changes from the MorphOS smbfs version 50.3, which
+was kindly provided by Frank Mariak. The individual changes came from
+Harry Sintonen, David Gerber and Frank Mariak.
 
 The password encryption code was lifted from the Samba package. It was
 written by Andrew Tridgell and the Samba Team.
