@@ -4,6 +4,20 @@
  * dump_smb.c
  *
  * Written by Olaf Barthel <obarthel -at- gmx -dot- net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include "smbfs.h"
@@ -871,7 +885,7 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 
 				Printf("\tnext entry offset = %ld\n",next_entry_offset);
 				Printf("\tfile index = 0x%08lx\n",file_index);
-				Printf("\tcreation time = 0x%08lx%08lx\n",creation_time[0],creation_time[1]);
+				Printf("\tcreation time = 0x%08lx%08lx\n",creation_time[0],creation_time[1]);	/* ZZZ this is actually a signed value */
 				Printf("\t                %s\n",convert_filetime_to_string(creation_time));
 				Printf("\tlast access time = 0x%08lx%08lx\n",last_access_time[0],last_access_time[1]);
 				Printf("\t                   %s\n",convert_filetime_to_string(last_access_time));
@@ -1654,7 +1668,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	{
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
-			Printf("file handle = 0x%04lx\n",vwv[0]);
+			Printf("file handle = 0x%04lx\n",(signed short)vwv[0]);
 			Printf("count of bytes to read = %ld\n",vwv[1]);
 			Printf("read offset in bytes = %lu\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
 			Printf("estimate of remaining bytes to be read = %ld\n",vwv[4]);
@@ -1672,6 +1686,15 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 			Printf("buffer format = %lu\n",buffer_format);
 			Printf("count of bytes read = %lu\n",count_of_bytes_read);
+
+			if(count_of_bytes_read > 0)
+			{
+				struct line_buffer lb;
+
+				Printf("raw data (%ld bytes) =\n",count_of_bytes_read);
+
+				print_smb_data(&lb,count_of_bytes_read,next_data_bytes(data,count_of_bytes_read,&offset));
+			}
 		}
 	}
 	else if (command == SMB_COM_WRITE)
@@ -1692,6 +1715,15 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 			Printf("buffer format = %lu\n",buffer_format);
 			Printf("data length = %lu\n",data_length);
+
+			if(data_length > 0)
+			{
+				struct line_buffer lb;
+
+				Printf("raw data (%ld bytes) =\n",data_length);
+
+				print_smb_data(&lb,data_length,next_data_bytes(data,data_length,&offset));
+			}
 		}
 		else
 		{
@@ -1738,7 +1770,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	{
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
-			Printf("file handle = 0x%04lx\n",vwv[0]);
+			Printf("file handle = 0x%04lx\n",(signed short)vwv[0]);
 			Printf("offset = %lu\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
 			Printf("maximum count of bytes to return = %ld\n",vwv[3]);
 			Printf("minimum count of byte to return = %ld\n",vwv[4]);
@@ -1752,6 +1784,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	{
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
+			unsigned short data_length;
+			unsigned short data_offset;
+
 			Printf("file handle = 0x%04lx\n",vwv[0]);
 			Printf("cound of bytes = %lu\n",vwv[1]);
 			Printf("offset = %lu\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
@@ -1770,11 +1805,26 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			if(vwv[7] & 0x0008)
 				Printf("             Named pipe start\n");
 
-			Printf("data length = %lu\n",vwv[8]);
-			Printf("data offset = %lu\n",vwv[9]);
+			data_length = vwv[8];
+			data_offset = vwv[9];
+
+			Printf("data length = %lu\n",data_length);
+			Printf("data offset = %lu\n",data_offset);
 
 			if(num_parameter_words == 0x0E)
 				Printf("offset high = %lu\n",(((unsigned long)vwv[11]) << 16) | vwv[10]);
+
+			if(data_length > 0)
+			{
+				struct line_buffer lb;
+
+				if(header->data_offset < data_offset)
+					Printf("padding bytes = %ld\n",data_offset - header->data_offset);
+
+				Printf("raw data (%ld bytes) =\n",data_length);
+
+				print_smb_data(&lb,num_data_bytes,&header->raw_packet[data_offset]);
+			}
 		}
 		else
 		{
@@ -2212,11 +2262,26 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				if(capabilities & 0x00004000)
 					Printf("               CAP_LARGE_READX\n");
 
+				if(capabilities & 0x00008000)
+					Printf("               CAP_LARGE_WRITEX\n");
+
+				if(capabilities & 0x00800000)
+					Printf("               CAP_UNIX\n");
+
+				if(capabilities & 0x20000000)
+					Printf("               CAP_BULK_TRANSFER\n");
+
+				if(capabilities & 0x40000000)
+					Printf("               CAP_COMPRESSED_DATA\n");
+
+				if(capabilities & 0x80000000)
+					Printf("               CAP_EXTENDED_SECURITY\n");
+
 				next_data_qword(parameters,system_time,&offset);
 
 				Printf("system time = 0x%08lx%08lx\n",system_time[0],system_time[1]);
 				Printf("              %s\n",convert_filetime_to_string(system_time));
-				Printf("server time zone = %ld\n",next_data_word(parameters,&offset));
+				Printf("server time zone = %ld\n",(signed short)next_data_word(parameters,&offset));	/* ZZZ this is a signed 16 bit integer */
 
 				challenge_length = next_data_byte(parameters,&offset);
 				Printf("challenge length = %ld\n",challenge_length);
@@ -2353,6 +2418,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 			if(capabilities & 0x00004000)
 				Printf("               CAP_LARGE_READX\n");
+
+			if(capabilities & 0x80000000)
+				Printf("               CAP_EXTENDED_SECURITY\n");
 
 			if(num_data_bytes > 0)
 			{
@@ -4226,23 +4294,107 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 /*****************************************************************************/
 
 void
-dump_smb(const char *file_name,int line_number,const void * packet,int length,
-	enum smb_packet_source_t smb_packet_source,int max_buffer_size)
+dump_smb(const char *file_name,int line_number,const unsigned char * netbios_session_header,int is_raw_data,
+	const void * packet,int length,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
 {
-	if(dump_smb_enabled && length > 4 && memcmp(packet,"\xffSMB",4) == 0)
+	if(dump_smb_enabled)
 	{
-		struct smb_header header;
-		int num_bytes_read;
-		
-		num_bytes_read = fill_header(packet,length,&header);
-		if(num_bytes_read <= length)
+		char netbios_header_text[256];
+
+		if(netbios_session_header != NULL)
 		{
+			unsigned char session_type = netbios_session_header[0];
+			unsigned char session_flags = netbios_session_header[1] & 0xfe;
+			unsigned long session_length =
+				((netbios_session_header[1] & 1) ? 0x10000 : 0) |
+				(((unsigned long)netbios_session_header[2]) << 8) |
+				netbios_session_header[3];
+
+			const char * session_type_label;
+
+			switch(session_type)
+			{
+				case 0x00:
+
+					session_type_label = "session message";
+					break;
+
+				case 0x81:
+
+					session_type_label = "session request";
+					break;
+
+				case 0x82:
+
+					session_type_label = "positive session response";
+					break;
+
+				case 0x83:
+
+					session_type_label = "negative session response";
+					break;
+
+				case 0x84:
+
+					session_type_label = "retarget session response";
+					break;
+
+				case 0x85:
+
+					session_type_label = "session keep alive";
+					break;
+
+				default:
+
+					session_type_label = "?";
+					break;
+			}
+
+			SPrintf(netbios_header_text,"type=%s (0x%02lx), flags=0x%02lx, length=%ld\n",
+				session_type_label,session_type,session_flags,session_length);
+		}
+		else
+		{
+			strcpy(netbios_header_text,"");
+		}
+
+		if(is_raw_data)
+		{
+			struct line_buffer lb;
+
 			Printf("---\n");
 			Printf("%s:%ld\n",file_name,line_number);
 
-			print_smb_header(&header,num_bytes_read,packet,length,smb_packet_source,max_buffer_size);
+			if(netbios_header_text[0] != '\0')
+				Printf("netbios session header: %s\n",netbios_header_text);
+
+			Printf("raw data (%ld bytes) =\n",length);
+
+			print_smb_data(&lb,length,packet);
 
 			Printf("---\n\n");
+		}
+		else
+		{
+			if(length > 4 && memcmp(packet,"\xffSMB",4) == 0)
+			{
+				struct smb_header header;
+				int num_bytes_read;
+				
+				num_bytes_read = fill_header(packet,length,&header);
+				if(num_bytes_read <= length)
+				{
+					Printf("---\n");
+					Printf("%s:%ld\n",file_name,line_number);
+
+					if(netbios_header_text[0] != '\0')
+						Printf("netbios session header: %s\n",netbios_header_text);
+
+					print_smb_header(&header,num_bytes_read,packet,length,smb_packet_source,max_buffer_size);
+
+					Printf("---\n\n");
+				}
+			}
 		}
 	}
 }
