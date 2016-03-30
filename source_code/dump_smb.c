@@ -523,7 +523,7 @@ print_smb_data(struct line_buffer * lb,int num_data_bytes_left,const unsigned ch
 static const struct tm *
 convert_smb_date_time_to_tm(unsigned short smb_date,unsigned short smb_time)
 {
-	struct tm tm;
+	static struct tm tm;
 
 	memset(&tm,0,sizeof(tm));
 
@@ -1743,17 +1743,17 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 			switch(mode)
 			{
-				case 1:
+				case 0:
 
 					Printf("              Seek from the start of the file\n");
 					break;
 
-				case 2:
+				case 1:
 
 					Printf("              Seek from the current position\n");
 					break;
 
-				case 3:
+				case 2:
 
 					Printf("              Seek from the end of the file\n");
 					break;
