@@ -812,3 +812,31 @@ smbfs 1.89 (29.3.2016)
 - Data transmitted by SMB_COM_WRITE and SMB_COM_WRITE_RAW as well
   as data received by SMB_COM_READ and SMB_COM_READ_RAW is now
   printed by the SMB message decoder.
+
+
+smbfs 1.90 (29.3.2016)
+
+- The respective fall-back code for smba_read() and smba_write()
+  would fail to catch the raw read/write operation failing properly
+  and end up skipping the non-raw read/write fallback operation
+  altogether. Whether or not this happened would depend upon the
+  number of bytes to be read/written, respectively. The net effect
+  was that newly-created short files would remain entirely empty
+  with no data written at all. A similar effect happened for
+  the read operation.
+
+
+smbfs 1.91 (30.3.2016)
+
+- Turns out that the payload size transmitted in the NetBIOS
+  session header was too short by 4 bytes due to a misinterpretation
+  of the code and a subsequent "bug fix".
+
+- SMB_COM_WRITE_RAW server responses may be followed not just
+  by a single SMB_COM_WRITE_COMPLETE response, but might be
+  followed by any number of SMB_COM_WRITE_RAW responses. This
+  is now handled correctly.
+
+- All functions in smb_abstraction.c now report and test for
+  error return values in a uniform fashion. Mixing up return
+  values and error codes is no longer so easy.
