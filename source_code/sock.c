@@ -130,7 +130,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 
 /* smb_receive
    fs points to the correct segment, server != NULL, sock!=NULL */
-static int
+int
 smb_receive (struct smb_server *server, int sock_fd)
 {
 	byte * packet = server->packet;
@@ -372,6 +372,9 @@ smb_request (struct smb_server *server)
 		goto out;
 	}
 
+	/* Length includes the NetBIOS session header (4 bytes), which
+	 * is prepended to the packet to be sent.
+	 */
 	len = smb_len (buffer) + 4;
 
 	LOG (("smb_request: len = %ld cmd = 0x%lx\n", len, buffer[8]));
@@ -420,6 +423,9 @@ smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, ch
 		goto out;
 	}
 
+	/* Length includes the NetBIOS session header (4 bytes), which
+	 * is prepended to the packet to be sent.
+	 */
 	len = smb_len (buffer) + 4;
 
 	LOG (("smb_request: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
@@ -467,6 +473,9 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 		goto out;
 	}
 
+	/* Length includes the NetBIOS session header (4 bytes), which
+	 * is prepended to the packet to be sent.
+	 */
 	len = smb_len (buffer) + 4;
 
 	LOG (("smb_request_read_raw: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
@@ -546,7 +555,6 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 
 	/* If the write operation succeeded, wait for the
 	 * server to confirm it.
-	 * ZZZ server may respond with *two* different messages.
 	 */
 	if (result == length)
 		result = smb_receive (server, sock_fd);
