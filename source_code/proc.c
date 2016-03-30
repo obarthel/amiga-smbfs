@@ -35,16 +35,16 @@
 
 static INLINE byte * smb_encode_word(byte *p, word data);
 static INLINE byte * smb_decode_word(byte *p, word *data);
-static INLINE word smb_bcc(byte *packet);
-static INLINE int smb_verify(byte *packet, int command, int wct, int bcc);
+static INLINE word smb_bcc(const byte *packet);
+static INLINE int smb_verify(const byte *packet, int command, int wct, int bcc);
 static byte *smb_encode_dialect(byte *p, const byte *name, int len);
 static byte *smb_encode_ascii(byte *p, const byte *name, int len);
 static void smb_encode_vblock(byte *p, const byte *data, word len, int unused_fs);
-static byte *smb_decode_data(byte *p, byte *data, word *data_len, int fs);
+static byte *smb_decode_data(const byte *p, byte *data, word *data_len, int fs);
 static byte *smb_name_mangle(byte *p, const byte *name);
 static int date_dos2unix(unsigned short time_value, unsigned short date);
 static void date_unix2dos(int unix_date, unsigned short *time_value, unsigned short *date);
-static INLINE int smb_valid_packet(byte *packet);
+static INLINE int smb_valid_packet(const byte *packet);
 static int smb_errno(int errcls, int error);
 static int smb_request_ok(struct smb_server *s, int command, int wct, int bcc);
 static int smb_retry(struct smb_server *server);
@@ -84,10 +84,17 @@ smb_decode_word (byte * p, word * data)
 byte *
 smb_encode_smb_length (byte * p, dword len)
 {
-	p[0] = p[1] = 0;
+	/* 0x00 = NetBIOS session message */
+	p[0] = 0;
+
+	/* 0 = reserved */
+	p[1] = 0;
+
+	/* Payload length in network byte order. */
 	p[2] = (len & 0xFF00) >> 8;
 	p[3] = (len & 0xFF);
 
+	/* Length is actually a 17 bit integer. */
 	if (len > 0xFFFF)
 		p[1] |= 0x01;
 
@@ -121,7 +128,7 @@ smb_encode_vblock (byte * p, const byte * data, word len, int unused_fs)
 }
 
 static byte *
-smb_decode_data (byte * p, byte * data, word * data_len, int unused_fs)
+smb_decode_data (const byte * p, byte * data, word * data_len, int unused_fs)
 {
 	word len;
 
@@ -237,13 +244,14 @@ date_unix2dos (int unix_date, unsigned short *time_value, unsigned short *date)
  *
  ****************************************************************************/
 dword
-smb_len (byte * packet)
+smb_len (const byte * packet)
 {
+	/* This returns the payload length stored in the NetBIOS session header. */
 	return (dword)( (((dword)(packet[1] & 0x1)) << 16) | (((dword)packet[2]) << 8) | (packet[3]) );
 }
 
 static INLINE word
-smb_bcc (byte * packet)
+smb_bcc (const byte * packet)
 {
 	int pos = SMB_HEADER_LEN + SMB_WCT (packet) * sizeof (word);
 
@@ -253,7 +261,7 @@ smb_bcc (byte * packet)
 /* smb_valid_packet: We check if packet fulfills the basic
    requirements of a smb packet */
 static INLINE int
-smb_valid_packet (byte * packet)
+smb_valid_packet (const byte * packet)
 {
 	int result;
 
@@ -271,11 +279,11 @@ smb_valid_packet (byte * packet)
 	          this would be. But for now, I've modified this test to check only if there
 	          is less data in a response than required. */
 	result = (packet[4] == 0xff
-				&& packet[5] == 'S'
-				&& packet[6] == 'M'
-				&& packet[7] == 'B'
-				&& (smb_len (packet) + 4 >= (dword)
-						(SMB_HEADER_LEN + SMB_WCT (packet) * 2 + SMB_BCC (packet) + 2))) ? 0 : (-EIO);
+		   && packet[5] == 'S'
+		   && packet[6] == 'M'
+		   && packet[7] == 'B'
+		   && (smb_len (packet) + 4 >= (dword)
+				(SMB_HEADER_LEN + SMB_WCT (packet) * 2 + SMB_BCC (packet) + 2))) ? 0 : (-EIO);
 
 	return result;
 }
@@ -283,11 +291,11 @@ smb_valid_packet (byte * packet)
 /* smb_verify: We check if we got the answer we expected, and if we
    got enough data. If bcc == -1, we don't care. */
 static INLINE int
-smb_verify (byte * packet, int command, int wct, int bcc)
+smb_verify (const byte * packet, int command, int wct, int bcc)
 {
 	return (SMB_CMD (packet) == command &&
-					SMB_WCT (packet) >= wct &&
-					(bcc == -1 || SMB_BCC (packet) >= bcc)) ? 0 : -EIO;
+		SMB_WCT (packet) >= wct &&
+		(bcc == -1 || SMB_BCC (packet) >= bcc)) ? 0 : -EIO;
 }
 
 static int
@@ -538,7 +546,7 @@ smb_request_ok_unlock (struct smb_server *s, int command, int wct, int bcc)
 }
 
 /* smb_setup_header: We completely set up the packet. You only have to
-	 insert the command-specific fields */
+   insert the command-specific fields */
 static byte *
 smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
 {
@@ -546,11 +554,10 @@ smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
 	byte *p = server->packet;
 	byte *buf = server->packet;
 
-	/* olsen: we subtract four bytes because smb_encode_smb_length() adds
-	   four bytes which are not supposed to be included in the total
-	   number of bytes to be sent */
-	p = smb_encode_smb_length (p, xmit_len - 4);
-	/* p = smb_encode_smb_length (p, xmit_len); */
+	/* This sets up the NetBIOS session header. 'xmit_length'
+	 * is the amount of data that follows the header.
+	 */
+	p = smb_encode_smb_length (p, xmit_len);
 
 	BSET (p, 0, 0xff);
 	BSET (p, 1, 'S');
@@ -847,10 +854,50 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 		{
 			result = -smb_errno (server->rcls, server->err);
 		}
-		else if ((error = smb_verify (server->packet, SMBwritec, 1, 0)) != 0)
+		else
 		{
-			LOG (("smb_verify failed\n"));
-			result = error;
+			int sock_fd = server->mount_data.fd;
+
+			/* SMBwritebraw may be followed by the server sending
+			 * several interim update responses of SMBwritebraw,
+			 * which are eventually followed by a final response
+			 * of SMBwritec (complete).
+			 */
+			while(SMB_CMD(server->packet) == SMBwritebraw && SMB_BCC(server->packet) == 0 && SMB_WCT(server->packet) == 1)
+			{
+				error = smb_receive (server, sock_fd);
+				if(error < 0)
+				{
+					result = error;
+					break;
+				}
+
+				error = smb_valid_packet (server->packet);
+				if(error != 0)
+				{
+					result = error;
+					break;
+				}
+
+				if (server->rcls != 0)
+				{
+					result = -smb_errno (server->rcls, server->err);
+					break;
+				}
+			}
+
+			/* If everything went fine so far, this should be the
+			 * final packet which concludes the transfer.
+			 */
+			if(result >= 0)
+			{
+				error = smb_verify (server->packet, SMBwritec, 1, 0);
+				if (error != 0)
+				{
+					LOG (("smb_verify failed\n"));
+					result = error;
+				}
+			}
 		}
 
 		/* If everything went fine, the whole block has been transfered. */
@@ -1290,8 +1337,8 @@ interpret_long_date(char * p)
 	time_t result;
 
 	/* Extract the 64 bit time value. */
-	long_date.Low	 = DVAL(p,0);
-	long_date.High = DVAL(p,4);
+	long_date.Low	= DVAL(p,0);
+	long_date.High	= DVAL(p,4);
 
 	/* Divide by 10,000,000 to convert the time from 100ns
 	   units into seconds. */
@@ -2117,7 +2164,7 @@ smb_proc_reconnect (struct smb_server *server)
 		{-1, NULL}
 	};
 
-	char dev[] = "A:";
+	const char dev[] = "A:";
 	int i, plength;
 	int max_xmit = 1024; /* Space needed for first request. */
 	int given_max_xmit = server->mount_data.given_max_xmit;
