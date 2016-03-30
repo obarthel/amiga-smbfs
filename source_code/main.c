@@ -3070,6 +3070,7 @@ Action_DeleteObject(
 
 	FreeMemory(full_name);
 	FreeMemory(full_parent_name);
+
 	if(file != NULL)
 		smba_close(file);
 
@@ -3436,6 +3437,7 @@ Action_FreeLock(
 	ln = (struct LockNode *)lock->fl_Key;
 
 	Remove((struct Node *)ln);
+
 	smba_close(ln->ln_File);
 	FreeMemory(ln->ln_FullName);
 	FreeMemory(ln);
@@ -3603,6 +3605,7 @@ Action_SetProtect(
  out:
 
 	FreeMemory(full_name);
+
 	if(file != NULL)
 		smba_close(file);
 
@@ -5228,6 +5231,7 @@ Action_SetDate(
  out:
 
 	FreeMemory(full_name);
+
 	if(file != NULL)
 		smba_close(file);
 
@@ -5876,6 +5880,7 @@ Action_SetComment(
  out:
 
 	FreeMemory(full_name);
+
 	if(file != NULL)
 		smba_close(file);
 
