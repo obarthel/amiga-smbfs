@@ -65,7 +65,8 @@ struct smba_file
 
 /*****************************************************************************/
 
-static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name, int cache_size, int max_transmit, int opt_raw_smb, smba_server_t **result);
+static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name,
+	int cache_size, int max_transmit, int opt_raw_smb, smba_server_t **result);
 static INLINE int make_open(smba_file_t *f, int need_fid);
 static int write_attr(smba_file_t *f);
 static void invalidate_dircache(struct smba_server *server, char *path);
@@ -77,7 +78,8 @@ static int extract_service (char *service, char *server, size_t server_size, cha
 /*****************************************************************************/
 
 static int
-smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name, int cache_size, int max_transmit, int opt_raw_smb, smba_server_t ** result)
+smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name,
+	int cache_size, int max_transmit, int opt_raw_smb, smba_server_t ** result)
 {
 	smba_server_t *res;
 	struct smb_mount_data data;
@@ -208,8 +210,9 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
 		res->supports_E_known = 1;
 
 	(*result) = res;
+	res = NULL;
 
-	return 0;
+	errnum = 0;
 
  error_occured:
 
@@ -239,8 +242,8 @@ smba_disconnect (smba_server_t * server)
 static INLINE int
 make_open (smba_file_t * f, int need_fid)
 {
-	int errnum = 0;
 	smba_server_t *s;
+	int errnum;
 
 	if (!f->is_valid || (need_fid && !f->dirent.opened))
 	{
@@ -248,8 +251,9 @@ make_open (smba_file_t * f, int need_fid)
 
 		if (!f->is_valid || f->attr_time == -1 || GetCurrentTime() - f->attr_time > ATTR_CACHE_TIME)
 		{
-			if ((errnum = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent)) < 0)
-				goto error_occured;
+			errnum = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
+			if (errnum < 0)
+				goto out;
 		}
 
 		if ((f->dirent.attr & aDIR) == 0) /* a regular file */
@@ -257,8 +261,9 @@ make_open (smba_file_t * f, int need_fid)
 			if (need_fid || !s->supports_E_known || s->supports_E)
 			{
 				LOG (("opening file %s\n", f->dirent.complete_path));
-				if ((errnum = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent)) < 0)
-					goto error_occured;
+				errnum = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
+				if (errnum < 0)
+					goto out;
 
 				if (s->supports_E || !s->supports_E_known)
 				{
@@ -293,7 +298,9 @@ make_open (smba_file_t * f, int need_fid)
 		f->is_valid = 1;
 	}
 
- error_occured:
+	errnum = 0;
+
+ out:
 
 	return errnum;
 }
@@ -312,7 +319,7 @@ smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file)
 	if(f == NULL)
 	{
 		errnum = -ENOMEM;
-		goto error_occured;
+		goto out;
 	}
 
 	memset(f,0,sizeof(*f));
@@ -324,15 +331,16 @@ smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file)
 
 	errnum = make_open (f, 0);
 	if (errnum < 0)
-		goto error_occured;
+		goto out;
 
 	AddTail ((struct List *)&s->open_files, (struct Node *)f);
 
 	(*file) = f;
+	f = NULL;
 
-	return 0;
+	errnum = 0;
 
- error_occured:
+ out:
 
 	if (f != NULL)
 		free (f);
@@ -359,9 +367,14 @@ write_attr (smba_file_t * f)
 		errnum = smb_proc_setattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
 
 	if (errnum < 0)
+	{
 		f->attr_time = -1;
-	else
-		f->attr_dirty = 0;
+		goto out;
+	}
+
+	f->attr_dirty = 0;
+
+	errnum = 0;
 
  out:
 
@@ -373,26 +386,29 @@ write_attr (smba_file_t * f)
 void
 smba_close (smba_file_t * f)
 {
-	if(f->node.mln_Succ != NULL || f->node.mln_Pred != NULL)
-		Remove((struct Node *)f);
-
-	if(f->attr_dirty)
-		write_attr(f);
-
-	if (f->dirent.opened)
+	if(f != NULL)
 	{
-		LOG (("closing file %s\n", f->dirent.complete_path));
-		smb_proc_close (&f->server->server, f->dirent.fileid, f->dirent.mtime);
-	}
+		if(f->node.mln_Succ != NULL || f->node.mln_Pred != NULL)
+			Remove((struct Node *)f);
 
-	if (f->dircache != NULL)
-	{
-		f->dircache->cache_for = NULL;
-		f->dircache->len = 0;
-		f->dircache = NULL;
-	}
+		if(f->attr_dirty)
+			write_attr(f);
 
-	free (f);
+		if (f->dirent.opened)
+		{
+			LOG (("closing file %s\n", f->dirent.complete_path));
+			smb_proc_close (&f->server->server, f->dirent.fileid, f->dirent.mtime);
+		}
+
+		if (f->dircache != NULL)
+		{
+			f->dircache->cache_for = NULL;
+			f->dircache->len = 0;
+			f->dircache = NULL;
+		}
+
+		free (f);
+	}
 }
 
 /*****************************************************************************/
@@ -400,24 +416,21 @@ smba_close (smba_file_t * f)
 int
 smba_read (smba_file_t * f, char *data, long len, long offset)
 {
-	int maxsize, count, totalcount, result;
+	int num_bytes_read = 0;
+	int maxsize, count, result;
 	char *rpos;
+	int errnum;
 
-	result = make_open (f, 1);
-	if (result < 0)
+	errnum = make_open (f, 1);
+	if (errnum < 0)
+	{
+		result = errnum;
 		goto out;
-
-	/* make_open() will return the number of bytes read
-	   from the server, or a negative number if an error
-	   occured. We just reset "result" to 0 here because
-	   it might otherwise cause the number of data bytes
-	   read to be off, which in turn causes the first
-	   few bytes read from a file to contain random
-	   junk. */
-	result = 0;
+	}
 
 	D(("read %ld bytes from offset %ld",len,offset));
 
+	/* Raw write supported (note: raw read support is a different flag!)? */
 	if (f->server->server.blkmode & 1)
 	{
 		SHOWVALUE(f->server->server.max_xmit);
@@ -428,11 +441,9 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 
 			LOG (("smb_proc_read_raw(%s)->%ld\n", f->dirent.complete_path, result));
 		}
-		else if (len > 0)
+		else
 		{
 			int n;
-
-			totalcount = 0;
 
 			do
 			{
@@ -442,14 +453,13 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 				if(result <= 0)
 				{
 					D(("!!! wanted to read %ld bytes, got %ld",n,result));
-					totalcount = -1;
 					break;
 				}
 
 				data += result;
 				offset += result;
 				len -= result;
-				totalcount += result;
+				num_bytes_read += result;
 
 				if(result < n)
 				{
@@ -458,34 +468,36 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 				}
 			}
 			while(len > 0);
-
-			if(totalcount != -1)
-			{
-				result = totalcount;
-				goto out;
-			}
 		}
 	}
-
-	if (result <= 0)
+	else
 	{
-		int bytes_read = 0;
+		/* Nothing read so far. */
+		result = 0;
+	}
 
-		totalcount = len;
+	/* Raw read not supported and no data read yet?
+	 * Fall back onto SMB_COM_READ.
+	 */
+	if (result <= 0 && num_bytes_read == 0)
+	{
+		int num_bytes_left;
+
+		num_bytes_left = len;
 		rpos = data;
 
 		maxsize = f->server->server.max_xmit - SMB_HEADER_LEN - 5 * 2 - 5;
 
 		do
 		{
-			count = totalcount > maxsize ? maxsize : totalcount;
+			count = min(num_bytes_left,maxsize);
 
 			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, rpos, 0);
-			if (result <= 0)
-				break;
+			if (result < 0)
+				goto out;
 
-			bytes_read += result;
-			totalcount -= result;
+			num_bytes_read += result;
+			num_bytes_left -= result;
 			offset += result;
 			rpos += result;
 
@@ -495,11 +507,14 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 				break;
 			}
 		}
-		while (totalcount > 0);
-
-		if(result >= 0)
-			result = bytes_read;
+		while (num_bytes_left > 0);
 	}
+
+	/* Still no luck? */
+	if(result < 0)
+		goto out;
+
+	result = num_bytes_read;
 
  out:
 
@@ -511,10 +526,16 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 int
 smba_write (smba_file_t * f, char *data, long len, long offset)
 {
-	int newlen, maxsize, totalcount, count, result;
+	int newlen, maxsize, count, result;
+	long num_bytes_written = 0;
+	int errnum;
 
-	if ((result = make_open (f, 1)) < 0)
-		return result;
+	errnum = make_open (f, 1);
+	if (errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
 
 	/* Calculate maximum number of bytes that could be transfered with
 	   a single SMBwrite packet... */
@@ -525,21 +546,24 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		/* Use a single SMBwrite packet whenever possible instead of a SMBwritebraw
 		   because that requires two packets to be send. */
 		result = smb_proc_write (&f->server->server, &f->dirent, offset, len, data);
+		if(result < 0)
+			goto out;
+
+		num_bytes_written = result;
 	}
 	else
 	{
+		/* Nothing was written yet. */
+		result = 0;
+
 		/* Added by Brian Willette - We were always checking bit 2 here, but
 		   according to the documentation I have, the newer versions of SMB put
 		   the SMB_RAW_WRITE AND SMB_RAW_READ capability in bit 1 */
-		if ((f->server->server.protocol >= PROTOCOL_NT1
-		  && f->server->server.blkmode & 1)
-		  || (f->server->server.protocol < PROTOCOL_NT1
-		  && f->server->server.blkmode & 2))
+		if ((f->server->server.protocol >= PROTOCOL_NT1 && f->server->server.blkmode & 1)
+		 || (f->server->server.protocol < PROTOCOL_NT1 && f->server->server.blkmode & 2))
 		{
 			long maxxmit;
 			int n;
-
-			totalcount = 0;
 
 			/* Try to send the maximum number of bytes with the two SMBwritebraw packets. */
 			maxxmit = 2 * f->server->server.max_xmit - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
@@ -558,7 +582,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 				if (n <= maxsize)
 				{
 					/* Use a single SMBwrite packet whenever possible instead of a
-					   SMBwritebraw because that requires two packets to be send. */
+					   SMBwritebraw because that requires two packets to be sent. */
 					result = smb_proc_write (&f->server->server, &f->dirent, offset, n, data);
 				}
 				else
@@ -566,70 +590,79 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 					result = smb_proc_write_raw (&f->server->server, &f->dirent, offset, n, data);
 				}
 
+				/* Stop if the write operation failed. We'll try again with
+				 * SMB_COM_WRITE if possible.
+				 */
 				if(result <= 0)
-				{
-					totalcount = -1;
 					break;
-				}
 
 				data += result;
 				offset += result;
 				len -= result;
-				totalcount += result;
+				num_bytes_written += result;
 
+				/* Fewer data written than intended? Could be out of disk space. */
 				if(result < n)
 					break;
 			}
 			while(len > 0);
-
-			if(totalcount != -1)
-			{
-				len = totalcount;
-				goto out;
-			}
 		}
-		if (result <= 0)
+
+		/* Raw write failed and no data has been written yet?
+		 * Fall back onto SMB_COM_WRITE.
+		 */
+		if (result <= 0 && num_bytes_written == 0)
 		{
+			int num_bytes_left;
+
 			/* Failed to use the SMBwritebraw packet, fallback to SMBwrite... */
-			totalcount = len;
-			len = 0;
+			num_bytes_left = len;
 
 			do
 			{
-				count = totalcount > maxsize ? maxsize : totalcount;
+				count = min(num_bytes_left,maxsize);
+
 				result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data);
 				if (result < 0)
-					break;
+					goto out;
 
-				totalcount -= result;
+				num_bytes_left -= result;
 				offset += result;
 				data += result;
-				len += result;
+				num_bytes_written += result;
 
 				if(result < count)
 					break;
 			}
-			while (totalcount > 0);
+			while (num_bytes_left > 0);
 		}
+
+		/* Still no luck? */
+		if(result < 0)
+			goto out;
 	}
+
+	result = num_bytes_written;
 
  out:
 
 	if (result < 0)
 	{
 		f->attr_time = -1;
-		return result;
+	}
+	else
+	{
+		f->dirent.mtime = GetCurrentTime();
+
+		newlen = f->dirent.size;
+
+		if (offset + num_bytes_written > newlen)
+			newlen = offset + num_bytes_written;
+
+		f->dirent.size = newlen;
 	}
 
-	f->dirent.mtime = GetCurrentTime();
-
-	newlen = f->dirent.size;
-
-	if (offset + len > newlen)
-		newlen = offset + len;
-
-	f->dirent.size = newlen;
-	return len;
+	return result;
 }
 
 /*****************************************************************************/
@@ -638,11 +671,27 @@ long
 smba_seek (smba_file_t *f, long offset, long mode, off_t * new_position_ptr)
 {
 	long result;
+	int errnum;
 
 	D(("seek %ld bytes from position %s",offset,mode > 0 ? (mode == 2 ? "SEEK_END" : "SEEK_CUR") : "SEEK_SET"));
 
-	if ((result = make_open (f, 1)) >= 0)
-		result = smb_proc_lseek (&f->server->server, &f->dirent, offset, mode, new_position_ptr);
+	errnum = make_open (f, 1);
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
+
+	errnum = smb_proc_lseek (&f->server->server, &f->dirent, offset, mode, new_position_ptr);
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
+
+	result = 0;
+
+ out:
 
 	return result;
 }
@@ -653,31 +702,45 @@ smba_seek (smba_file_t *f, long offset, long mode, off_t * new_position_ptr)
 int
 smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, long timeout)
 {
+	struct smb_lkrng *rec_lock = NULL;
 	int errnum;
-	struct smb_lkrng *rec_lock;
+	int result;
 
-	if ((errnum = make_open (f, 1)) >= 0)
+	errnum = make_open (f, 1);
+	if(errnum < 0)
 	{
-		if (unlocked)
-			mode |= 2;
-
-		rec_lock = malloc (sizeof (struct smb_lkrng));
-		if (rec_lock != NULL)
-		{
-			rec_lock->offset = offset,
-			rec_lock->len = len;
-
-			errnum = smb_proc_lockingX (&f->server->server, &f->dirent, rec_lock, 1, mode, timeout);
-
-			free (rec_lock);
-		}
-		else
-		{
-			errnum = -ENOMEM;
-		}
+		result = errnum;
+		goto out;
 	}
 
-	return errnum;
+	if (unlocked)
+		mode |= 2;
+
+	rec_lock = malloc (sizeof (*rec_lock));
+	if (rec_lock == NULL)
+	{
+		result = -ENOMEM;
+		goto out;
+	}
+
+	rec_lock->offset = offset,
+	rec_lock->len = len;
+
+	errnum = smb_proc_lockingX (&f->server->server, &f->dirent, rec_lock, 1, mode, timeout);
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
+
+	result = 0;
+
+ out:
+
+	if(rec_lock != NULL)
+		free (rec_lock);
+
+	return(result);
 }
 
 /*****************************************************************************/
@@ -687,10 +750,14 @@ smba_getattr (smba_file_t * f, smba_stat_t * data)
 {
 	long now = GetCurrentTime();
 	int errnum;
+	int result;
 
 	errnum = make_open (f, 0);
 	if (errnum < 0)
+	{
+		result = errnum;
 		goto out;
+	}
 
 	if (f->attr_time == -1 || (now - f->attr_time) > ATTR_CACHE_TIME)
 	{
@@ -701,8 +768,13 @@ smba_getattr (smba_file_t * f, smba_stat_t * data)
 		else
 			errnum = smb_proc_getattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
 
-		if (errnum >= 0)
-			f->attr_time = now;
+		if (errnum < 0)
+		{
+			result = errnum;
+			goto out;
+		}
+
+		f->attr_time = now;
 	}
 
 	data->is_dir = (f->dirent.attr & aDIR) != 0;
@@ -716,9 +788,11 @@ smba_getattr (smba_file_t * f, smba_stat_t * data)
 	data->ctime = f->dirent.ctime;
 	data->mtime = f->dirent.mtime;
 
+	result = 0;
+
  out:
 
-	return errnum;
+	return(result);
 }
 
 /*****************************************************************************/
@@ -727,6 +801,7 @@ int
 smba_setattr (smba_file_t * f, smba_stat_t * data)
 {
 	int errnum;
+	int result;
 
 	if (data->atime != -1)
 		f->dirent.atime = data->atime;
@@ -754,23 +829,37 @@ smba_setattr (smba_file_t * f, smba_stat_t * data)
 
 	f->attr_dirty = 1;
 
-	if ((errnum = write_attr (f)) < 0)
-		goto error_occured;
+	errnum = write_attr (f);
+	if (errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
 
 	if (data->size != -1 && data->size != (int)f->dirent.size)
 	{
-		if ((errnum = make_open (f, 1)) < 0)
-			goto error_occured;
+		errnum = make_open (f, 1);
+		if(errnum < 0)
+		{
+			result = errnum;
+			goto out;
+		}
 
-		if ((errnum = smb_proc_trunc (&f->server->server, f->dirent.fileid, data->size)) < 0)
-			goto error_occured;
+		errnum = smb_proc_trunc (&f->server->server, f->dirent.fileid, data->size);
+		if(errnum < 0)
+		{
+			result = errnum;
+			goto out;
+		}
 
 		f->dirent.size = data->size;
 	}
 
- error_occured:
+	result = 0;
 
-	return errnum;
+ out:
+
+	return(result);
 }
 
 /*****************************************************************************/
@@ -778,13 +867,19 @@ smba_setattr (smba_file_t * f, smba_stat_t * data)
 int
 smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 {
-	int cache_index, rval, o, eof, count = 0;
+	int cache_index, o, eof, count = 0;
 	long now = GetCurrentTime();
+	int num_entries;
 	smba_stat_t data;
+	int result;
+	int errnum;
 
-	rval = make_open (f, 0);
-	if (rval < 0)
+	errnum = make_open (f, 0);
+	if (errnum < 0)
+	{
+		result = errnum;
 		goto out;
+	}
 
 	if (f->dircache == NULL) /* get a cache */
 	{
@@ -824,9 +919,12 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			f->dircache->len = 0;
 			f->dircache->base = cache_index;
 
-			rval = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size, f->dircache->cache);
-			if (rval <= 0)
-				break;
+			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size, f->dircache->cache);
+			if (num_entries < 0)
+			{
+				result = num_entries;
+				goto out;
+			}
 
 			/* Avoid some hits if restart/retry occured. Should fix the real root
 			   of this problem really, but I am not bored enough atm. -Piru
@@ -834,15 +932,15 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			if (f->dircache == NULL)
 			{
 				LOG (("lost dircache due to an error, bailing out!\n"));
-				rval = -1;
-				break;
+				result = -ENOSPC;
+				goto out;
 			}
 
-			f->dircache->len = rval;
-			f->dircache->eof = (rval < f->dircache->cache_size);
+			f->dircache->len = num_entries;
+			f->dircache->eof = (num_entries < f->dircache->cache_size);
 			f->dircache->created_at = now;
 
-			LOG (("cachefill with %ld entries\n", rval));
+			LOG (("cachefill with %ld entries\n", num_entries));
 		}
 
 		o = cache_index - f->dircache->base;
@@ -865,12 +963,11 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			break;
 	}
 
+	result = count;
+
  out:
 
-	if (rval < 0)
-		return rval;
-	else
-		return count;
+	return result;
 }
 
 /*****************************************************************************/
@@ -937,12 +1034,16 @@ int
 smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
 {
 	struct smb_dirent entry;
-	char *path;
+	char *path = NULL;
+	int result;
 	int errnum;
 
 	errnum = make_open (dir, 0);
 	if (errnum < 0)
+	{
+		result = errnum;
 		goto out;
+	}
 
 	memset (&entry, 0, sizeof (entry));
 
@@ -960,7 +1061,7 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
 	path = malloc (strlen (name) + dir->dirent.len + 2);
 	if(path == NULL)
 	{
-		errnum = -ENOMEM;
+		result = -ENOMEM;
 		goto out;
 	}
 
@@ -969,14 +1070,22 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
 	strcpy (&path[dir->dirent.len + 1], name);
 
 	errnum = smb_proc_create (&dir->server->server, path, strlen (path), &entry);
-	if(errnum >= 0)
-		invalidate_dircache (dir->server, path);
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
 
-	free (path);
+	invalidate_dircache (dir->server, path);
+
+	result = 0;
 
  out:
 
-	return errnum;
+	if(path != NULL)
+		free (path);
+
+	return(result);
 }
 
 /*****************************************************************************/
@@ -984,17 +1093,21 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
 int
 smba_mkdir (smba_file_t * dir, const char *name)
 {
-	char *path;
+	char *path = NULL;
 	int errnum;
+	int result;
 
 	errnum = make_open (dir, 0);
 	if (errnum < 0)
+	{
+		result = errnum;
 		goto out;
+	}
 
 	path = malloc (strlen (name) + dir->dirent.len + 2);
 	if(path == NULL)
 	{
-		errnum = -ENOMEM;
+		result = -ENOMEM;
 		goto out;
 	}
 
@@ -1003,14 +1116,22 @@ smba_mkdir (smba_file_t * dir, const char *name)
 	strcpy (&path[dir->dirent.len + 1], name);
 
 	errnum = smb_proc_mkdir (&dir->server->server, path, strlen (path));
-	if(errnum >= 0)
-		invalidate_dircache (dir->server, path);
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
 
-	free (path);
+	invalidate_dircache (dir->server, path);
+
+	result = 0;
 
  out:
 
-	return errnum;
+	if(path != NULL)
+		free (path);
+
+	return(result);
 }
 
 /*****************************************************************************/
@@ -1040,13 +1161,23 @@ close_path (smba_server_t * s, char *path)
 int
 smba_remove (smba_server_t * s, char *path)
 {
+	int errnum;
 	int result;
 
 	close_path (s, path);
 
-	result = smb_proc_unlink (&s->server, path, strlen (path));
-	if(result >= 0)
-		invalidate_dircache (s, path);
+	errnum = smb_proc_unlink (&s->server, path, strlen (path));
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
+
+	invalidate_dircache (s, path);
+
+	result = 0;
+
+ out:
 
 	return result;
 }
@@ -1057,12 +1188,22 @@ int
 smba_rmdir (smba_server_t * s, char *path)
 {
 	int result;
+	int errnum;
 
 	close_path (s, path);
 
-	result = smb_proc_rmdir (&s->server, path, strlen (path));
-	if(result >= 0)
-		invalidate_dircache (s, path);
+	errnum = smb_proc_rmdir (&s->server, path, strlen (path));
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
+
+	invalidate_dircache (s, path);
+
+	result = 0;
+
+ out:
 
 	return result;
 }
@@ -1073,14 +1214,24 @@ int
 smba_rename (smba_server_t * s, char *from, char *to)
 {
 	int result;
+	int errnum;
 
 	close_path (s, from);
 
-	result = smb_proc_mv (&s->server, from, strlen (from), to, strlen (to));
-	if(result >= 0)
-		invalidate_dircache (s, from);
+	errnum = smb_proc_mv (&s->server, from, strlen (from), to, strlen (to));
+	if(errnum < 0)
+	{
+		result = errnum;
+		goto out;
+	}
 
-	return result;
+	invalidate_dircache (s, from);
+
+	result = 0;
+
+ out:
+
+	return(result);
 }
 
 /*****************************************************************************/
@@ -1090,18 +1241,24 @@ smba_statfs (smba_server_t * s, long *bsize, long *blocks, long *bfree)
 {
 	struct smb_dskattr dskattr;
 	int errnum;
+	int result;
 
 	errnum = smb_proc_dskattr (&s->server, &dskattr);
 	if (errnum < 0)
+	{
+		result = errnum;
 		goto out;
+	}
 
 	(*bsize) = dskattr.blocksize * dskattr.allocblocks;
 	(*blocks) = dskattr.total;
 	(*bfree) = dskattr.free;
 
+	result = 0;
+
  out:
 
-	return errnum;
+	return(result);
 }
 
 /*****************************************************************************/
@@ -1148,7 +1305,7 @@ static int
 smba_setup_dircache (struct smba_server * server,int cache_size)
 {
 	dircache_t * the_dircache;
-	int error = (-ENOMEM);
+	int error = -ENOMEM;
 	int i;
 
 	the_dircache = malloc(sizeof(*the_dircache) + (cache_size-1) * sizeof(the_dircache->cache));
@@ -1168,23 +1325,21 @@ smba_setup_dircache (struct smba_server * server,int cache_size)
 	}
 
 	server->dircache = the_dircache;
+	the_dircache = NULL;
 
 	error = 0;
 
  out:
 
-	if(error < 0)
+	if(the_dircache != NULL)
 	{
-		if(the_dircache != NULL)
+		for (i = 0; i < the_dircache->cache_size; i++)
 		{
-			for (i = 0; i < the_dircache->cache_size; i++)
-			{
-				if(the_dircache->cache[i].complete_path != NULL)
-					free(the_dircache->cache[i].complete_path);
-			}
-
-			free(the_dircache);
+			if(the_dircache->cache[i].complete_path != NULL)
+				free(the_dircache->cache[i].complete_path);
 		}
+
+		free(the_dircache);
 	}
 
 	return(error);
@@ -1195,9 +1350,9 @@ smba_setup_dircache (struct smba_server * server,int cache_size)
 static int
 extract_service (char *service, char *server, size_t server_size, char *share, size_t share_size)
 {
-	char *share_start;
-	char *root_start;
-	char *complete_service;
+	char * share_start;
+	char * root_start;
+	char * complete_service;
 	char * service_copy;
 	int result = 0;
 

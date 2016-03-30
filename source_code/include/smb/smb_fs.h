@@ -1,12 +1,12 @@
 /*
- * $Id: smb_fs.h,v 1.1.1.1 2005-05-24 13:22:13 obarthel Exp $
+ * $Id: smb_fs.h,v 1.1.1.1 2005/05/24 13:22:13 obarthel Exp $
  *
  * :ts=8
  *
  * smb_fs.h
  *
  * Copyright (C) 1995 by Paal-Kr. Engstad and Volker Lendecke
- * Modified for use with AmigaOS by Olaf Barthel <olsen@sourcery.han.de>
+ * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  * Modified for supporting SMBlockingX packets by Peter Riede <Noster-Riede@T-Online.de>
  */
 
@@ -48,7 +48,7 @@ struct smb_lkrng
 
 /* proc.c */
 byte *smb_encode_smb_length(byte *p, dword len);
-dword smb_len(byte *packet);
+dword smb_len(const byte *packet);
 int smb_proc_open(struct smb_server *server, const char *pathname, int len, struct smb_dirent *entry);
 int smb_proc_close(struct smb_server *server, word fileid, dword mtime);
 int smb_proc_read(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int fs);
@@ -72,6 +72,7 @@ int smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr);
 int smb_proc_connect(struct smb_server *server);
 
 /* sock.c */
+int smb_receive (struct smb_server *server, int sock_fd);
 int smb_catch_keepalive(struct smb_server *server);
 int smb_dont_catch_keepalive(struct smb_server *server);
 int smb_release(struct smb_server *server);
