@@ -31,12 +31,13 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 {
 	int len, result;
 	int already_read;
-	unsigned char peek_buf[4];
+	unsigned char netbios_session_buf[256];
+	int netbios_session_payload_size;
 
  re_recv:
 
 	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
-	result = recvfrom (sock_fd, peek_buf, 4, 0, NULL, NULL);
+	result = recvfrom (sock_fd, netbios_session_buf, 4, 0, NULL, NULL);
 	if (result < 0)
 	{
 		LOG (("smb_receive_raw: recv error = %ld\n", errno));
@@ -51,13 +52,43 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 		goto out;
 	}
 
+	netbios_session_payload_size = (int)smb_len (netbios_session_buf);
+
+	#if defined(DUMP_SMB)
+	{
+		if(netbios_session_buf[0] != 0x00 && netbios_session_payload_size > 0)
+		{
+			if(netbios_session_payload_size > 256 - 4)
+				netbios_session_payload_size = 256 - 4;
+
+			result = recvfrom (sock_fd, &netbios_session_buf[4], netbios_session_payload_size - 4, 0, NULL, NULL);
+			if (result < 0)
+			{
+				LOG (("smb_receive_raw: recv error = %ld\n", errno));
+				result = (-errno);
+				goto out;
+			}
+
+			if(result < netbios_session_payload_size - 4)
+			{
+				result = -EIO;
+				goto out;
+			}
+
+			dump_netbios_header(__FILE__,__LINE__,netbios_session_buf,&netbios_session_buf[4],netbios_session_payload_size);
+		}
+		else
+		{
+			dump_netbios_header(__FILE__,__LINE__,netbios_session_buf,NULL,0);
+		}
+	}
+	#endif /* defined(DUMP_SMB) */
+
 	/* Check the session type. */
-	switch (peek_buf[0])
+	switch (netbios_session_buf[0])
 	{
 		/* 0x00 == session message */
 		case 0x00:
-		/* 0x82 == positive session response */
-		case 0x82:
 
 			break;
 
@@ -68,17 +99,18 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 			goto re_recv;
 
 		/* 0x81 == session request */
+		/* 0x82 == positive session response */
 		/* 0x83 == negative session response */
 		/* 0x84 == retarget session response */
 		default:
 
-			LOG (("smb_receive_raw: Invalid packet 0x%02lx\n", peek_buf[0]));
+			LOG (("smb_receive_raw: Invalid session header type 0x%02lx\n", netbios_session_buf[0]));
 			result = -EIO;
 			goto out;
 	}
 
 	/* The length in the RFC NB header is the raw data length (17 bits) */
-	len = (int)smb_len (peek_buf);
+	len = netbios_session_payload_size;
 	if (len > max_raw_length)
 	{
 		LOG (("smb_receive_raw: Received length (%ld) > max_xmit (%ld)!\n", len, max_raw_length));
@@ -97,7 +129,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 			goto out;
 		}
 	
-		memcpy (target, peek_buf, 4);
+		memcpy (target, netbios_session_buf, 4);
 		target += 4;
 	}
 
@@ -117,7 +149,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 	#if defined(DUMP_SMB)
 	{
 		/* If want_header==0 then this is the data returned by SMB_COM_READ_RAW. */
-		dump_smb(__FILE__,__LINE__,peek_buf,!want_header,target,already_read,smb_packet_to_consumer,server->max_recv);
+		dump_smb(__FILE__,__LINE__,!want_header,target,already_read,smb_packet_to_consumer,server->max_recv);
 	}
 	#endif /* defined(DUMP_SMB) */
 
@@ -380,7 +412,8 @@ smb_request (struct smb_server *server)
 	LOG (("smb_request: len = %ld cmd = 0x%lx\n", len, buffer[8]));
 
 	#if defined(DUMP_SMB)
-	dump_smb(__FILE__,__LINE__,buffer,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_netbios_header(__FILE__,__LINE__,buffer,&buffer[4],len);
+	dump_smb(__FILE__,__LINE__,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	result = send (sock_fd, (void *) buffer, len, 0);
@@ -431,7 +464,8 @@ smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, ch
 	LOG (("smb_request: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
 
 	#if defined(DUMP_SMB)
-	dump_smb(__FILE__,__LINE__,buffer,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_netbios_header(__FILE__,__LINE__,buffer,NULL,0);
+	dump_smb(__FILE__,__LINE__,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	result = send (sock_fd, (void *) buffer, len, 0);
@@ -483,7 +517,8 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	LOG (("smb_request_read_raw: buffer=%lx, sock=%lx\n", (unsigned int) buffer, (unsigned int) sock_fd));
 
 	#if defined(DUMP_SMB)
-	dump_smb(__FILE__,__LINE__,buffer,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_netbios_header(__FILE__,__LINE__,buffer,NULL,0);
+	dump_smb(__FILE__,__LINE__,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	/* Request that data should be read in raw mode. */
