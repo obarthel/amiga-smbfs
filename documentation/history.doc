@@ -840,3 +840,29 @@ smbfs 1.91 (30.3.2016)
 - All functions in smb_abstraction.c now report and test for
   error return values in a uniform fashion. Mixing up return
   values and error codes is no longer so easy.
+
+
+smbfs 1.92 (31.3.2016)
+
+- Added NetBIOS header debug output.
+
+
+smbfs 1.93 (31.3.2016)
+
+- The DOS error status and code are now decoded properly.
+
+- If there is no sufficient command data or other data in
+  the SMB message, the decoder no longer attempts to
+  decode it.
+
+- Decoding of SMB_COM_SEARCH data had the client/server
+  information mixed up.
+
+- SMB_COM_READ_RAW now properly updates the offset value,
+  and also sets the number of bytes read so far correctly
+  if the initial read operation succeeds. Previously, the
+  number of bytes read would remain 0.
+
+- SMB_COM_WRITE_RAW now sets the offset value correctly,
+  which in turn will update the directory cache file
+  size information correctly, too.
