@@ -418,7 +418,6 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 {
 	int num_bytes_read = 0;
 	int maxsize, count, result;
-	char *rpos;
 	int errnum;
 
 	errnum = make_open (f, 1);
@@ -438,6 +437,11 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 		if(len <= 65535)
 		{
 			result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, len, data);
+			if(result > 0)
+			{
+				num_bytes_read += result;
+				offset += result;
+			}
 
 			LOG (("smb_proc_read_raw(%s)->%ld\n", f->dirent.complete_path, result));
 		}
@@ -456,10 +460,10 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 					break;
 				}
 
-				data += result;
-				offset += result;
-				len -= result;
 				num_bytes_read += result;
+				len -= result;
+				offset += result;
+				data += result;
 
 				if(result < n)
 				{
@@ -481,25 +485,20 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	 */
 	if (result <= 0 && num_bytes_read == 0)
 	{
-		int num_bytes_left;
-
-		num_bytes_left = len;
-		rpos = data;
-
 		maxsize = f->server->server.max_xmit - SMB_HEADER_LEN - 5 * 2 - 5;
 
 		do
 		{
-			count = min(num_bytes_left,maxsize);
+			count = min(len,maxsize);
 
-			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, rpos, 0);
+			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, data, 0);
 			if (result < 0)
 				goto out;
 
 			num_bytes_read += result;
-			num_bytes_left -= result;
+			len -= result;
 			offset += result;
-			rpos += result;
+			data += result;
 
 			if(result < count)
 			{
@@ -507,7 +506,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 				break;
 			}
 		}
-		while (num_bytes_left > 0);
+		while (len > 0);
 	}
 
 	/* Still no luck? */
@@ -526,7 +525,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 int
 smba_write (smba_file_t * f, char *data, long len, long offset)
 {
-	int newlen, maxsize, count, result;
+	int maxsize, count, result;
 	long num_bytes_written = 0;
 	int errnum;
 
@@ -549,7 +548,8 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		if(result < 0)
 			goto out;
 
-		num_bytes_written = result;
+		num_bytes_written += result;
+		offset += result;
 	}
 	else
 	{
@@ -562,22 +562,22 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		if ((f->server->server.protocol >= PROTOCOL_NT1 && f->server->server.blkmode & 1)
 		 || (f->server->server.protocol < PROTOCOL_NT1 && f->server->server.blkmode & 2))
 		{
-			long maxxmit;
+			long max_xmit;
 			int n;
 
 			/* Try to send the maximum number of bytes with the two SMBwritebraw packets. */
-			maxxmit = 2 * f->server->server.max_xmit - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
+			max_xmit = 2 * f->server->server.max_xmit - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
 
 			/* If the number of bytes that should be transfered exceed the number of
 			   bytes that could be transfered by a single call to smb_proc_write_raw,
 			   the data is transfered as before: Only by the second packet, this
 			   prevents the CPU from copying the data into the transferbuffer. */
-			if (maxxmit < len)
-				maxxmit = f->server->server.max_xmit - 4;
+			if (max_xmit < len)
+				max_xmit = f->server->server.max_xmit - 4;
 
 			do
 			{
-				n = min(len,maxxmit);
+				n = min(len,max_xmit);
 
 				if (n <= maxsize)
 				{
@@ -613,28 +613,24 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		 */
 		if (result <= 0 && num_bytes_written == 0)
 		{
-			int num_bytes_left;
-
-			/* Failed to use the SMBwritebraw packet, fallback to SMBwrite... */
-			num_bytes_left = len;
-
 			do
 			{
-				count = min(num_bytes_left,maxsize);
+				count = min(len,maxsize);
 
 				result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data);
 				if (result < 0)
 					goto out;
 
-				num_bytes_left -= result;
+				len -= result;
 				offset += result;
 				data += result;
 				num_bytes_written += result;
 
+				/* Fewer data written than intended? Could be out of disk space. */
 				if(result < count)
 					break;
 			}
-			while (num_bytes_left > 0);
+			while (len > 0);
 		}
 
 		/* Still no luck? */
@@ -654,12 +650,8 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 	{
 		f->dirent.mtime = GetCurrentTime();
 
-		newlen = f->dirent.size;
-
-		if (offset + num_bytes_written > newlen)
-			newlen = offset + num_bytes_written;
-
-		f->dirent.size = newlen;
+		if (offset + num_bytes_written > f->dirent.size)
+			f->dirent.size = offset + num_bytes_written;
 	}
 
 	return result;
