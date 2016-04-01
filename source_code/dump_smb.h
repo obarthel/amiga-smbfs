@@ -192,8 +192,14 @@ struct smb_header
 
 /*****************************************************************************/
 
-extern void dump_smb(const char *file_name,int line_number,const unsigned char *netbios_session_header,int is_raw_data,
-	const void * packet,int length,enum smb_packet_source_t smb_packet_source,int max_buffer_size);
+extern void dump_netbios_header(const char *file_name,int line_number,
+	const unsigned char *netbios_session_header,
+	const unsigned char *netbios_payload,int netbios_payload_size);
+
+extern void dump_smb(const char *file_name,int line_number,int is_raw_data,
+	const void * packet,int length,enum smb_packet_source_t smb_packet_source,
+	int max_buffer_size);
+
 extern void control_smb_dump(int enable);
 
 /*****************************************************************************/

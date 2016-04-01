@@ -1140,8 +1140,13 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	unsigned short vwv[256];
 	int i,j;
 	
-	if(num_parameter_words > 255)
+	if(num_parameter_words < 0)
+		num_parameter_words = 0;
+	else if (num_parameter_words > 255)
 		num_parameter_words = 255;
+
+	if(num_data_bytes < 0)
+		num_data_bytes = 0;
 
 	for(i = j = 0 ; i < num_parameter_words ; i++, j += 2)
 		vwv[i] = (((int)parameters[j+1]) << 8) + parameters[j];
@@ -1314,6 +1319,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		{
 			int access_mode;
 			int file_attributes;
+
+			if(num_parameter_words <= 0)
+				return;
 
 			Printf("file handle = 0x%04lx\n",vwv[0]);
 
@@ -1488,6 +1496,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		}
 		else
 		{
+			if(num_parameter_words <= 0)
+				return;
+
 			Printf("file handle = 0x%04lx\n",vwv[0]);
 		}
 	}
@@ -1593,6 +1604,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		{
 			int file_attributes;
 
+			if(num_parameter_words <= 0)
+				return;
+
 			file_attributes = vwv[0];
 			Printf("file attributes = 0x%04lx\n",file_attributes);
 
@@ -1679,6 +1693,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			unsigned short count_of_bytes_read;
 			int offset = 0;
 
+			if(num_parameter_words <= 0)
+				return;
+
 			Printf("count of bytes returned = %ld\n",vwv[0]);
 
 			buffer_format = next_data_byte(data,&offset);
@@ -1727,6 +1744,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		}
 		else
 		{
+			if(num_parameter_words <= 0)
+				return;
+
 			Printf("count of bytes written = %ld\n",vwv[0]);
 		}
 	}
@@ -1763,6 +1783,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		}
 		else
 		{
+			if(num_parameter_words <= 0)
+				return;
+
 			Printf("absolute position = %lu\n",(((unsigned long)vwv[1]) << 16) | vwv[0]);
 		}
 	}
@@ -1834,7 +1857,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	}
 	else if (command == SMB_COM_WRITE_COMPLETE)
 	{
-		if(smb_packet_source == smb_packet_to_consumer)
+		if(smb_packet_source == smb_packet_to_consumer && num_parameter_words > 0)
 			Printf("total number of bytes written = %lu\n",vwv[0]);
 	}
 	else if (command == SMB_COM_SET_INFORMATION2)
@@ -1855,7 +1878,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	}
 	else if (command == SMB_COM_QUERY_INFORMATION2)
 	{
-		if(smb_packet_source == smb_packet_to_consumer)
+		if(smb_packet_source == smb_packet_to_consumer && num_parameter_words > 0x11)
 		{
 			int file_attributes;
 
@@ -2141,6 +2164,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		}
 		else
 		{
+			if(num_parameter_words <= 0)
+				return;
+
 			Printf("max buffer size = %ld\n",vwv[0]);
 			Printf("tid = %ld\n",vwv[1]);
 		}
@@ -2329,6 +2355,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			}
 			else
 			{
+				if(num_parameter_words <= 0)
+					return;
+
 				Printf("dialect index = %ld\n",vwv[0]);
 			}
 		}
@@ -2474,6 +2503,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		{
 			int request_mode;
 
+			if(num_parameter_words <= 0)
+				return;
+
 			request_mode = vwv[0];
 			Printf("request mode = 0x%04lx\n",request_mode);
 
@@ -2499,11 +2531,11 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 					/* ZZZ could be Unicode if SMB_FLAGS2_UNICODE_STRINGS is set. */
 					primary_domain = &native_lan_man[len+1];
 				}
-			}
 			
-			Printf("native os = '%s'\n",native_os);
-			Printf("native lan man = '%s'\n",native_lan_man);
-			Printf("primary domain = '%s'\n",primary_domain);
+				Printf("native os = '%s'\n",native_os);
+				Printf("native lan man = '%s'\n",native_lan_man);
+				Printf("primary domain = '%s'\n",primary_domain);
+			}
 		}
 	}
 	else if (command == SMB_COM_TREE_CONNECT_ANDX)
@@ -2561,6 +2593,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			const char * service;
 			const char * native_file_system;
 
+			if(num_data_bytes <= 0)
+				return;
+
 			service = args;
 			len = strlen(service)+1;
 
@@ -2573,7 +2608,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	}
 	else if (command == SMB_COM_QUERY_INFORMATION_DISK)
 	{
-		if(smb_packet_source == smb_packet_to_consumer)
+		if(smb_packet_source == smb_packet_to_consumer && num_parameter_words > 3)
 		{
 			Printf("allocation units/server = %ld\n",vwv[0]);
 			Printf("blocks/allocation unit = %ld\n",vwv[1]);
@@ -2583,7 +2618,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	}
 	else if (command == SMB_COM_SEARCH)
 	{
-		if(smb_packet_source == smb_packet_to_consumer)
+		if(smb_packet_source == smb_packet_from_consumer)
 		{
 			int search_attributes;
 			const char * file_name;
@@ -2667,6 +2702,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int i,j;
 			int file_attributes;
 			const char * file_name;
+
+			if(num_parameter_words <= 0)
+				return;
 
 			count = vwv[0];
 
@@ -4038,8 +4076,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 		int error_code_value;
 		int i;
 
-		error_class_value = header->status >> 24;
-		error_code_value = header->status & 0xffff;
+		error_class_value = header->status & 0xff;
+		error_code_value = (header->status >> 16) & 0xffff;
 
 		switch(error_class_value)
 		{
@@ -4100,7 +4138,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 				break;
 		}
 
-		Printf("status = error:%s (%ld), code:%s (%ld)\n",error_class_name,error_class_value,
+		Printf("status = [%08lx] error:%s (%ld), code:%s (%ld)\n",header->status,
+			error_class_name,error_class_value,
 			error_code_name,error_code_value);
 	}
 
@@ -4294,79 +4333,124 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 /*****************************************************************************/
 
 void
-dump_smb(const char *file_name,int line_number,const unsigned char * netbios_session_header,int is_raw_data,
-	const void * packet,int length,enum smb_packet_source_t smb_packet_source,int max_buffer_size)
+dump_netbios_header(const char *file_name,int line_number,const unsigned char *netbios_session_header,
+	const unsigned char *netbios_payload,int netbios_payload_size)
 {
 	if(dump_smb_enabled)
 	{
-		char netbios_header_text[256];
+		unsigned char session_type = netbios_session_header[0];
+		unsigned char session_flags = netbios_session_header[1] & 0xfe;
+		unsigned long session_length =
+			((netbios_session_header[1] & 1) ? 0x10000 : 0) |
+			(((unsigned long)netbios_session_header[2]) << 8) |
+			netbios_session_header[3];
 
-		if(netbios_session_header != NULL)
+		const char * session_type_label;
+
+		switch(session_type)
 		{
-			unsigned char session_type = netbios_session_header[0];
-			unsigned char session_flags = netbios_session_header[1] & 0xfe;
-			unsigned long session_length =
-				((netbios_session_header[1] & 1) ? 0x10000 : 0) |
-				(((unsigned long)netbios_session_header[2]) << 8) |
-				netbios_session_header[3];
+			case 0x00:
 
-			const char * session_type_label;
+				session_type_label = "session message";
+				break;
 
-			switch(session_type)
+			case 0x81:
+
+				session_type_label = "session request";
+				break;
+
+			case 0x82:
+
+				session_type_label = "positive session response";
+				break;
+
+			case 0x83:
+
+				session_type_label = "negative session response";
+				break;
+
+			case 0x84:
+
+				session_type_label = "retarget session response";
+				break;
+
+			case 0x85:
+
+				session_type_label = "session keep alive";
+				break;
+
+			default:
+
+				session_type_label = "?";
+				break;
+		}
+
+		Printf("---\n");
+		Printf("%s:%ld\n",file_name,line_number);
+
+		Printf("netbios session type=%s (0x%02lx), flags=0x%02lx, length=%ld\n",
+			session_type_label,session_type,session_flags,session_length);
+
+		if (session_type == 0x83 && netbios_payload != NULL && netbios_payload_size > 0)
+		{
+			int error_code = *netbios_payload;
+
+			Printf("error code = 0x%02lx\n",error_code);
+
+			switch(error_code)
 			{
-				case 0x00:
+				case 0x80:
 
-					session_type_label = "session message";
+					Printf("             Not listening on called name\n");
 					break;
 
 				case 0x81:
 
-					session_type_label = "session request";
+					Printf("             Not listening for calling name\n");
 					break;
 
 				case 0x82:
 
-					session_type_label = "positive session response";
+					Printf("             Called name not present\n");
 					break;
 
 				case 0x83:
 
-					session_type_label = "negative session response";
+					Printf("             Insufficient resources\n");
 					break;
 
-				case 0x84:
+				case 0x8f:
 
-					session_type_label = "retarget session response";
-					break;
-
-				case 0x85:
-
-					session_type_label = "session keep alive";
-					break;
-
-				default:
-
-					session_type_label = "?";
+					Printf("             Unspecific error\n");
 					break;
 			}
-
-			SPrintf(netbios_header_text,"type=%s (0x%02lx), flags=0x%02lx, length=%ld\n",
-				session_type_label,session_type,session_flags,session_length);
 		}
-		else
+		else if (session_type != 0x00 && netbios_payload != NULL && netbios_payload_size > 0)
 		{
-			strcpy(netbios_header_text,"");
-		}
+			struct line_buffer lb;
 
+			Printf("session data (%ld bytes) =\n",netbios_payload_size);
+
+			print_smb_data(&lb,netbios_payload_size,netbios_payload);
+		}
+	}
+}
+
+/*****************************************************************************/
+
+void
+dump_smb(const char *file_name,int line_number,int is_raw_data,
+	const void * packet,int length,enum smb_packet_source_t smb_packet_source,
+	int max_buffer_size)
+{
+	if(dump_smb_enabled)
+	{
 		if(is_raw_data)
 		{
 			struct line_buffer lb;
 
 			Printf("---\n");
 			Printf("%s:%ld\n",file_name,line_number);
-
-			if(netbios_header_text[0] != '\0')
-				Printf("netbios session header: %s\n",netbios_header_text);
 
 			Printf("raw data (%ld bytes) =\n",length);
 
@@ -4387,10 +4471,8 @@ dump_smb(const char *file_name,int line_number,const unsigned char * netbios_ses
 					Printf("---\n");
 					Printf("%s:%ld\n",file_name,line_number);
 
-					if(netbios_header_text[0] != '\0')
-						Printf("netbios session header: %s\n",netbios_header_text);
-
-					print_smb_header(&header,num_bytes_read,packet,length,smb_packet_source,max_buffer_size);
+					print_smb_header(&header,num_bytes_read,packet,length,
+						smb_packet_source,max_buffer_size);
 
 					Printf("---\n\n");
 				}
