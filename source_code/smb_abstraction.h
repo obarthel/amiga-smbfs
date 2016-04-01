@@ -37,7 +37,7 @@ typedef struct smba_stat
 {
 	unsigned is_dir:1;
 	unsigned is_wp:1;
-	 unsigned is_hidden:1;
+	unsigned is_hidden:1;
 	unsigned is_system:1;
 	unsigned is_archive:1;
 	int size;
