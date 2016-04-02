@@ -768,6 +768,7 @@ smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t of
 	WSET (buf, smb_vwv3, count); /* maxcnt */
 	WSET (buf, smb_vwv4, 0); /* mincnt */
 	DSET (buf, smb_vwv5, 0); /* timeout */
+	WSET (buf, smb_vwv7, 0); /* reserved */
 
 	result = smb_request_read_raw (server, data, count);
 
@@ -824,6 +825,10 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	{
 		WSET (buf, smb_vwv10, len);
 		WSET (buf, smb_vwv11, p - smb_base(buf));
+	}
+	else
+	{
+		WSET (buf, smb_vwv10, 0);
 	}
 
 	if (len > 0)
@@ -962,7 +967,7 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct s
 	BSET (buf, smb_vwv0, 0xFF);
 	WSET (buf, smb_vwv1, 0);
 	WSET (buf, smb_vwv2, finfo->fileid);
-	BSET (buf, smb_vwv3, mode & 1);
+	WSET (buf, smb_vwv3, mode & 1);	/* must be WSET() or new oplock level will be random */
 	DSET (buf, smb_vwv4, timeout);
 	WSET (buf, smb_vwv6, num_unlocks);
 	WSET (buf, smb_vwv7, num_locks);
@@ -2290,7 +2295,7 @@ smb_proc_reconnect (struct smb_server *server)
 		if (server->protocol >= PROTOCOL_NT1)
 		{
 			server_maxxmt = DVAL (packet, smb_vwv3 + 1);
-			server->blkmode = DVAL (packet, smb_vwv9 + 1);
+			server->capabilities = DVAL (packet, smb_vwv9 + 1);
 			server_sesskey = DVAL (packet, smb_vwv7 + 1);
 
 			server->security_mode = BVAL(packet, smb_vwv1);
@@ -2300,7 +2305,7 @@ smb_proc_reconnect (struct smb_server *server)
 		else
 		{
 			server_maxxmt = WVAL (packet, smb_vwv2);
-			server->blkmode = WVAL (packet, smb_vwv5);
+			server->capabilities = WVAL (packet, smb_vwv5);
 			server_sesskey = DVAL (packet, smb_vwv6);
 
 			server->security_mode = BVAL(packet, smb_vwv1);
@@ -2383,6 +2388,8 @@ smb_proc_reconnect (struct smb_server *server)
 			DSET (packet, smb_vwv5, server_sesskey);
 			WSET (packet, smb_vwv7, password_len);
 			WSET (packet, smb_vwv8, nt_password_len);
+			DSET (packet, smb_vwv9, 0);	/* reserved */
+			DSET (packet, smb_vwv11, server->capabilities & 0x00800000);	/* capabilities: Unix support. */
 
 			p = SMB_BUF (packet);
 
@@ -2446,7 +2453,7 @@ smb_proc_reconnect (struct smb_server *server)
 	else
 	{
 		server_maxxmt = 0;
-		server->blkmode = 0;
+		server->capabilities = 0;
 
 		password_len = strlen(server->mount_data.password)+1;
 
