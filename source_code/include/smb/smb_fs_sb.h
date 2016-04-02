@@ -1,7 +1,5 @@
 /*
- * $Id: smb_fs_sb.h,v 1.1.1.1 2005/05/24 13:22:14 obarthel Exp $
- *
- * :ts=8
+ * :ts=4
  *
  * smb_fs_sb.h
  *
@@ -17,35 +15,33 @@
 
 struct smb_server
 {
-  enum smb_protocol protocol;   /* The protocol this
-                                   connection accepts. */
+	enum smb_protocol protocol;		/* The protocol this
+									   connection accepts. */
 
-  word max_xmit;
-  int max_recv;                 /* added by CS */
-  word server_uid;
-  word tid;
+	word max_xmit;
+	int max_recv;		/* added by CS */
+	word server_uid;
+	word tid;
 
-  struct smb_mount_data mount_data; /* We store the complete information here
-                                       to be able to reconnect.
-                                     */
+	struct smb_mount_data mount_data;	/* We store the complete information here
+										   to be able to reconnect. */
 
-  unsigned short rcls;          /* The error codes we received */
-  unsigned short err;
-  unsigned char *packet;
+	unsigned short rcls;				/* The error codes we received */
+	unsigned short err;
+	unsigned char *packet;
 
-  int security_mode;
-  unsigned char crypt_key[8];
+	int security_mode;
+	unsigned char crypt_key[8];
 
-  struct smba_server * abstraction;
+	struct smba_server * abstraction;
 
-  enum smb_conn_state state;
+	enum smb_conn_state state;
 
-  /* The following are LANMAN 1.0 options transferred to us in
-     SMBnegprot */
-  word blkmode;
+	/* The following are LANMAN 1.0 options transferred to us in SMBnegprot */
+	dword capabilities;
 
-  /* olsen (2012-12-10): raw SMB over TCP instead of NBT transport? */
-  int raw_smb;
+	/* olsen (2012-12-10): raw SMB over TCP instead of NBT transport? */
+	int raw_smb;
 };
 
 #endif
