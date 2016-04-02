@@ -139,7 +139,7 @@ described below. The command template looks like this:
    SERVER=SERVERNAME/K,DEVICE=DEVICENAME/K,VOLUME=VOLUMENAME/K,
    CACHE=CACHESIZE/N/K,MAXTRANSMIT/N/K,DEBUGLEVEL=DEBUG/N/K,
    TZ=TIMEZONEOFFSET/N/K,DST=DSTOFFSET/N/K,NETBIOS/S,DUMPSMB/S,
-   TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
+   UTF8/S,TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
 
 The individual options serve the following purposes:
 
@@ -378,6 +378,25 @@ The individual options serve the following purposes:
       "L:FileSystem_Trans/INTL.crossdos" translation table file should be
       sufficient. To specify which file contains the translation tables to
       use you would use the TRANSLATIONFILE parameter.
+
+      Please note that the use of the UTF8 option will cause the
+      TRANSLATE option to be ignored.
+
+   UTF8/S
+
+      Some file servers do not use a character set which cannot be easily
+      translated to the Amiga character set and the other way round.
+      Instead, these file servers use UTF-8 encoding which may store
+      characters in file and directory names into more than one byte.
+      This requires a different encoding/decoding procedure which can be
+      enabled with the UTF8 switch.
+
+      As with the TRANSLATE option, those files whose names cannot be
+      encoded or decoded properly may not be used by smbfs and will,
+      for example, not show up directory listings.
+      
+      Please note that the use of the UTF8 option will cause the
+      TRANSLATE option to be ignored.
 
    SERVICE/A
 
