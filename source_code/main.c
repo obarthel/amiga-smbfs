@@ -3,7 +3,7 @@
  *
  * SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
  *
- * Copyright (C) 2000-2009 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
+ * Copyright (C) 2000-2016 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,6 +36,7 @@
 /****************************************************************************/
 
 #include "smb_abstraction.h"
+#include "utf-8-iso-8859-1-conversion.h"
 #include "dump_smb.h"
 
 /****************************************************************************/
@@ -173,7 +174,7 @@ int BroadcastNameQuery(char *name, char *scope, UBYTE *address);
 INLINE STATIC BOOL ReallyRemoveDosEntry(struct DosList *entry);
 INLINE STATIC LONG BuildFullName(STRPTR parent_name, STRPTR name, STRPTR *result_ptr, LONG *result_size_ptr);
 INLINE STATIC VOID TranslateCName(UBYTE *name, UBYTE *map);
-INLINE STATIC VOID ConvertCString(LONG max_len, APTR bstring, STRPTR cstring);
+INLINE STATIC VOID ConvertCString(APTR bstring, LONG max_len, STRPTR cstring, LONG len);
 STATIC VOID DisplayErrorList(VOID);
 STATIC VOID AddError(STRPTR fmt, APTR args);
 STATIC LONG CVSPrintf(STRPTR format_string, APTR args);
@@ -288,6 +289,7 @@ STATIC BOOL					Quit;
 STATIC BOOL					Quiet;
 STATIC BOOL					CaseSensitive;
 STATIC BOOL					OmitHidden;
+STATIC BOOL					TranslateUTF8;
 
 STATIC LONG					DSTOffset;
 STATIC LONG					TimeZoneOffset;
@@ -339,6 +341,7 @@ _start(VOID)
 		NUMBER	DSTOffset;
 		SWITCH	NetBIOSTransport;
 		SWITCH	DumpSMB;
+		SWITCH	UTF8;
 		KEY		TranslationFile;
 		KEY		Service;
 	} args;
@@ -362,6 +365,7 @@ _start(VOID)
 		"DST=DSTOFFSET/N/K,"
 		"NETBIOS/S,"
 		"DUMPSMB/S,"
+		"UTF8/S,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
 		"SERVICE/A";
 
@@ -661,12 +665,15 @@ _start(VOID)
 			args.TimeZoneOffset = &other_number;
 		}
 
+		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
+			args.NetBIOSTransport = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"UTF8") != NULL)
+			args.UTF8 = TRUE;
+
 		str = FindToolType(Icon->do_ToolTypes,"DST");
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"DSTOFFSET");
-
-		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
-			args.NetBIOSTransport = TRUE;
 
 		if(str != NULL)
 		{
@@ -788,8 +795,13 @@ _start(VOID)
 	if(args.DeviceName == NULL && args.VolumeName == NULL)
 		args.DeviceName = "SMBFS";
 
+	/* UTF8 file name translation disables code-page based translation. */
+	if(args.UTF8)
+		args.TranslationFile = NULL;
+
 	CaseSensitive = (BOOL)args.CaseSensitive;
 	OmitHidden = (BOOL)args.OmitHidden;
+	TranslateUTF8 = (BOOL)args.UTF8;
 
 	/* Configure the debugging options. */
 	SETPROGRAMNAME(FilePart(program_name));
@@ -1927,19 +1939,16 @@ MapErrnoToIoErr(int error)
 INLINE STATIC VOID
 TranslateBName(UBYTE * name,UBYTE * map)
 {
-	if(TranslateNames)
+	LONG len;
+	UBYTE c;
+
+	len = (*name++);
+
+	while(len-- > 0)
 	{
-		LONG len;
-		UBYTE c;
+		c = (*name);
 
-		len = (*name++);
-
-		while(len-- > 0)
-		{
-			c = (*name);
-
-			(*name++) = map[c];
-		}
+		(*name++) = map[c];
 	}
 }
 
@@ -1947,13 +1956,10 @@ TranslateBName(UBYTE * name,UBYTE * map)
 INLINE STATIC VOID
 TranslateCName(UBYTE * name,UBYTE * map)
 {
-	if(TranslateNames)
-	{
-		UBYTE c;
+	UBYTE c;
 
-		while((c = (*name)) != '\0')
-			(*name++) = map[c];
-	}
+	while((c = (*name)) != '\0')
+		(*name++) = map[c];
 }
 
 /****************************************************************************/
@@ -2585,9 +2591,8 @@ ConvertBString(LONG max_len,STRPTR cstring,APTR bstring)
 
 /* Convert a NUL terminated 'C' string into a BCPL string. */
 INLINE STATIC VOID
-ConvertCString(LONG max_len,APTR bstring,STRPTR cstring)
+ConvertCString(APTR bstring,LONG max_len,STRPTR cstring,LONG len)
 {
-	LONG len = strlen(cstring);
 	STRPTR to = bstring;
 
 	if(len > max_len-1)
@@ -2949,7 +2954,28 @@ Action_DeleteObject(
 	}
 
 	ConvertBString(sizeof(name),name,bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
 	if(error != OK)
@@ -3122,7 +3148,28 @@ Action_CreateDir(
 	}
 
 	ConvertBString(sizeof(name),name,bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
 	if(error != OK)
@@ -3258,7 +3305,28 @@ Action_LocateObject(
 	}
 
 	ConvertBString(sizeof(name),name,bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	if(IsReservedName(FilePart(name)))
 	{
@@ -3542,7 +3610,28 @@ Action_SetProtect(
 	}
 
 	ConvertBString(sizeof(name),name,bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
 	if(error != OK)
@@ -3658,7 +3747,28 @@ Action_RenameObject(
 	}
 
 	ConvertBString(sizeof(name),name,source_bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	error = BuildFullName(parent_name,name,&full_source_name,&full_source_name_size);
 	if(error != OK)
@@ -3683,7 +3793,28 @@ Action_RenameObject(
 	}
 
 	ConvertBString(sizeof(name),name,destination_bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	error = BuildFullName(parent_name,name,&full_destination_name,&full_destination_name_size);
 	if(error != OK)
@@ -3921,10 +4052,13 @@ Action_ExamineObject(
 		else
 		{
 			STRPTR name;
+			LONG name_len;
 			LONG i;
 
 			name = ln->ln_FullName;
-			for(i = strlen(name)-1 ; i >= 0 ; i--)
+			name_len = strlen(name);
+
+			for(i = name_len-1 ; i >= 0 ; i--)
 			{
 				if(name[i] == SMB_PATH_SEPARATOR)
 				{
@@ -3934,14 +4068,36 @@ Action_ExamineObject(
 			}
 
 			/* Just checking: will the name fit? */
-			if(strlen(name) >= sizeof(fib->fib_FileName))
+			if(name_len >= sizeof(fib->fib_FileName))
 			{
 				error = ERROR_INVALID_COMPONENT_NAME;
 				goto out;
 			}
 
-			ConvertCString(sizeof(fib->fib_FileName),fib->fib_FileName,name);
-			TranslateBName(fib->fib_FileName,M2A);
+			if(TranslateUTF8)
+			{
+				UBYTE decoded_name[MAX_FILENAME_LEN];
+				int decoded_name_len;
+
+				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
+				if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+				{
+					error = ERROR_INVALID_COMPONENT_NAME;
+					goto out;
+				}
+
+				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+
+				fib->fib_FileName[0] = decoded_name_len;
+				memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
+			}
+			else
+			{
+				ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
+
+				if(TranslateNames)
+					TranslateBName(fib->fib_FileName,M2A);
+			}
 
 			fib->fib_DirEntryType	= st.is_dir ? ST_USERDIR : ST_FILE;
 			fib->fib_EntryType		= fib->fib_DirEntryType;
@@ -4026,7 +4182,9 @@ dir_scan_callback_func_exnext(
 	int						eof,
 	smba_stat_t *			st)
 {
-	int result;
+	int result = 0;
+	LONG name_len;
+	LONG seconds;
 
 	ENTER();
 
@@ -4038,47 +4196,64 @@ dir_scan_callback_func_exnext(
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if(NameIsAcceptable((STRPTR)name,sizeof(fib->fib_FileName)) && NOT (st->is_hidden && OmitHidden))
+	if(!NameIsAcceptable((STRPTR)name,sizeof(fib->fib_FileName)) || (st->is_hidden && OmitHidden))
+		goto out;
+
+	name_len = strlen(name);
+
+	if(TranslateUTF8)
 	{
-		LONG seconds;
+		UBYTE decoded_name[MAX_FILENAME_LEN];
+		int decoded_name_len;
 
-		ConvertCString(sizeof(fib->fib_FileName),fib->fib_FileName,name);
-		TranslateBName(fib->fib_FileName,M2A);
+		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
+		if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+			goto out;
 
-		fib->fib_DirEntryType	= st->is_dir ? ST_USERDIR : ST_FILE;
-		fib->fib_EntryType		= fib->fib_DirEntryType;
-		fib->fib_NumBlocks		= (st->size + 511) / 512;
-		fib->fib_Size			= st->size;
-		fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
-								  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
+		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
 
-		if(st->is_wp)
-			fib->fib_Protection ^= (FIBF_OTR_WRITE|FIBF_OTR_DELETE|FIBF_GRP_WRITE|FIBF_GRP_DELETE|FIBF_WRITE|FIBF_DELETE);
-
-		/* Careful: the 'archive' attribute has exactly the opposite
-		 *          meaning in the Amiga and the SMB worlds.
-		 */
-		if(NOT st->is_archive)
-			fib->fib_Protection |= FIBF_ARCHIVE;
-
-		if(st->is_system)
-			fib->fib_Protection |= FIBF_PURE;
-
-		/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-		seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
-		if(seconds < 0)
-			seconds = 0;
-
-		fib->fib_Date.ds_Days	= (seconds / (24 * 60 * 60));
-		fib->fib_Date.ds_Minute	= (seconds % (24 * 60 * 60)) / 60;
-		fib->fib_Date.ds_Tick	= (seconds % 60) * TICKS_PER_SECOND;
-
-		result = 1;
+		fib->fib_FileName[0] = decoded_name_len;
+		memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
 	}
 	else
 	{
-		result = 0;
+		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
+
+		if(TranslateNames)
+			TranslateBName(fib->fib_FileName,M2A);
 	}
+
+	fib->fib_DirEntryType	= st->is_dir ? ST_USERDIR : ST_FILE;
+	fib->fib_EntryType		= fib->fib_DirEntryType;
+	fib->fib_NumBlocks		= (st->size + 511) / 512;
+	fib->fib_Size			= st->size;
+	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
+							  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
+
+	if(st->is_wp)
+		fib->fib_Protection ^= (FIBF_OTR_WRITE|FIBF_OTR_DELETE|FIBF_GRP_WRITE|FIBF_GRP_DELETE|FIBF_WRITE|FIBF_DELETE);
+
+	/* Careful: the 'archive' attribute has exactly the opposite
+	 *          meaning in the Amiga and the SMB worlds.
+	 */
+	if(NOT st->is_archive)
+		fib->fib_Protection |= FIBF_ARCHIVE;
+
+	if(st->is_system)
+		fib->fib_Protection |= FIBF_PURE;
+
+	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
+	seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+	if(seconds < 0)
+		seconds = 0;
+
+	fib->fib_Date.ds_Days	= (seconds / (24 * 60 * 60));
+	fib->fib_Date.ds_Minute	= (seconds % (24 * 60 * 60)) / 60;
+	fib->fib_Date.ds_Tick	= (seconds % 60) * TICKS_PER_SECOND;
+
+	result = 1;
+
+ out:
 
 	fib->fib_DiskKey = eof ? -1 : nextpos;
 
@@ -4199,6 +4374,8 @@ dir_scan_callback_func_exall(
 	int						eof,
 	smba_stat_t *			st)
 {
+	UBYTE decoded_name[MAX_FILENAME_LEN];
+	BOOL ignore_this_entry = FALSE;
 	int result = 0;
 
 	ENTER();
@@ -4208,10 +4385,35 @@ dir_scan_callback_func_exall(
 		st->is_dir,st->is_wp,st->is_hidden,st->size));
 	D(("   nextpos=%ld eof=%ld",nextpos,eof));
 
+	/* If necessary, translate the name of the file first, so that we
+	 * can decide early on whether or not it should show up in a
+	 * directory listing. This filters out, for example, files using
+	 * characters which are not usable on the Amiga because they fall
+	 * outside the 8 bit character set used.
+	 */
+	if(TranslateUTF8)
+	{
+		LONG name_len = strlen(name);
+		int decoded_name_len;
+
+		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
+		if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+		{
+			ignore_this_entry = TRUE;
+		}
+		else
+		{
+			decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+
+			/* Use the decoded replacement name. */
+			name = decoded_name;
+		}	
+	}
+
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if(NameIsAcceptable((STRPTR)name,MAX_FILENAME_LEN) && NOT (st->is_hidden && OmitHidden))
+	if(!ignore_this_entry && NameIsAcceptable((STRPTR)name,MAX_FILENAME_LEN) && NOT (st->is_hidden && OmitHidden))
 	{
 		struct ExAllData * ed;
 		ULONG size;
@@ -4250,7 +4452,8 @@ dir_scan_callback_func_exall(
 		ed->ed_Name = (STRPTR)(((ULONG)ed) + ec->ec_MinSize);
 		strcpy(ed->ed_Name,name);
 
-		TranslateCName(ed->ed_Name,M2A);
+		if(!TranslateUTF8 && TranslateNames)
+			TranslateCName(ed->ed_Name,M2A);
 
 		if(type >= ED_TYPE)
 			ed->ed_Type = st->is_dir ? ST_USERDIR : ST_FILE;
@@ -4613,7 +4816,28 @@ Action_Find(
 	}
 
 	ConvertBString(sizeof(name),name,bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	if(IsReservedName(FilePart(name)))
 	{
@@ -5183,7 +5407,28 @@ Action_SetDate(
 	}
 
 	ConvertBString(sizeof(name),name,bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
 	if(error != OK)
@@ -5254,6 +5499,7 @@ Action_ExamineFH(
 	LONG error;
 	LONG seconds;
 	STRPTR name;
+	LONG name_len;
 	LONG i;
 
 	ENTER();
@@ -5266,7 +5512,9 @@ Action_ExamineFH(
 	}
 
 	name = fn->fn_FullName;
-	for(i = strlen(name)-1 ; i >= 0 ; i--)
+	name_len = strlen(name);
+
+	for(i = name_len ; i >= 0 ; i--)
 	{
 		if(name[i] == SMB_PATH_SEPARATOR)
 		{
@@ -5276,7 +5524,7 @@ Action_ExamineFH(
 	}
 
 	/* Just checking: will the name fit? */
-	if(strlen(name) >= sizeof(fib->fib_FileName))
+	if(name_len >= sizeof(fib->fib_FileName))
 	{
 		error = ERROR_INVALID_COMPONENT_NAME;
 		goto out;
@@ -5284,8 +5532,30 @@ Action_ExamineFH(
 
 	memset(fib,0,sizeof(*fib));
 
-	ConvertCString(sizeof(fib->fib_FileName),fib->fib_FileName,name);
-	TranslateBName(fib->fib_FileName,M2A);
+	if(TranslateUTF8)
+	{
+		UBYTE decoded_name[MAX_FILENAME_LEN];
+		int decoded_name_len;
+
+		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
+		if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+
+		fib->fib_FileName[0] = decoded_name_len;
+		memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
+	}
+	else
+	{
+		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
+
+		if(TranslateNames)
+			TranslateBName(fib->fib_FileName,M2A);
+	}
 
 	fib->fib_DirEntryType	= ST_FILE;
 	fib->fib_EntryType		= ST_FILE;
@@ -5842,7 +6112,28 @@ Action_SetComment(
 	}
 
 	ConvertBString(sizeof(name),name,bcpl_name);
-	TranslateCName(name,A2M);
+
+	if (TranslateUTF8)
+	{
+		UBYTE encoded_name[MAX_FILENAME_LEN];
+		int encoded_name_len;
+		LONG name_len = strlen(name);
+
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		strlcpy(name,encoded_name,sizeof(name));
+	}
+	else if (TranslateNames)
+	{
+		TranslateCName(name,A2M);
+	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
 	if(error != OK)
