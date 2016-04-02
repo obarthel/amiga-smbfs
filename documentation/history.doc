@@ -866,3 +866,41 @@ smbfs 1.93 (31.3.2016)
 - SMB_COM_WRITE_RAW now sets the offset value correctly,
   which in turn will update the directory cache file
   size information correctly, too.
+
+
+smbfs 1.94 (1.4.2016)
+
+- Added provisional conversion functions for UTF-8
+  and ISO 8859-1.
+
+
+smbfs 1.95 (2.4.2016)
+
+- Plugged in the UTF-8 conversion functionality.
+
+
+smbfs 1.96 (2.4.2016)
+
+- SMB_COM_NEGOTIATE capabilities field is no longer a 16 bit
+  unsigned integer, but a 32 bit unsigned integer, and it's
+  called "capabilities" rather than "blkmode".
+
+- The client capabilities sent to the server no longer have
+  random data in the reserved and capapabilities fields.
+
+- The client now identies as a Unix system if the server has
+  identified itself as such, too.
+
+- Fixed the 32 bit status field decoding. 32 bit status code
+  ("NT status" codes) could have accidentally been enabled
+  because the client capability field would contain random
+  data.
+
+
+smbfs 1.97 (2.4.2016)
+
+- New oplock level in SMB_COM_LOCKING_ANDX could have been
+  random.
+
+- Last parameter word of SMB_COM_WRITE_RAW could have been
+  uninitialized.
