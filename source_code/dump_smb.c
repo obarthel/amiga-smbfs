@@ -3,7 +3,7 @@
  *
  * dump_smb.c
  *
- * Written by Olaf Barthel <obarthel -at- gmx -dot- net>
+ * Copyright (C) 2016 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -2448,6 +2448,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			if(capabilities & 0x00004000)
 				Printf("               CAP_LARGE_READX\n");
 
+			if(capabilities & 0x00800000)
+				Printf("               CAP_UNIX\n");
+
 			if(capabilities & 0x80000000)
 				Printf("               CAP_EXTENDED_SECURITY\n");
 
@@ -4022,39 +4025,13 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 
 	if(header->flags2 & SMB_FLAGS2_32BIT_STATUS)
 	{
-		int level,facility,error_code;
-		const char * level_name;
-		const char * facility_name = "?";
+		int severity,facility,error_code;
 		const char * error_code_name = "?";
 		int i;
 
-		level = (header->status >> 29) & 0x3;
+		severity = (header->status >> 30) & 1;
 		facility = (header->status >> 16) & 0x0fff;
 		error_code = header->status & 0xffff;
-
-		switch(level)
-		{
-			case 0:
-
-				level_name = "success";
-				break;
-
-			case 1:
-
-				level_name = "information";
-				break;
-
-			case 2:
-
-				level_name = "warning";
-				break;
-
-			case 3:
-			default:
-
-				level_name = "error";
-				break;
-		}
 
 		for(i = 0 ; nt_error_codes[i].code != -1 ; i++)
 		{
@@ -4065,8 +4042,8 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 			}
 		}
 
-		Printf("status = [%08lx] level:%s (%ld), facility:%s (%ld), code:%s (%ld)\n",header->status,level,
-			level_name,facility,facility_name,error_code,error_code_name);
+		Printf("status = [%08lx] severity:%s, facility:%s (%ld), code:%s (%ld)\n",header->status,
+			severity ? "failure" : "success",facility ? "?" : "default",facility,error_code_name,error_code);
 	}
 	else
 	{
