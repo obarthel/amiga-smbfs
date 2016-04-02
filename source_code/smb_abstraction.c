@@ -429,8 +429,8 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 
 	D(("read %ld bytes from offset %ld",len,offset));
 
-	/* Raw write supported (note: raw read support is a different flag!)? */
-	if (f->server->server.blkmode & 1)
+	/* SMB_COM_READ_RAW and SMB_COM_WRITE_RAW supported? */
+	if (f->server->server.capabilities & 1)
 	{
 		SHOWVALUE(f->server->server.max_xmit);
 
@@ -559,8 +559,8 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		/* Added by Brian Willette - We were always checking bit 2 here, but
 		   according to the documentation I have, the newer versions of SMB put
 		   the SMB_RAW_WRITE AND SMB_RAW_READ capability in bit 1 */
-		if ((f->server->server.protocol >= PROTOCOL_NT1 && f->server->server.blkmode & 1)
-		 || (f->server->server.protocol < PROTOCOL_NT1 && f->server->server.blkmode & 2))
+		if ((f->server->server.protocol >= PROTOCOL_NT1 && f->server->server.capabilities & 1)
+		 || (f->server->server.protocol < PROTOCOL_NT1 && f->server->server.capabilities & 2))
 		{
 			long max_xmit;
 			int n;
