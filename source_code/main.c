@@ -171,6 +171,13 @@ int BroadcastNameQuery(char *name, char *scope, UBYTE *address);
 
 /****************************************************************************/
 
+STATIC LONG main(VOID);
+STATIC ULONG get_stack_size(VOID);
+STATIC VOID stack_usage_init(struct StackSwapStruct * stk);
+STATIC ULONG stack_usage_exit(struct StackSwapStruct * stk);
+
+/****************************************************************************/
+
 INLINE STATIC BOOL ReallyRemoveDosEntry(struct DosList *entry);
 INLINE STATIC LONG BuildFullName(STRPTR parent_name, STRPTR name, STRPTR *result_ptr, LONG *result_size_ptr);
 INLINE STATIC VOID TranslateCName(UBYTE *name, UBYTE *map);
@@ -318,67 +325,18 @@ STATIC UBYTE				M2A[256];
 
 /****************************************************************************/
 
+extern int STDARGS swap_stack_and_call(struct StackSwapStruct * stk,APTR function);
+
+/****************************************************************************/
+
 LONG
 _start(VOID)
 {
-	struct
-	{
-		KEY		Workgroup;
-		KEY		UserName;
-		KEY		Password;
-		SWITCH	ChangeCase;
-		SWITCH	CaseSensitive;
-		SWITCH	OmitHidden;
-		SWITCH	Quiet;
-		KEY		ClientName;
-		KEY		ServerName;
-		KEY		DeviceName;
-		KEY		VolumeName;
-		NUMBER	CacheSize;
-		NUMBER	MaxTransmit;
-		NUMBER	DebugLevel;
-		NUMBER	TimeZoneOffset;
-		NUMBER	DSTOffset;
-		SWITCH	NetBIOSTransport;
-		SWITCH	DumpSMB;
-		SWITCH	UTF8;
-		KEY		TranslationFile;
-		KEY		Service;
-	} args;
-
-	STRPTR cmd_template =
-		"DOMAIN=WORKGROUP/K,"
-		"USER=USERNAME/K,"
-		"PASSWORD/K,"
-		"CHANGECASE/S,"
-		"CASE=CASESENSITIVE/S,"
-		"OMITHIDDEN/S,"
-		"QUIET/S,"
-		"CLIENT=CLIENTNAME/K,"
-		"SERVER=SERVERNAME/K,"
-		"DEVICE=DEVICENAME/K,"
-		"VOLUME=VOLUMENAME/K,"
-		"CACHE=CACHESIZE/N/K,"
-		"MAXTRANSMIT/N/K,"
-		"DEBUGLEVEL=DEBUG/N/K,"
-		"TZ=TIMEZONEOFFSET/N/K,"
-		"DST=DSTOFFSET/N/K,"
-		"NETBIOS/S,"
-		"DUMPSMB/S,"
-		"UTF8/S,"
-		"TRANSLATE=TRANSLATIONFILE/K,"
-		"SERVICE/A";
-
+	struct StackSwapStruct * stk = NULL;
+	APTR new_stack = NULL;
+	LONG new_stack_size = 20000;
 	struct Process * this_process;
-	UBYTE program_name[MAX_FILENAME_LEN];
 	LONG result = RETURN_FAIL;
-	LONG number;
-	LONG other_number;
-	LONG cache_size = 0;
-	LONG max_transmit = -1;
-	char env_workgroup_name[17];
-	char env_user_name[64];
-	char env_password[64];
 
 	SysBase = (struct Library *)AbsExecBase;
 
@@ -401,9 +359,6 @@ _start(VOID)
 	{
 		WBStartup = NULL;
 	}
-
-	/* Don't emit any debugging output before we are ready. */
-	SETDEBUGLEVEL(0);
 
 	/* Open the libraries we need and check
 	 * whether we could get them.
@@ -464,6 +419,209 @@ _start(VOID)
 
 		goto out;
 	}
+
+	if(get_stack_size() < new_stack_size)
+	{
+		/* Make the stack size a multiple of 32 bytes. */
+		new_stack_size = 32 + ((new_stack_size + 31UL) & ~31UL);
+
+		/* Allocate the stack swapping data structure
+		   and the stack space separately. */
+		stk = AllocVec(sizeof(*stk),MEMF_PUBLIC|MEMF_ANY);
+		if(stk == NULL)
+			goto out;
+
+		new_stack = AllocMem(new_stack_size,MEMF_PUBLIC|MEMF_ANY);
+		if(new_stack == NULL)
+			goto out;
+
+		/* Fill in the lower and upper bounds, then take care of
+		   the stack pointer itself. */
+		stk->stk_Lower		= new_stack;
+		stk->stk_Upper		= ((ULONG)new_stack) + new_stack_size;
+		stk->stk_Pointer	= (APTR)(stk->stk_Upper - 32);
+
+		/* stack_usage_init(stk); */
+
+		result = swap_stack_and_call(stk,(APTR)main);
+
+		/* Printf("stack size used = %ld\n",stack_usage_exit(stk)); */
+	}
+	else
+	{
+		result = main();
+	}
+
+ out:
+
+	if(stk != NULL)
+		FreeVec(stk);
+
+	if(new_stack != NULL)
+		FreeMem(new_stack,new_stack_size);
+
+	#if defined(__amigaos4__)
+	{
+		if(IUtility != NULL)
+		{
+			DropInterface((struct Interface *)IUtility);
+			IUtility = NULL;
+		}
+	}
+	#endif /* __amigaos4__ */
+
+	if(UtilityBase != NULL)
+	{
+		CloseLibrary(UtilityBase);
+		UtilityBase = NULL;
+	}
+
+	#if defined(__amigaos4__)
+	{
+		if(IDOS != NULL)
+		{
+			DropInterface((struct Interface *)IDOS);
+			IDOS = NULL;
+		}
+	}
+	#endif /* __amigaos4__ */
+
+	if(DOSBase != NULL)
+	{
+		CloseLibrary(DOSBase);
+		DOSBase = NULL;
+	}
+
+	if(WBStartup != NULL)
+	{
+		Forbid();
+		ReplyMsg((struct Message *)WBStartup);
+	}
+
+	return(result);
+}
+
+/****************************************************************************/
+
+STATIC ULONG
+get_stack_size(VOID)
+{
+	struct Task * tc = FindTask(NULL);
+	ULONG upper,lower;
+	ULONG result;
+
+	/* How much stack size was provided? */
+	upper = (ULONG)tc->tc_SPUpper;
+	lower = (ULONG)tc->tc_SPLower;
+
+	result = upper - lower;
+
+	return(result);
+}
+
+/****************************************************************************/
+
+#define STACK_FILL_COOKIE 0xA1
+
+/****************************************************************************/
+
+STATIC VOID
+stack_usage_init(struct StackSwapStruct * stk)
+{
+	size_t stack_size = ((ULONG)stk->stk_Upper - (ULONG)stk->stk_Lower);
+
+	memset(stk->stk_Lower,STACK_FILL_COOKIE,stack_size);
+}
+
+STATIC ULONG
+stack_usage_exit(struct StackSwapStruct * stk)
+{
+	const UBYTE * m = (const UBYTE *)stk->stk_Lower;
+	size_t stack_size = ((ULONG)stk->stk_Upper - (ULONG)stk->stk_Lower);
+	size_t total,i;
+
+	total = 0;
+
+	/* Figure out how much of the stack was used by checking
+	   if the fill pattern was overwritten. */
+	for(i = 0 ; i < stack_size ; i++)
+	{
+		/* Strangely, the first long word is always trashed,
+		   even if the stack doesn't grow down this far... */
+		if(i > sizeof(LONG) && m[i] != STACK_FILL_COOKIE)
+			break;
+
+		total++;				
+	}
+
+	return(total);
+}
+
+/****************************************************************************/
+
+STATIC LONG
+main(VOID)
+{
+	struct
+	{
+		KEY		Workgroup;
+		KEY		UserName;
+		KEY		Password;
+		SWITCH	ChangeCase;
+		SWITCH	CaseSensitive;
+		SWITCH	OmitHidden;
+		SWITCH	Quiet;
+		KEY		ClientName;
+		KEY		ServerName;
+		KEY		DeviceName;
+		KEY		VolumeName;
+		NUMBER	CacheSize;
+		NUMBER	MaxTransmit;
+		NUMBER	DebugLevel;
+		NUMBER	TimeZoneOffset;
+		NUMBER	DSTOffset;
+		SWITCH	NetBIOSTransport;
+		SWITCH	DumpSMB;
+		SWITCH	UTF8;
+		KEY		TranslationFile;
+		KEY		Service;
+	} args;
+
+	STRPTR cmd_template =
+		"DOMAIN=WORKGROUP/K,"
+		"USER=USERNAME/K,"
+		"PASSWORD/K,"
+		"CHANGECASE/S,"
+		"CASE=CASESENSITIVE/S,"
+		"OMITHIDDEN/S,"
+		"QUIET/S,"
+		"CLIENT=CLIENTNAME/K,"
+		"SERVER=SERVERNAME/K,"
+		"DEVICE=DEVICENAME/K,"
+		"VOLUME=VOLUMENAME/K,"
+		"CACHE=CACHESIZE/N/K,"
+		"MAXTRANSMIT/N/K,"
+		"DEBUGLEVEL=DEBUG/N/K,"
+		"TZ=TIMEZONEOFFSET/N/K,"
+		"DST=DSTOFFSET/N/K,"
+		"NETBIOS/S,"
+		"DUMPSMB/S,"
+		"UTF8/S,"
+		"TRANSLATE=TRANSLATIONFILE/K,"
+		"SERVICE/A";
+
+	UBYTE program_name[MAX_FILENAME_LEN];
+	LONG result = RETURN_FAIL;
+	LONG number;
+	LONG other_number;
+	LONG cache_size = 0;
+	LONG max_transmit = -1;
+	char env_workgroup_name[17];
+	char env_user_name[64];
+	char env_password[64];
+
+	/* Don't emit any debugging output before we are ready. */
+	SETDEBUGLEVEL(0);
 
 	/* This needs to be set up properly for ReportError()
 	 * to work.
@@ -1863,7 +2021,7 @@ MapErrnoToIoErr(int error)
 		{ E2BIG,			ERROR_TOO_MANY_ARGS },			/* Argument list too long */
 		{ EBADF,			ERROR_INVALID_LOCK },			/* Bad file descriptor */
 		{ ENOMEM,			ERROR_NO_FREE_STORE },			/* Cannot allocate memory */
-		{ EACCES,			ERROR_OBJECT_IN_USE },			/* Permission denied */
+		{ EACCES,			ERROR_OBJECT_NOT_FOUND},		/* Permission denied */
 		{ ENOTBLK,			ERROR_OBJECT_WRONG_TYPE },		/* Block device required */
 		{ EBUSY,			ERROR_OBJECT_IN_USE },			/* Device busy */
 		{ EEXIST,			ERROR_OBJECT_EXISTS },			/* File exists */
@@ -2129,22 +2287,6 @@ Cleanup(VOID)
 
 	#if defined(__amigaos4__)
 	{
-		if(IUtility != NULL)
-		{
-			DropInterface((struct Interface *)IUtility);
-			IUtility = NULL;
-		}
-	}
-	#endif /* __amigaos4__ */
-
-	if(UtilityBase != NULL)
-	{
-		CloseLibrary(UtilityBase);
-		UtilityBase = NULL;
-	}
-
-	#if defined(__amigaos4__)
-	{
 		if(IIcon != NULL)
 		{
 			DropInterface((struct Interface *)IIcon);
@@ -2185,28 +2327,6 @@ Cleanup(VOID)
 	{
 		DeletePool(MemoryPool);
 		MemoryPool = NULL;
-	}
-
-	#if defined(__amigaos4__)
-	{
-		if(IDOS != NULL)
-		{
-			DropInterface((struct Interface *)IDOS);
-			IDOS = NULL;
-		}
-	}
-	#endif /* __amigaos4__ */
-
-	if(DOSBase != NULL)
-	{
-		CloseLibrary(DOSBase);
-		DOSBase = NULL;
-	}
-
-	if(WBStartup != NULL)
-	{
-		Forbid();
-		ReplyMsg((struct Message *)WBStartup);
 	}
 
 	LEAVE();

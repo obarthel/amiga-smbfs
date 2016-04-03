@@ -74,7 +74,7 @@ LFLAGS = \
 
 OBJS = \
 	main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o \
-	utf-8-iso-8859-1-conversion.o
+	utf-8-iso-8859-1-conversion.o swap_stack_and_call.o
 
 ###############################################################################
 
@@ -110,6 +110,7 @@ smb_abstraction.o : smb_abstraction.c system_headers.h assert.h smbfs.h smb_abst
 sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h dump_smb.h
 dump_smb.o : dump_smb.c system_headers.h assert.h smbfs.h dump_smb.h quad_math.h
 utf-8-iso-8859-1-conversion.o : utf-8-iso-8859-1-conversion.c utf-8-iso-8859-1-conversion.h
+swap_stack_and_call.o : swap_stack_and_call.asm
 
 ###############################################################################
 
