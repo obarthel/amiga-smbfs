@@ -565,11 +565,10 @@ smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
 	BSET (p, 3, 'B');
 	BSET (p, 4, command);
 
-	p += 5;
-	memset (p, '\0', 19);
-	p += 19;
-	memset (p, '\0', 8); /* zap the signature */
-	p += 8;
+	/* Fixed header length (32 bytes). */
+	memset (&p[5], 0, 32 - 5);
+
+	p += 32;
 
 	WSET (buf, smb_tid, server->tid);
 	WSET (buf, smb_pid, 0); /* server->pid */
@@ -582,7 +581,7 @@ smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
 		WSET (buf, smb_flg2, 0x3); /* extended attributes supported, long names supported */
 	}
 
-	(*p++) = wct; /* wct */
+	(*p++) = wct;
 	p += 2 * wct;
 	WSET (p, 0, bcc);
 
@@ -2253,8 +2252,6 @@ smb_proc_reconnect (struct smb_server *server)
 	}
 
 	/* Now we are ready to send a SMB Negotiate Protocol packet. */
-	memset (packet, 0, SMB_HEADER_LEN);
-
 	plength = 0;
 	for (i = 0; prots[i].name != NULL; i++)
 		plength += strlen (prots[i].name) + 2;
@@ -2479,8 +2476,6 @@ smb_proc_reconnect (struct smb_server *server)
 
 		SHOWSTRING(full_share);
 
-		memset (packet, 0, SMB_HEADER_LEN);
-
 		smb_setup_header (server, SMBtconX, 4, password_len + full_share_len+1 + strlen(dev)+1);
 
 		WSET (packet, smb_vwv0, 0xFF);
@@ -2499,8 +2494,6 @@ smb_proc_reconnect (struct smb_server *server)
 		p += full_share_len+1;
 
 		strcpy(p,dev);
-
-		BSET(packet,smb_rcls,1);
 
 		if ((result = smb_request_ok (server, SMBtconX, 3, 0)) < 0)
 		{
