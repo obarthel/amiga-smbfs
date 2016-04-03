@@ -56,6 +56,7 @@
 #define ASM __asm
 #define REG(r,p) register __##r p
 #define INLINE __inline
+#define STDARGS __stdargs
 #endif /* __SASC */
 
 #if defined(__GNUC__)
@@ -63,6 +64,7 @@
 #define ASM
 #define REG(r,p) p __asm(#r)
 #define INLINE __inline__
+#define STDARGS
 #endif /* __GNUC__ */
 
 /****************************************************************************/

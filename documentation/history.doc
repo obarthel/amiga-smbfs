@@ -904,3 +904,23 @@ smbfs 1.97 (2.4.2016)
 
 - Last parameter word of SMB_COM_WRITE_RAW could have been
   uninitialized.
+
+
+smbfs 1.98 (2.4.2016)
+
+- SMB header is set to zero during every setup, and needs
+  not be reset again.
+
+- SMB_COM_TREE_CONNECT_ANDX no longer sets the error class
+  before sending a client request.
+
+- Changed mapping of ERRnoaccess (permission denied) from
+  ERROR_OBJECT_IN_USE to ERROR_OBJECT_NOT_FOUND, which is
+  closer to its purpose.
+
+
+smbfs 1.99 (3.4.2016)
+
+- Figured out that smbfs needs a minimum stack size of
+  20000 bytes to run correctly. Modified the startup
+  code to provide as much, if possible.
