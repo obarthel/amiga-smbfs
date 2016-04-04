@@ -133,6 +133,8 @@
 #define smb_vwv12	61
 #define smb_vwv13	63
 #define smb_vwv14	65
+#define smb_vwv15	67
+#define smb_vwv16	69
 
 /* these are the trans2 sub fields for primary requests */
 #define smb_tpscnt	smb_vwv0

@@ -430,11 +430,11 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	D(("read %ld bytes from offset %ld",len,offset));
 
 	/* SMB_COM_READ_RAW and SMB_COM_WRITE_RAW supported? */
-	if (f->server->server.capabilities & 1)
+	if (f->server->server.capabilities & CAP_RAW_MODE)
 	{
-		SHOWVALUE(f->server->server.max_xmit);
+		SHOWVALUE(f->server->server.max_buffer_size);
 
-		if(len <= 65535)
+		if(len <= f->server->server.max_raw_size)
 		{
 			result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, len, data);
 			if(result > 0)
@@ -451,7 +451,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 
 			do
 			{
-				n = min(len,65535);
+				n = min(len,f->server->server.max_raw_size);
 
 				result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, n, data);
 				if(result <= 0)
@@ -485,7 +485,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	 */
 	if (result <= 0 && num_bytes_read == 0)
 	{
-		maxsize = f->server->server.max_xmit - SMB_HEADER_LEN - 5 * 2 - 5;
+		maxsize = f->server->server.max_buffer_size - SMB_HEADER_LEN - 5 * 2 - 5;
 
 		do
 		{
@@ -538,7 +538,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 
 	/* Calculate maximum number of bytes that could be transfered with
 	   a single SMBwrite packet... */
-	maxsize = f->server->server.max_xmit - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;
+	maxsize = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;
 
 	if (len <= maxsize)
 	{
@@ -556,24 +556,20 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		/* Nothing was written yet. */
 		result = 0;
 
-		/* Added by Brian Willette - We were always checking bit 2 here, but
-		   according to the documentation I have, the newer versions of SMB put
-		   the SMB_RAW_WRITE AND SMB_RAW_READ capability in bit 1 */
-		if ((f->server->server.protocol >= PROTOCOL_NT1 && f->server->server.capabilities & 1)
-		 || (f->server->server.protocol < PROTOCOL_NT1 && f->server->server.capabilities & 2))
+		if (f->server->server.capabilities & CAP_RAW_MODE)
 		{
 			long max_xmit;
 			int n;
 
 			/* Try to send the maximum number of bytes with the two SMBwritebraw packets. */
-			max_xmit = 2 * f->server->server.max_xmit - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
+			max_xmit = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
 
 			/* If the number of bytes that should be transfered exceed the number of
 			   bytes that could be transfered by a single call to smb_proc_write_raw,
 			   the data is transfered as before: Only by the second packet, this
 			   prevents the CPU from copying the data into the transferbuffer. */
 			if (max_xmit < len)
-				max_xmit = f->server->server.max_xmit - 4;
+				max_xmit = f->server->server.max_buffer_size - 4;
 
 			do
 			{

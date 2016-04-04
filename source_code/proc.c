@@ -803,7 +803,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 {
 	char *buf = server->packet;
 	int result;
-	long len = server->max_xmit - 4;
+	long len = server->max_buffer_size - 4;
 	byte *p;
 
 	if (len >= count)
@@ -1198,7 +1198,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 	word bcc;
 	word count;
 	char status[SMB_STATUS_SIZE];
-	int entries_asked = (server->max_xmit - 100) / SMB_DIRINFO_SIZE;
+	int entries_asked = (server->max_buffer_size - 100) / SMB_DIRINFO_SIZE;
 	int dirlen = strlen (path);
 	char * mask;
 
@@ -1615,7 +1615,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 static int
 smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry)
 {
-	int max_matches = 512; /* this should actually be based on the max_xmit value */
+	int max_matches = 512; /* this should actually be based on the max_buffer_size value */
 
 	/* NT uses 260, OS/2 uses 2. Both accept 1. */
 	int info_level = server->protocol < PROTOCOL_NT1 ? 1 : 260;
@@ -1652,12 +1652,12 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	/* ZZZ experimental 'max_matches' adjustment */
 	/*
 	if(info_level == 260)
-		max_matches = server->max_xmit / 360;
+		max_matches = server->max_buffer_size / 360;
 	else
-		max_matches = server->max_xmit / 40;
+		max_matches = server->max_buffer_size / 40;
 	*/
 
-	SHOWVALUE(server->max_xmit);
+	SHOWVALUE(server->max_buffer_size);
 	SHOWVALUE(max_matches);
 
 	mask = malloc (dirlen);
@@ -1703,7 +1703,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 		WSET (outbuf, smb_tpscnt, 12 + masklen + 1);
 		WSET (outbuf, smb_tdscnt, 0);
 		WSET (outbuf, smb_mprcnt, 10);
-		WSET (outbuf, smb_mdrcnt, server->max_xmit);
+		WSET (outbuf, smb_mdrcnt, server->max_buffer_size);
 		WSET (outbuf, smb_msrcnt, 0);
 		WSET (outbuf, smb_flags, 0);
 		DSET (outbuf, smb_timeout, 0);
@@ -2157,23 +2157,22 @@ smb_proc_reconnect (struct smb_server *server)
 {
 	static const struct smb_prots prots[] =
 	{
-		{PROTOCOL_CORE, "PC NETWORK PROGRAM 1.0"},
-		{PROTOCOL_COREPLUS, "MICROSOFT NETWORKS 1.03"},
-		{PROTOCOL_LANMAN1, "MICROSOFT NETWORKS 3.0"},
-		{PROTOCOL_LANMAN1, "LANMAN1.0"},
-		{PROTOCOL_LANMAN2, "LM1.2X002"},
-		{PROTOCOL_NT1, "NT LM 0.12"},
-		{PROTOCOL_NT1, "NT LANMAN 1.0"},
-
-		{-1, NULL}
+		{PROTOCOL_CORE,		"PC NETWORK PROGRAM 1.0"},	/* Core Protocol */
+		{PROTOCOL_COREPLUS,	"MICROSOFT NETWORKS 1.03"},	/* CorePlus */
+		{PROTOCOL_LANMAN1,	"MICROSOFT NETWORKS 3.0"},	/* DOS LAN Manager 1.0 */
+		{PROTOCOL_LANMAN1,	"LANMAN1.0"},				/* LAN Manager 1.0 */
+		{PROTOCOL_LANMAN2,	"LM1.2X002"},				/* LAN Manager 2.0 */
+		{PROTOCOL_NT1,		"NT LM 0.12"},				/* NT LAN Manager */
+		{PROTOCOL_NT1,		"NT LANMAN 1.0"},
 	};
 
+	const int num_prots = sizeof(prots) / sizeof(prots[0]);
 	const char dev[] = "A:";
 	int i, plength;
-	int max_xmit = 1024; /* Space needed for first request. */
+	const int default_max_buffer_size = 1024; /* Space needed for first request. */
 	int given_max_xmit = server->mount_data.given_max_xmit;
 	int result;
-	word any_word;
+	word dialect_index;
 	byte *p;
 	unsigned char password[24];
 	int password_len;
@@ -2182,7 +2181,7 @@ smb_proc_reconnect (struct smb_server *server)
 	unsigned char full_share[SMB_MAXNAMELEN+1];
 	int full_share_len;
 	byte *packet;
-	word server_maxxmt;
+	word max_buffer_size;
 
 	/* Reception buffer size (buffer is allocated below) is always as large as the
 	 * maximum transmission buffer size, and could be larger if the transmission
@@ -2213,7 +2212,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 	packet = server->packet;
 
-	server->max_xmit = max_xmit;
+	server->max_buffer_size = default_max_buffer_size;
 
 	/* Prepend a NetBIOS header? */
 	if(!server->raw_smb)
@@ -2253,14 +2252,14 @@ smb_proc_reconnect (struct smb_server *server)
 
 	/* Now we are ready to send a SMB Negotiate Protocol packet. */
 	plength = 0;
-	for (i = 0; prots[i].name != NULL; i++)
+	for (i = 0; i < num_prots ; i++)
 		plength += strlen (prots[i].name) + 2;
 
 	smb_setup_header (server, SMBnegprot, 0, plength);
 
 	p = SMB_BUF (packet);
 
-	for (i = 0; prots[i].name != NULL; i++)
+	for (i = 0; i < num_prots ; i++)
 		p = smb_encode_dialect (p, prots[i].name, strlen (prots[i].name));
 
 	LOG (("smb_proc_connect: Request SMBnegprot...\n"));
@@ -2273,12 +2272,24 @@ smb_proc_reconnect (struct smb_server *server)
 	LOG (("Verified!\n"));
 
 	p = SMB_VWV (packet);
-	p = smb_decode_word (p, &any_word);
-	i = any_word;
+	p = smb_decode_word (p, &dialect_index);
 
-	server->protocol = prots[i].prot;
+	/* If the server does not support any of the listed
+	 * dialects, ist must return a dialect index of 0xFFFF.
+	 */
+	if(dialect_index > num_prots || dialect_index == 0xFFFFU)
+	{
+		LOG (("smb_proc_connect: Unsupported dialect\n"));
 
-	LOG (("smb_proc_connect: Server wants %s protocol.\n",prots[i].name));
+		result = -EACCES;
+		goto fail;
+	}
+
+	i = dialect_index;
+
+	server->protocol = prots[dialect_index].prot;
+
+	LOG (("smb_proc_connect: Server wants %s protocol.\n",prots[dialect_index].name));
 
 	if (server->protocol > PROTOCOL_LANMAN1)
 	{
@@ -2289,30 +2300,45 @@ smb_proc_reconnect (struct smb_server *server)
 		LOG (("smb_proc_connect: usernam = %s\n",server->mount_data.username));
 		LOG (("smb_proc_connect: blkmode = %ld\n",WVAL (packet, smb_vwv5)));
 
+		/* NT LAN Manager or newer. */
 		if (server->protocol >= PROTOCOL_NT1)
 		{
-			server_maxxmt = DVAL (packet, smb_vwv3 + 1);
-			server->capabilities = DVAL (packet, smb_vwv9 + 1);
-			server_sesskey = DVAL (packet, smb_vwv7 + 1);
-
 			server->security_mode = BVAL(packet, smb_vwv1);
+			max_buffer_size = DVAL (packet, smb_vwv3 + 1);
+			server->max_raw_size = DVAL (packet, smb_vwv5 + 1);
+			server_sesskey = DVAL (packet, smb_vwv7 + 1);
+			server->capabilities = DVAL (packet, smb_vwv9 + 1);
+			server->crypt_key_length = BVAL (packet, smb_vwv16 + 1);
 
-			memcpy(server->crypt_key,SMB_BUF(packet),8);
+			memcpy(server->crypt_key,SMB_BUF(packet),server->crypt_key_length);
 		}
+		/* LAN Manager 2.0 or older */
 		else
 		{
-			server_maxxmt = WVAL (packet, smb_vwv2);
-			server->capabilities = WVAL (packet, smb_vwv5);
-			server_sesskey = DVAL (packet, smb_vwv6);
+			word blkmode;
 
 			server->security_mode = BVAL(packet, smb_vwv1);
+			max_buffer_size = WVAL (packet, smb_vwv2);
+			/* Maximum raw read/write size is fixed to 65535 bytes. */
+			server->max_raw_size = 65535;
+			blkmode = WVAL (packet, smb_vwv5);
+			server_sesskey = DVAL (packet, smb_vwv6);
 
-			memcpy(server->crypt_key,SMB_BUF(packet),8);
+			/* Crypt key size is fixed to 8 bytes. */
+			server->crypt_key_length = 8;
+
+			memcpy(server->crypt_key,SMB_BUF(packet),server->crypt_key_length);
+
+			/* We translate this into capabilities. According to the
+			   LAN Manager 1.x/2.0 documentation both bits 0+1 being set
+			   means the same thing as CAP_RAW_MODE being set. */
+			if((blkmode & 3) == 3)
+				server->capabilities = CAP_RAW_MODE;
 		}
 
 		SHOWVALUE(server->security_mode);
 
-		if(server->security_mode & 2)
+		if(server->security_mode & NEGOTIATE_ENCRYPT_PASSWORDS)
 		{
 			SHOWMSG("encrypted passwords required");
 
@@ -2342,7 +2368,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 			PRINTHEADER();
 			PRINTF(("crypt_key: "));
-			for(i = 0 ; i < 8 ; i++)
+			for(i = 0 ; i < server->crypt_key_length ; i++)
 				PRINTF(("%02lx ",server->crypt_key[i]));
 			PRINTF(("\n"));
 		}
@@ -2355,7 +2381,7 @@ smb_proc_reconnect (struct smb_server *server)
 		}
 
 		/* If in share level security then don't send a password now */
-		if((server->security_mode & 1) == 0)
+		if((server->security_mode & NEGOTIATE_USER_SECURITY) == 0)
 		{
 			SHOWMSG("share level security; zapping passwords");
 			strcpy(password,"");
@@ -2369,6 +2395,8 @@ smb_proc_reconnect (struct smb_server *server)
 		SHOWVALUE(nt_password_len);
 
 		LOG (("smb_proc_connect: workgroup = %s\n", server->mount_data.workgroup_name));
+
+		/* NT LAN Manager or newer. */
 		if (server->protocol >= PROTOCOL_NT1)
 		{
 			char *OS_id = "AmigaOS";
@@ -2419,22 +2447,24 @@ smb_proc_reconnect (struct smb_server *server)
 
 			strcpy (p, client_id);
 		}
+		/* LAN Manager 2.0 or older */
 		else
 		{
 			smb_setup_header (server, SMBsesssetupX, 10, user_len + password_len);
 
-			WSET (packet, smb_vwv0, 0xff);
-			WSET (packet, smb_vwv1, 0);
-			WSET (packet, smb_vwv2, given_max_xmit);
-			WSET (packet, smb_vwv3, 2);
+			WSET (packet, smb_vwv0, 0xff);	/* No further ANDX command */
+			WSET (packet, smb_vwv1, 0);		/* ANDX offset = 0 */
+
+			WSET (packet, smb_vwv2, given_max_xmit);	/* maximum buffer size */
+			WSET (packet, smb_vwv3, 2);					/* maximum mpx count; should be copied from server */
 			WSET (packet, smb_vwv4, 0); /* server->pid */
 			DSET (packet, smb_vwv5, server_sesskey);
-			WSET (packet, smb_vwv7, password_len);
-			WSET (packet, smb_vwv8, 0);
-			WSET (packet, smb_vwv9, 0);
+			WSET (packet, smb_vwv7, password_len);	/* case sensitive password length */
+			WSET (packet, smb_vwv8, 0);	/* offset to encrypted password */
 
 			p = SMB_BUF (packet);
 			memcpy (p, server->mount_data.password, password_len);
+
 			p += password_len;
 			memcpy (p, server->mount_data.username, user_len);
 		}
@@ -2449,7 +2479,7 @@ smb_proc_reconnect (struct smb_server *server)
 	}
 	else
 	{
-		server_maxxmt = 0;
+		max_buffer_size = 0;
 		server->capabilities = 0;
 
 		password_len = strlen(server->mount_data.password)+1;
@@ -2505,9 +2535,9 @@ smb_proc_reconnect (struct smb_server *server)
 
 		SHOWVALUE(SMB_WCT(packet));
 
-		/* Changed, max_xmit hasn't been updated if a tconX message was send instead of tcon. */
-		if (server_maxxmt != 0)
-			server->max_xmit = server_maxxmt;
+		/* Changed, max_buffer_size hasn't been updated if a tconX message was send instead of tcon. */
+		if (max_buffer_size != 0)
+			server->max_buffer_size = max_buffer_size;
 
 		server->tid = WVAL(packet,smb_tid);
 	}
@@ -2534,30 +2564,30 @@ smb_proc_reconnect (struct smb_server *server)
 		p = SMB_VWV (packet);
 		p = smb_decode_word (p, &decoded_max_xmit);
 
-		server->max_xmit = decoded_max_xmit;
+		server->max_buffer_size = decoded_max_xmit;
 
-		SHOWVALUE(server->max_xmit);
+		SHOWVALUE(server->max_buffer_size);
 
 		/* Added by Brian Willette - We were ignoring the server's initial
 		   maxbuf value */
-		if (server_maxxmt != 0 && server->max_xmit > server_maxxmt)
-			server->max_xmit = server_maxxmt;
+		if (max_buffer_size != 0 && server->max_buffer_size > max_buffer_size)
+			server->max_buffer_size = max_buffer_size;
 
 		(void) smb_decode_word (p, &server->tid);
 	}
 
-	SHOWVALUE(server->max_xmit);
+	SHOWVALUE(server->max_buffer_size);
 
-	/* Ok, everything is fine. max_xmit does not include
-	   the TCP-SMB header of 4 bytes. */
-	if (server->max_xmit < 65535 - 4)
-		server->max_xmit += 4;
+	/* Ok, everything is fine. max_buffer_size does not include
+	   the SMB session header of 4 bytes. */
+	if (server->max_buffer_size < 65535 - 4)
+		server->max_buffer_size += 4;
 
-	/* Changed, max_xmit hasn't been updated if a tconX message was send instead of tcon. */
-	if (server->max_xmit > given_max_xmit)
-		server->max_xmit = given_max_xmit;
+	/* Changed, max_buffer_size hasn't been updated if a tconX message was send instead of tcon. */
+	if (server->max_buffer_size > given_max_xmit)
+		server->max_buffer_size = given_max_xmit;
 
-	LOG (("max_xmit = %ld, tid = %ld\n", server->max_xmit, server->tid));
+	LOG (("max_buffer_size = %ld, tid = %ld\n", server->max_buffer_size, server->tid));
 
 	LOG (("smb_proc_connect: Normal exit\n"));
 
@@ -2571,7 +2601,7 @@ smb_proc_reconnect (struct smb_server *server)
 }
 
 /* smb_proc_reconnect: server->packet is allocated with
-   server->max_xmit bytes if and only if we return >= 0 */
+   server->max_buffer_size bytes if and only if we return >= 0 */
 int
 smb_proc_connect (struct smb_server *server)
 {

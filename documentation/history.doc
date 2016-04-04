@@ -924,3 +924,31 @@ smbfs 1.99 (3.4.2016)
 - Figured out that smbfs needs a minimum stack size of
   20000 bytes to run correctly. Modified the startup
   code to provide as much, if possible.
+
+
+smbfs 1.100 (3.4.2016)
+
+- smb_proc_reconnect() is now much more paranoid when
+  it comes to verify that the negotiated protocol
+  makes sense. It actually bails out if the server
+  hasn't got a clue as to what protocol should be
+  used instead of doing who knows what.
+
+- If smb_proc_reconnect() negotiates LAN Manager 2.0
+  protocol or worse, it now sets up the capabilities
+  field to match what NT LAN Manager would have used.
+
+- smb_proc_reconnect() now reads and uses the maximum
+  raw read/write size from the server instead of just
+  assuming that it will be 65535 (appropriate for
+  LAN Manager 2.0 and older). Also, the challenge
+  key (crypt key) length is read correctly instead of
+  assuming that it will always be 8.
+
+
+smbfs 1.101 (4.4.2016)
+
+- Added documentation for SMB_COM_SESSION_SETUP_AND_X
+  with regard to the LANMAN 2.0 protocol variant of
+  the setup message in smb_proc_reconnect(). It really
+  does contain 10 parameter words.

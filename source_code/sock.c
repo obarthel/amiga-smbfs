@@ -213,7 +213,7 @@ smb_receive_trans2 (struct smb_server *server, int sock_fd, int *data_len, int *
 	total_data = WVAL (inbuf, smb_tdrcnt);
 	total_param = WVAL (inbuf, smb_tprcnt);
 
-	if ((total_data > server->max_xmit) || (total_param > server->max_xmit))
+	if ((total_data > server->max_buffer_size) || (total_param > server->max_buffer_size))
 	{
 		LOG (("smb_receive_trans2: data/param too long\n"));
 

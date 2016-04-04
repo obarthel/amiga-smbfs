@@ -56,8 +56,8 @@ VERSION = 1
  OPTIMIZE =	optimize opttime optinline optinlocal optschedule
  CPU =		any
 #CPU =		060
- DEBUG =	line define=DUMP_SMB
-#DEBUG =	symbolflush noopt define=DEBUG define=DUMP_SMB
+#DEBUG =	line define=DUMP_SMB
+ DEBUG =	symbolflush noopt define=DEBUG define=DUMP_SMB
 
 ###############################################################################
 
