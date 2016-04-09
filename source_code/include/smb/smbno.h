@@ -43,6 +43,14 @@
 #define ERRbadshare				32	/* Share mode on file conflict with open mode */
 #define ERRlock					33	/* Lock request conflicts with existing lock */
 #define ERRfilexists			80	/* File in operation already exists */
+#define ERRpaused				81
+#define ERRmsgoff				82
+#define ERRnoroom				83
+#define ERRrmuns				87
+#define ERRtimeout				88
+#define ERRnoresource			89
+#define ERRtoomanyuids			90
+#define ERRbaduid				91
 #define ERRbadpipe				230	/* Named pipe invalid */
 #define ERRpipebusy				231	/* All instances of pipe are busy */
 #define ERRpipeclosing			232	/* named pipe close in progress */
@@ -62,9 +70,11 @@
 #define ERRinvdevice	7		/* Invalid device */
 #define ERRqfull		49		/* Print queue full */
 #define ERRqtoobig		50		/* Queued item too big */
+#define ERRqeof			51
 #define ERRinvpfid		52		/* Invalid print file in smb_fid */
 #define ERRsmbcmd		64		/* Unrecognised command */
 #define ERRsrverror		65		/* smb server internal error */
+#define ERRbadBID		66
 #define ERRfilespecs	67		/* fid and pathname invalid combination */
 #define ERRbadlink		68		/* reserved */
 #define ERRbadpermits	69		/* Access specified for a file is not valid */
@@ -81,8 +91,13 @@
 #define ERRuseMPX		250		/* temporarily unable to use raw mode, use MPX mode */
 #define ERRuseSTD		251		/* temporarily unable to use raw mode, use std.mode */
 #define ERRcontMPX		252		/* resume MPX mode */
-#define ERRbadPW				/* reserved */
-#define ERRnosupport	0xFFFF
+#define ERRbadPW		254
+#define ERRnotifyEnumDir	1024
+#define ERRaccountExpired	2239
+#define ERRbadClient		2240
+#define ERRbadLogonTime		2241
+#define ERRpasswordExpired	2242
+#define ERRnosupport		0xFFFF
 
 /* Error codes for the ERRHRD class */
 
@@ -99,6 +114,8 @@
 #define ERRwrite		29		/* write fault */
 #define ERRread			30		/* read fault */
 #define ERRgeneral		31		/* General hardware failure */
+#define ERRbadshare		32
+#define ERRlock			33
 #define ERRwrongdisk	34
 #define ERRFCBunavail	35
 #define ERRsharebufexc	36		/* share buffer exceeded */
