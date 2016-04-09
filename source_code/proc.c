@@ -95,8 +95,7 @@ smb_encode_smb_length (byte * p, dword len)
 	p[3] = (len & 0xFF);
 
 	/* Length is actually a 17 bit integer. */
-	if (len > 0xFFFF)
-		p[1] |= 0x01;
+	p[1] |= (len >> 16) & 1;
 
 	return &p[4];
 }
@@ -2272,7 +2271,8 @@ smb_proc_reconnect (struct smb_server *server)
 	LOG (("Verified!\n"));
 
 	p = SMB_VWV (packet);
-	p = smb_decode_word (p, &dialect_index);
+
+	smb_decode_word (p, &dialect_index);
 
 	/* If the server does not support any of the listed
 	 * dialects, ist must return a dialect index of 0xFFFF.
@@ -2284,8 +2284,6 @@ smb_proc_reconnect (struct smb_server *server)
 		result = -EACCES;
 		goto fail;
 	}
-
-	i = dialect_index;
 
 	server->protocol = prots[dialect_index].prot;
 
@@ -2652,11 +2650,18 @@ static const err_code_struct dos_msgs[] =
 	{"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
 	{"ERRnosuchshare", 67, "Share name not found"},
 	{"ERRfilexists", 80, "The file named in a Create Directory, Make New File or Link request already exists"},
+	{"ERRpaused", 81, "The server is temporarily paused"},
+	{"ERRtimeout", 88, "The requested operation on a named pipe or an I/O device has timed out"},
+	{"ERRnoresource", 89, "No resources currently available for this SMB request"},
+	{"ERRtoomanyuids", 90, "Too many UIDs active for this SMB connection"},
+	{"ERRbaduid", 91, "The UID supplied is not known to the session, or the user identified by the UID does not have sufficient privileges"},
 	{"ERRbadpipe", 230, "Pipe invalid"},
 	{"ERRpipebusy", 231, "All instances of the requested pipe are busy"},
 	{"ERRpipeclosing", 232, "Pipe close in progress"},
 	{"ERRnotconnected", 233, "No process on other end of pipe"},
 	{"ERRmoredata", 234, "There is more data to be returned"},
+	{"ERROR_EAS_DIDNT_FIT", 275, "Either there are no extended attributes, or the available extended attributes did not fit into the response"},
+	{"ERROR_EAS_NOT_SUPPORTED", 282, "The server file system does not support Extended Attributes"},
 
 	{NULL, -1, NULL}
 };
@@ -2694,7 +2699,11 @@ static const err_code_struct server_msgs[] =
 	{"ERRusestd", 251, "Temp unable to support Raw, use standard read/write"},
 	{"ERRcontmpx", 252, "Continue in MPX mode"},
 	{"ERRreserved", 253, "reserved"},
-	{"ERRreserved", 254, "reserved"},
+	{"ERRbadPW", 254, "Invalid password"},
+	{"ERRaccountExpired", 2239, "User account on the target machine is disabled or has expired"},
+	{"ERRbadClient", 2240, "The client does not have permission to access this server"},
+	{"ERRbadLogonTime", 2241, "Access to the server is not permitted at this time"},
+	{"ERRpasswordExpired", 2242, "The user's password has expired"},
 	{"ERRnosupport", 0xFFFF, "Function not supported"},
 
 	{NULL, -1, NULL}
@@ -2721,6 +2730,7 @@ static const err_code_struct hard_msgs[] =
 	{"ERRwrongdisk", 34, "The wrong disk was found in a drive"},
 	{"ERRFCBUnavail", 35, "No FCBs are available to process request"},
 	{"ERRsharebufexc", 36, "A sharing buffer has been exceeded"},
+	{"ERRdiskfull", 39, "The file system is full"},
 
 	{NULL, -1, NULL}
 };
