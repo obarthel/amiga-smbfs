@@ -536,14 +536,14 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		goto out;
 	}
 
-	/* Calculate maximum number of bytes that could be transfered with
+	/* Calculate maximum number of bytes that could be transferred with
 	   a single SMBwrite packet... */
 	maxsize = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;
 
 	if (len <= maxsize)
 	{
 		/* Use a single SMBwrite packet whenever possible instead of a SMBwritebraw
-		   because that requires two packets to be send. */
+		   because that requires two packets to be sent. */
 		result = smb_proc_write (&f->server->server, &f->dirent, offset, len, data);
 		if(result < 0)
 			goto out;
@@ -564,9 +564,9 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 			/* Try to send the maximum number of bytes with the two SMBwritebraw packets. */
 			max_xmit = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
 
-			/* If the number of bytes that should be transfered exceed the number of
-			   bytes that could be transfered by a single call to smb_proc_write_raw,
-			   the data is transfered as before: Only by the second packet, this
+			/* If the number of bytes that should be transferred exceed the number of
+			   bytes that could be transferred by a single call to smb_proc_write_raw,
+			   the data is transfered as before: Only by the second packet. This
 			   prevents the CPU from copying the data into the transferbuffer. */
 			if (max_xmit < len)
 				max_xmit = f->server->server.max_buffer_size - 4;
@@ -578,7 +578,8 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 				if (n <= maxsize)
 				{
 					/* Use a single SMBwrite packet whenever possible instead of a
-					   SMBwritebraw because that requires two packets to be sent. */
+					 * SMBwritebraw because that requires two packets to be sent.
+					 */
 					result = smb_proc_write (&f->server->server, &f->dirent, offset, n, data);
 				}
 				else
@@ -639,16 +640,16 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
  out:
 
 	if (result < 0)
-	{
 		f->attr_time = -1;
-	}
-	else
-	{
+	else if (result > 0)
 		f->dirent.mtime = GetCurrentTime();
-
-		if (offset + num_bytes_written > f->dirent.size)
-			f->dirent.size = offset + num_bytes_written;
-	}
+	
+	/* Even if one write access failed, we may have succeeded
+	 * at writing some data. Hence we update the cached file
+	 * size here.
+	 */
+	if (offset + num_bytes_written > f->dirent.size)
+		f->dirent.size = offset + num_bytes_written;
 
 	return result;
 }
@@ -1270,21 +1271,28 @@ smb_invalidate_all_inodes (struct smb_server *server)
 /*****************************************************************************/
 
 static void
+free_dircache(dircache_t * the_dircache)
+{
+	int i;
+
+	for (i = 0; i < the_dircache->cache_size; i++)
+	{
+		if(the_dircache->cache[i].complete_path != NULL)
+			free(the_dircache->cache[i].complete_path);
+	}
+
+	free(the_dircache);
+}
+
+static void
 smba_cleanup_dircache(struct smba_server * server)
 {
-	dircache_t * the_dircache = server->dircache;
+	dircache_t * the_dircache;
 
+	the_dircache = server->dircache;
 	if(the_dircache != NULL)
 	{
-		int i;
-
-		for (i = 0; i < the_dircache->cache_size; i++)
-		{
-			if(the_dircache->cache[i].complete_path != NULL)
-				free(the_dircache->cache[i].complete_path);
-		}
-
-		free(the_dircache);
+		free_dircache(the_dircache);
 		server->dircache = NULL;
 	}
 }
@@ -1320,15 +1328,7 @@ smba_setup_dircache (struct smba_server * server,int cache_size)
  out:
 
 	if(the_dircache != NULL)
-	{
-		for (i = 0; i < the_dircache->cache_size; i++)
-		{
-			if(the_dircache->cache[i].complete_path != NULL)
-				free(the_dircache->cache[i].complete_path);
-		}
-
-		free(the_dircache);
-	}
+		free_dircache(the_dircache);
 
 	return(error);
 }
@@ -1398,7 +1398,8 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 }
 
 int
-smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,char *opt_servername,int opt_cachesize,int opt_max_transmit,int opt_raw_smb,smba_server_t ** result)
+smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,
+	char *opt_servername,int opt_cachesize,int opt_max_transmit,int opt_raw_smb,smba_server_t ** result)
 {
 	smba_connect_parameters_t par;
 	smba_server_t *the_server = NULL;
@@ -1450,12 +1451,12 @@ smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_passw
 			goto out;
 		}
 
-		/* Brian Willette: Now we will set the server name to the dns
-		   hostname, hopefully this will be the same as the netbios name for
+		/* Brian Willette: Now we will set the server name to the DNS
+		   hostname, hopefully this will be the same as the NetBIOS name for
 		   the server.
 		   We do this because the user supplied no hostname, and we
-		   need one for netbios, this is the best guess choice we have
-		   NOTE: If the names are different between DNS and netbios on
+		   need one for NetBIOS, this is the best guess choice we have
+		   NOTE: If the names are different between DNS and NetBIOS on
 		   the windows side, the user MUST use the -s option. */
 		for (i = 0; h->h_name[i] != '.' && h->h_name[i] != '\0' && i < 255; i++)
 			hostName[i] = h->h_name[i];
@@ -1576,18 +1577,23 @@ int
 smba_change_dircache_size(struct smba_server * server,int cache_size)
 {
 	dircache_t * new_cache;
-	dircache_t * the_dircache = server->dircache;
+	dircache_t * old_dircache = server->dircache;
 	int result;
 	int i;
 
-	result = the_dircache->cache_size;
+	result = old_dircache->cache_size;
 
+	/* We have to have a minimum cache size. */
 	if(cache_size < 10)
 		cache_size = 10;
 
-	if(cache_size == the_dircache->cache_size)
+	/* Don't do anything if the cache size has not changed. */
+	if(cache_size == old_dircache->cache_size)
 		goto out;
 
+	/* Allocate a new cache and set it up with defaults. Note that
+	 * the file name pointers in the cache are still not initialized.
+	 */
 	new_cache = malloc(sizeof(*new_cache) + (cache_size-1) * sizeof(new_cache->cache));
 	if(new_cache == NULL)
 		goto out;
@@ -1596,20 +1602,21 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 	new_cache->cache_size = cache_size;
 
 	/* If the new cache is to be larger than the old one, allocate additional file name slots. */
-	if(cache_size > the_dircache->cache_size)
+	if(cache_size > old_dircache->cache_size)
 	{
-		for(i = the_dircache->cache_size ; i < cache_size ; i++)
+		/* Initialize the file name pointers so that free_dircache()
+		 * can be called safely, if necessary.
+		 */
+		for(i = 0 ; i < cache_size ; i++)
+			new_cache->cache[i].complete_path = NULL;
+
+		/* Allocate memory for the file names. */
+		for(i = old_dircache->cache_size ; i < cache_size ; i++)
 		{
 			new_cache->cache[i].complete_path = malloc (SMB_MAXNAMELEN + 1);
 			if(new_cache->cache[i].complete_path == NULL)
 			{
-				int j;
-
-				for(j = the_dircache->cache_size ; j < i ; j++)
-					free(new_cache->cache[j].complete_path);
-
-				free(new_cache);
-
+				free_dircache(new_cache);
 				goto out;
 			}
 
@@ -1617,12 +1624,12 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 		}
 
 		/* Reuse the file name buffers allocated for the old cache. */
-		for(i = 0 ; i < the_dircache->cache_size ; i++)
+		for(i = 0 ; i < old_dircache->cache_size ; i++)
 		{
-			new_cache->cache[i].complete_path = the_dircache->cache[i].complete_path;
-			new_cache->cache[i].complete_path_size = the_dircache->cache[i].complete_path_size;
+			new_cache->cache[i].complete_path = old_dircache->cache[i].complete_path;
+			new_cache->cache[i].complete_path_size = old_dircache->cache[i].complete_path_size;
 
-			the_dircache->cache[i].complete_path = NULL;
+			old_dircache->cache[i].complete_path = NULL;
 		}
 	}
 	else
@@ -1630,21 +1637,16 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 		/* Reuse the file name buffers allocated for the old cache. */
 		for(i = 0 ; i < cache_size ; i++)
 		{
-			new_cache->cache[i].complete_path = the_dircache->cache[i].complete_path;
-			new_cache->cache[i].complete_path_size = the_dircache->cache[i].complete_path_size;
-			the_dircache->cache[i].complete_path = NULL;
+			new_cache->cache[i].complete_path = old_dircache->cache[i].complete_path;
+			new_cache->cache[i].complete_path_size = old_dircache->cache[i].complete_path_size;
+
+			old_dircache->cache[i].complete_path = NULL;
 		}
 	}
 
 	invalidate_dircache(server, NULL);
-
-	for (i = 0; i < the_dircache->cache_size; i++)
-	{
-		if(the_dircache->cache[i].complete_path != NULL)
-			free(the_dircache->cache[i].complete_path);
-	}
-
-	free(the_dircache);
+	
+	free_dircache(old_dircache);
 
 	server->dircache = new_cache;
 	result = cache_size;
