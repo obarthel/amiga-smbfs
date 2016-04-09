@@ -308,6 +308,9 @@ smb_receive_trans2 (struct smb_server *server, int sock_fd, int *data_len, int *
 
 		if (server->rcls != 0)
 		{
+			/* smb_trans2_request() will check server->rcls, etc. and
+			 * produce a matching error code value.
+			 */
 			result = -EIO;
 			goto fail;
 		}
