@@ -21,14 +21,10 @@
  */
 
 /*
- * cpr smbfs.debug domain=workgroup user=olsen password=bazong volume=olsen //felix/olsen
+ * cpr smbfs.debug domain=workgroup user=olsen password=... volume=olsen //felix/olsen
  * cpr smbfs.debug dumpsmb user=guest volume=amiga //windows7-amiga/Users/Public
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
- * break smba_start
- * break smba_connect
- * break smb_receive_raw
- *
- * smbfs.debug user=guest  volume=sicherung //192.168.1.76/sicherung-smb
+ * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  */
 
 #include "smbfs.h"
@@ -42,12 +38,6 @@
 /****************************************************************************/
 
 #include <smb/smb.h>
-
-/****************************************************************************/
-
-#if defined(__amigaos4__) && !defined(Flush)
-#define Flush(fh) FFlush(fh)
-#endif /* __amigaos4__ && !Flush */
 
 /****************************************************************************/
 
@@ -153,7 +143,7 @@ VOID ASM AsmFreePooled(REG(a0,APTR poolHeader),REG(a1,APTR memory),REG(d0,ULONG 
 /****************************************************************************/
 
 /* Forward declarations for local routines. */
-LONG _start(VOID);
+LONG _start(STRPTR args, LONG args_length, struct ExecBase * exec_base);
 LONG VARARGS68K LocalPrintf(STRPTR format, ...);
 STRPTR amitcp_strerror(int error);
 STRPTR host_strerror(int error);
@@ -174,7 +164,7 @@ int BroadcastNameQuery(char *name, char *scope, UBYTE *address);
 STATIC LONG main(VOID);
 STATIC ULONG get_stack_size(VOID);
 STATIC VOID stack_usage_init(struct StackSwapStruct * stk);
-STATIC ULONG stack_usage_exit(struct StackSwapStruct * stk);
+STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 
 /****************************************************************************/
 
@@ -231,13 +221,6 @@ STATIC LONG Action_SetComment(struct FileLock *parent, APTR bcpl_name, APTR bcpl
 STATIC LONG Action_LockRecord(struct FileNode *fn, LONG offset, LONG length, LONG mode, ULONG timeout, LONG *error_ptr);
 STATIC LONG Action_FreeRecord(struct FileNode *fn, LONG offset, LONG length, LONG *error_ptr);
 STATIC VOID HandleFileSystem(STRPTR device_name, STRPTR volume_name, STRPTR service_name);
-
-/****************************************************************************/
-
-/* This is in sock.c and controls whether SMB packets sent/received are
- * decoded and printed in the shell.
- */
-void control_smb_dump(int enable);
 
 /****************************************************************************/
 
@@ -325,12 +308,25 @@ STATIC UBYTE				M2A[256];
 
 /****************************************************************************/
 
+#if defined(__amigaos4__)
+
+/* The AmigaOS 2.x/3.x version needs about 20000 bytes of stack,
+ * which is allocated at runtime. This is how it's done with
+ * AmigaOS 4.x, for which the shell allocates the stack
+ * before launching the program.
+ */
+const char stack_size_cookie[] = "$STACK: 30000";
+
+#endif /* __amigaos4__ */
+
+/****************************************************************************/
+
 extern int STDARGS swap_stack_and_call(struct StackSwapStruct * stk,APTR function);
 
 /****************************************************************************/
 
 LONG
-_start(VOID)
+_start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 {
 	struct StackSwapStruct * stk = NULL;
 	APTR new_stack = NULL;
@@ -338,11 +334,15 @@ _start(VOID)
 	struct Process * this_process;
 	LONG result = RETURN_FAIL;
 
-	SysBase = (struct Library *)AbsExecBase;
-
 	#if defined(__amigaos4__)
 	{
+		SysBase = (struct Library *)exec_base;
+
 		IExec = (struct ExecIFace *)((struct ExecBase *)SysBase)->MainInterface;
+	}
+	#else
+	{
+		SysBase = (struct Library *)AbsExecBase;
 	}
 	#endif /* __amigaos4__ */
 
@@ -420,37 +420,61 @@ _start(VOID)
 		goto out;
 	}
 
-	if(get_stack_size() < new_stack_size)
-	{
-		/* Make the stack size a multiple of 32 bytes. */
-		new_stack_size = 32 + ((new_stack_size + 31UL) & ~31UL);
-
-		/* Allocate the stack swapping data structure
-		   and the stack space separately. */
-		stk = AllocVec(sizeof(*stk),MEMF_PUBLIC|MEMF_ANY);
-		if(stk == NULL)
-			goto out;
-
-		new_stack = AllocMem(new_stack_size,MEMF_PUBLIC|MEMF_ANY);
-		if(new_stack == NULL)
-			goto out;
-
-		/* Fill in the lower and upper bounds, then take care of
-		   the stack pointer itself. */
-		stk->stk_Lower		= new_stack;
-		stk->stk_Upper		= ((ULONG)new_stack) + new_stack_size;
-		stk->stk_Pointer	= (APTR)(stk->stk_Upper - 32);
-
-		/* stack_usage_init(stk); */
-
-		result = swap_stack_and_call(stk,(APTR)main);
-
-		/* Printf("stack size used = %ld\n",stack_usage_exit(stk)); */
-	}
-	else
+	/* For AmigaOS4 we expect the stack size to be
+	 * sufficient, because of the "STACK" string
+	 * cookie.
+	 */
+	#if defined(__amigaos4__)
 	{
 		result = main();
 	}
+	/* For AmigaOS 2.x/3.x we check how much stack size the
+	 * program has available and, if necessary, allocate
+	 * a larger stack and use that instead.
+	 */
+	#else
+	{
+		/* Not enough stack size available? */
+		if(get_stack_size() < new_stack_size)
+		{
+			/* Make the new stack size a multiple of 32 bytes. */
+			new_stack_size = 32 + ((new_stack_size + 31UL) & ~31UL);
+
+			/* Allocate the new stack swapping data structure
+			 * and the stack space separately.
+			 */
+			stk = AllocVec(sizeof(*stk),MEMF_PUBLIC|MEMF_ANY);
+			if(stk == NULL)
+				goto out;
+
+			new_stack = AllocMem(new_stack_size,MEMF_PUBLIC|MEMF_ANY);
+			if(new_stack == NULL)
+				goto out;
+
+			/* Fill in the lower and upper bounds, then take care of
+			 * the stack pointer itself.
+			 */
+			stk->stk_Lower		= new_stack;
+			stk->stk_Upper		= ((ULONG)new_stack) + new_stack_size;
+			stk->stk_Pointer	= (APTR)(stk->stk_Upper - 32);
+
+			/* Testing: fill the stack with a preset pattern, so that we
+			 * can measure later how much stack space was used.
+			 */
+			/* stack_usage_init(stk); */
+
+			result = swap_stack_and_call(stk,(APTR)main);
+
+			/* Testing: figure out how much stack space was used. */
+			/* Printf("stack size used = %ld\n",stack_usage_exit(stk)); */
+		}
+		/* Sufficient stack space is available. */
+		else
+		{
+			result = main();
+		}
+	}
+	#endif /* __amigaos4__ */
 
  out:
 
@@ -503,6 +527,9 @@ _start(VOID)
 
 /****************************************************************************/
 
+/* Figure out how much stack size is available to the running
+ * Task. Returns the size in bytes.
+ */
 STATIC ULONG
 get_stack_size(VOID)
 {
@@ -521,10 +548,17 @@ get_stack_size(VOID)
 
 /****************************************************************************/
 
+/* This byte value is used to detect how much stack size
+ * was being used.
+ */
 #define STACK_FILL_COOKIE 0xA1
 
 /****************************************************************************/
 
+/* Testing: Fill the stack memory with a well-defined value which can later
+ * be used to figure out how much stack space was used by the program.
+ * This is needed by stack_usage_exit().
+ */
 STATIC VOID
 stack_usage_init(struct StackSwapStruct * stk)
 {
@@ -533,8 +567,12 @@ stack_usage_init(struct StackSwapStruct * stk)
 	memset(stk->stk_Lower,STACK_FILL_COOKIE,stack_size);
 }
 
+/* Testing: Check how much stack space was used by looking at where
+ * the test pattern previously written to the stack memory was
+ * overwritten. Returns how much space was used in bytes.
+ */
 STATIC ULONG
-stack_usage_exit(struct StackSwapStruct * stk)
+stack_usage_exit(const struct StackSwapStruct * stk)
 {
 	const UBYTE * m = (const UBYTE *)stk->stk_Lower;
 	size_t stack_size = ((ULONG)stk->stk_Upper - (ULONG)stk->stk_Lower);
@@ -543,15 +581,17 @@ stack_usage_exit(struct StackSwapStruct * stk)
 	total = 0;
 
 	/* Figure out how much of the stack was used by checking
-	   if the fill pattern was overwritten. */
+	 * if the fill pattern was overwritten.
+	 */
 	for(i = 0 ; i < stack_size ; i++)
 	{
 		/* Strangely, the first long word is always trashed,
-		   even if the stack doesn't grow down this far... */
+		 * even if the stack doesn't grow down this far...
+		 */
 		if(i > sizeof(LONG) && m[i] != STACK_FILL_COOKIE)
 			break;
 
-		total++;				
+		total++;
 	}
 
 	return(total);
@@ -559,6 +599,7 @@ stack_usage_exit(struct StackSwapStruct * stk)
 
 /****************************************************************************/
 
+/* This is the traditional main() program. */
 STATIC LONG
 main(VOID)
 {
@@ -2178,7 +2219,7 @@ Cleanup(VOID)
 	ENTER();
 
 	/* If any errors have cropped up, display them now before
-	 * call it quits.
+	 * we call it quits.
 	 */
 	DisplayErrorList();
 
@@ -3073,25 +3114,38 @@ Action_DeleteObject(
 		parent_name = NULL;
 	}
 
+	/* Name string, as given in the DOS packet, is in
+	 * BCPL format and needs to be converted into
+	 * 'C' format.
+	 */
 	ConvertBString(sizeof(name),name,bcpl_name);
 
+	/* Translate the Amiga file name into UTF-8 encoded form? */
 	if (TranslateUTF8)
 	{
 		UBYTE encoded_name[MAX_FILENAME_LEN];
 		int encoded_name_len;
 		LONG name_len = strlen(name);
 
+		/* Figure out how long the UTF-8 version will become. */
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+		
+		/* Encoding error occured, or the resulting name is longer than the buffer will hold? */
 		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
 		}
 
+		/* Repeat the encoding process, writing the result to the
+		 * replacement name buffer now.
+		 */
 		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
 
+		/* Copy it back to the conversion buffer (which is not terribly efficient, though). */
 		strlcpy(name,encoded_name,sizeof(name));
 	}
+	/* Translate the Amiga file name using a translation table? */
 	else if (TranslateNames)
 	{
 		TranslateCName(name,A2M);
@@ -4194,27 +4248,43 @@ Action_ExamineObject(
 				goto out;
 			}
 
+			/* Translate the name of the file/directory from UTF-8
+			 * into AmigaOS ISO 8859-1 (ISO Latin 1) encoding?
+			 */
 			if(TranslateUTF8)
 			{
 				UBYTE decoded_name[MAX_FILENAME_LEN];
 				int decoded_name_len;
 
+				/* Try to decode the file file, translating it into ISO 8859-1 format. */
 				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
+				
+				/* Decoding error occured, or the decoded name would be longer than
+				 * buffer would allow?
+				 */
 				if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
 				{
 					error = ERROR_INVALID_COMPONENT_NAME;
 					goto out;
 				}
 
+				/* Decode the name for real. */
 				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
 
+				/* Store the decoded name in the form expected
+				 * by dos.library (which will then translate it again).
+				 */
 				fib->fib_FileName[0] = decoded_name_len;
 				memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
 			}
 			else
 			{
+				/* Store the file/directory name in the form expected
+				 * by dos.library.
+				 */
 				ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
+				/* If necessary, translate the name to Amiga format using a mapping table. */
 				if(TranslateNames)
 					TranslateBName(fib->fib_FileName,M2A);
 			}
@@ -6468,7 +6538,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 	done = FALSE;
 
 	/* Raise the Task priority of the file system to 10
-	 * unless it already running at priority 10 or higher.
+	 * unless it already is running at priority 10 or higher.
 	 */
 	Forbid();
 

@@ -56,6 +56,10 @@
 #include <dos/rdargs.h>
 #include <dos/exall.h>
 
+#if defined(__amigaos4__)
+#include <dos/obsolete.h>
+#endif /* __amigaos4__ */
+
 #include <exec/memory.h>
 
 #include <devices/timer.h>
