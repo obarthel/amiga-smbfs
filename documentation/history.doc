@@ -952,3 +952,20 @@ smbfs 1.101 (4.4.2016)
   with regard to the LANMAN 2.0 protocol variant of
   the setup message in smb_proc_reconnect(). It really
   does contain 10 parameter words.
+
+
+smbfs 1.102 (9.4.2016)
+
+- Now builds properly for AmigaOS4.
+
+- in proc.c smb_encode_smb_length() now properly fills
+  in bit #17 of the message length instead of just
+  checking for the message to be longer than 65535
+  bytes.
+
+- Added the few missing error messages for error codes
+  covered by the "Common Internet File System (CIFS) Protocol"
+  documentation.
+
+- smba_write() now updates the cached file size if it
+  manages to execute one successful write operation.
