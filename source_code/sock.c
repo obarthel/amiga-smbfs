@@ -563,6 +563,7 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 	int result;
 	byte nb_header[4];
 	int sock_fd = server->mount_data.fd;
+	int num_bytes_written = 0;
 
 	if (server->state != CONN_VALID)
 	{
@@ -573,13 +574,30 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 	/* Send the NetBIOS header. */
 	smb_encode_smb_length (nb_header, length);
 
-	result = send (sock_fd, (void *) nb_header, 4, 0);
+	#if defined(DUMP_SMB)
+	dump_netbios_header(__FILE__,__LINE__,nb_header,NULL,0);
+	#endif /* defined(DUMP_SMB) */
+
+	result = send (sock_fd, nb_header, 4, 0);
 	if (result == 4)
 	{
+		#if defined(DUMP_SMB)
+		dump_smb(__FILE__,__LINE__,0,source,length,smb_packet_from_consumer,server->max_recv);
+		#endif /* defined(DUMP_SMB) */
+
 		/* Now send the data to be written. */
-		result = send (sock_fd, (void *) source, length, 0);
-		if(result < 0)
+		result = send (sock_fd, (void *)source, length, 0);
+		if(result >= 0)
+		{
+			num_bytes_written = result;
+
+			/* Wait for the server to respond. */
+			result = smb_receive (server, sock_fd);
+		}
+		else
+		{
 			result = (-errno);
+		}
 	}
 	else
 	{
@@ -591,23 +609,18 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 
 	LOG (("smb_request_write_raw: send returned %ld\n", result));
 
-	/* If the write operation succeeded, wait for the
-	 * server to confirm it.
-	 */
-	if (result == length)
-		result = smb_receive (server, sock_fd);
-
  out:
 
-	if (result < 0)
+	if (result >= 0)
+	{
+		result = length;
+	}
+	else
 	{
 		server->state = CONN_INVALID;
 
 		smb_invalidate_all_inodes (server);
 	}
-
-	if (result > 0)
-		result = length;
 
 	LOG (("smb_request_write_raw: result = %ld\n", result));
 
