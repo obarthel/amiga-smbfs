@@ -969,3 +969,62 @@ smbfs 1.102 (9.4.2016)
 
 - smba_write() now updates the cached file size if it
   manages to execute one successful write operation.
+
+
+smbfs 1.103 (14.4.2016)
+
+- Added DUMPSMBLEVEL option which controls how much raw
+  data output is produced. By default (level 0) no raw
+  data output is produced at all. Level 1 will print the
+  contents of the command data area. Level 2 will print
+  the raw data used by the respective commands, with any
+  management/control information stripped off.
+
+
+smbfs 1.104 (16.4.2016)
+
+- For smb_request_write_raw() return values of 0 now indicate success.
+
+- Simplified the raw read portion of smba_read() by removing the test
+  that avoids dropping into a read loop below. The loop handles the
+  special case well.
+  
+- Recalculated the overhead for SMB_COM_READ. It's still 52 bytes,
+  but now the documentation states how this number comes about.
+  
+- Recalculated the overhead for SMB_COM_WRITE. It's 52 bytes and
+  not 56 bytes.
+
+- Recalculated the overhead for the SMB_COM_WRITE_RAW command, and
+  it's 63 bytes, not 4.
+
+- Unless smb_proc_write_raw() finds that sending the packet results
+  in a transmission error, it will try to pick up the server responses.
+  Previously, it would not even try that, which could deadlock the
+  client<->server message exchange.
+
+
+smbfs 1.105 (16.4.2016)
+
+- Fixed decoding of maximum buffer size; this used to come out
+  as 0, which made smbfs switch back to the default minimum
+  supported (1024 bytes).
+
+- Corrected use of the maximum raw write size as the size used
+  by the client to perform raw reads with. The maximum allowed
+  are 65535 bytes for a raw read request. Likewise, the
+  maximum raw write size is 65535 bytes, too.
+
+
+smbfs 1.106 (17.4.2016)
+
+- More detailed error class/code translation information now
+  shows up in the debug log.
+
+- The SMB dump output can now be stored in a file, rather than
+  having to be redirected to one. When storing it in a file,
+  the output will be appended to an existing file, otherwise
+  a new file will be created.
+
+- The raw read/write functions now respect the upper limit
+  for the amount of data to be written, as given by the server.

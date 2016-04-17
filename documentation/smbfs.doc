@@ -139,7 +139,8 @@ described below. The command template looks like this:
    SERVER=SERVERNAME/K,DEVICE=DEVICENAME/K,VOLUME=VOLUMENAME/K,
    CACHE=CACHESIZE/N/K,MAXTRANSMIT/N/K,DEBUGLEVEL=DEBUG/N/K,
    TZ=TIMEZONEOFFSET/N/K,DST=DSTOFFSET/N/K,NETBIOS/S,DUMPSMB/S,
-   UTF8/S,TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
+   DUMPSMBLEVEL/N/K,DUMPSMBFILE/K,UTF8/S,
+   TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
 
 The individual options serve the following purposes:
 
@@ -362,6 +363,26 @@ The individual options serve the following purposes:
       of smbfs to a protocol file because a lot of output will be generated
       which is useful only for later analysis and not so much for viewing
       it scroll by in the shell.
+
+      You can have the dumped information written straight to a file using
+      the DUMPSMBFILE option described below.
+
+   DUMPSMBLEVEL/N/K
+
+      By default the SMB data decoded will not include a representation
+      of the respective message data. This information is not always needed,
+      which is why you can activate it by using the DUMPSMBLEVEL=1
+      option. If the contents of raw read/write message data is needed, too,
+      please use DUMPSMBLEVEL=1.
+
+   DUMPSMBFILE/K
+
+      The decoded SMB message information can be written to a file rather
+      than printed in the shell. Use the DUMPSMBFILE option to state which
+      file it should be written to. If the file cannot be created, then
+      the SMB message information will still be printed in the shell.
+      Note that if you specify an existing file, the new output will be
+      appended to it.
 
    TRANSLATE=TRANSLATIONFILE/K
 
