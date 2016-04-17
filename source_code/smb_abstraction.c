@@ -417,7 +417,7 @@ int
 smba_read (smba_file_t * f, char *data, long len, long offset)
 {
 	int num_bytes_read = 0;
-	int maxsize, count, result;
+	int maxsize, count, result = 0;
 	int errnum;
 
 	errnum = make_open (f, 1);
@@ -432,52 +432,36 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	/* SMB_COM_READ_RAW and SMB_COM_WRITE_RAW supported? */
 	if (f->server->server.capabilities & CAP_RAW_MODE)
 	{
-		SHOWVALUE(f->server->server.max_buffer_size);
+		dword max_raw_size = f->server->server.max_raw_size;
+		int n;
 
-		if(len <= f->server->server.max_raw_size)
+		do
 		{
-			result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, len, data);
-			if(result > 0)
+			n = min(len,max_raw_size);
+
+			/* SMB_COM_READ_RAW can only read up to 65535 bytes. */
+			if(n > 65535)
+				n = 65535;
+
+			result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, n, data);
+			if(result <= 0)
 			{
-				num_bytes_read += result;
-				offset += result;
+				D(("!!! wanted to read %ld bytes, got %ld",n,result));
+				break;
 			}
 
-			LOG (("smb_proc_read_raw(%s)->%ld\n", f->dirent.complete_path, result));
-		}
-		else
-		{
-			int n;
+			num_bytes_read += result;
+			len -= result;
+			offset += result;
+			data += result;
 
-			do
+			if(result < n)
 			{
-				n = min(len,f->server->server.max_raw_size);
-
-				result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, n, data);
-				if(result <= 0)
-				{
-					D(("!!! wanted to read %ld bytes, got %ld",n,result));
-					break;
-				}
-
-				num_bytes_read += result;
-				len -= result;
-				offset += result;
-				data += result;
-
-				if(result < n)
-				{
-					D(("read returned fewer characters than expected (%ld < %ld)",result,n));
-					break;
-				}
+				D(("read returned fewer characters than expected (%ld < %ld)",result,n));
+				break;
 			}
-			while(len > 0);
 		}
-	}
-	else
-	{
-		/* Nothing read so far. */
-		result = 0;
+		while(len > 0);
 	}
 
 	/* Raw read not supported and no data read yet?
@@ -485,11 +469,35 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	 */
 	if (result <= 0 && num_bytes_read == 0)
 	{
-		maxsize = f->server->server.max_buffer_size - SMB_HEADER_LEN - 5 * 2 - 5;
+		/* Calculate maximum number of bytes that could be transferred with
+		 * a single SMBread packet...
+		 *
+		 * 'max_buffer_size' is the maximum size of a complete SMB message
+		 * including the message header, the parameter and data blocks.
+		 *
+		 * The message header accounts for
+		 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+		 * = 32 bytes
+		 *
+		 * The parameters of a SMB_COM_READ response account for
+		 * 1(wordcount)+2(countofbytesreturned)+8(reserved)
+		 * = 11 bytes
+		 *
+		 * The data part of a SMB_COM_READ response account for
+		 * 2(bytecount)+1(bufferformat)+2(countofbytesread) = 5 bytes,
+		 * not including the actual payload
+		 *
+		 * This leaves 'max_buffer_size' - 48 for the payload.
+		 */
+		/*maxsize = f->server->server.max_buffer_size - SMB_HEADER_LEN - 5 * 2 - 5;*/
+		maxsize = f->server->server.max_buffer_size - 48 - 4;
 
 		do
 		{
 			count = min(len,maxsize);
+			if(count == 0)
+				break;
 
 			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, data, 0);
 			if (result < 0)
@@ -526,7 +534,7 @@ int
 smba_write (smba_file_t * f, char *data, long len, long offset)
 {
 	int maxsize, count, result;
-	long num_bytes_written = 0;
+	int num_bytes_written = 0;
 	int errnum;
 
 	errnum = make_open (f, 1);
@@ -537,13 +545,38 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 	}
 
 	/* Calculate maximum number of bytes that could be transferred with
-	   a single SMBwrite packet... */
-	maxsize = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;
+	 * a single SMBwrite packet...
+	 *
+	 * 'max_buffer_size' is the maximum size of a complete SMB message
+	 * including the message header, the parameter and data blocks.
+	 *
+	 * The message header accounts for
+	 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+	 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+	 * = 32 bytes
+	 *
+	 * The parameters of a SMB_COM_WRITE command account for
+	 * 1(wordcount)+2(fid)+2(countofbytestowrite)+4(writeoffsetinbytes)+
+	 * 2(estimateofremainingbytestobewritten) = 11 bytes
+	 *
+	 * The data part of a SMB_COM_WRITE command account for
+	 * 2(bytecount)+1(bufferformat)+2(datalength) = 5 bytes, not including
+	 * the actual payload
+	 *
+	 * This leaves 'max_buffer_size' - 48 for the payload.
+	 */
+	/*maxsize = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
+	maxsize = f->server->server.max_buffer_size - 48 - 4;
+
+	LOG (("len = %ld, maxsize = %ld\n", len, maxsize));
 
 	if (len <= maxsize)
 	{
+		LOG (("use single write\n"));
+
 		/* Use a single SMBwrite packet whenever possible instead of a SMBwritebraw
-		   because that requires two packets to be sent. */
+		 * because that requires two packets to be sent.
+		 */
 		result = smb_proc_write (&f->server->server, &f->dirent, offset, len, data);
 		if(result < 0)
 			goto out;
@@ -558,18 +591,26 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 
 		if (f->server->server.capabilities & CAP_RAW_MODE)
 		{
-			long max_xmit;
+			dword max_raw_size = f->server->server.max_raw_size;
+			int max_xmit;
 			int n;
 
 			/* Try to send the maximum number of bytes with the two SMBwritebraw packets. */
 			max_xmit = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
 
+			LOG (("len = %ld, max_xmit = %ld\n", len, max_xmit));
+
 			/* If the number of bytes that should be transferred exceed the number of
-			   bytes that could be transferred by a single call to smb_proc_write_raw,
-			   the data is transfered as before: Only by the second packet. This
-			   prevents the CPU from copying the data into the transferbuffer. */
+			 * bytes that could be transferred by a single call to smb_proc_write_raw(),
+			 * the data is transfered as before: Only by the second packet. This
+			 * prevents the CPU from copying the data into the transferbuffer.
+			 */
 			if (max_xmit < len)
+			{
 				max_xmit = f->server->server.max_buffer_size - 4;
+
+				LOG (("max_xmit changed to %ld\n", max_xmit));
+			}
 
 			do
 			{
@@ -577,6 +618,8 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 
 				if (n <= maxsize)
 				{
+					LOG (("n (%ld) <= maxsize (%ld)\n", n, maxsize));
+
 					/* Use a single SMBwrite packet whenever possible instead of a
 					 * SMBwritebraw because that requires two packets to be sent.
 					 */
@@ -584,6 +627,15 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 				}
 				else
 				{
+					if(n > max_raw_size)
+						n = max_raw_size;
+					
+					/* Maximum SMB_COM_RAW_WRITE length is 65535 bytes. */
+					if(n > 65535)
+						n = 65535;
+
+					LOG (("n (%ld) > maxsize (%ld)\n", n, maxsize));
+
 					result = smb_proc_write_raw (&f->server->server, &f->dirent, offset, n, data);
 				}
 
@@ -610,9 +662,13 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		 */
 		if (result <= 0 && num_bytes_written == 0)
 		{
+			LOG (("resume with single writes len = %ld, maxsize = %ld\n", len, maxsize));
+
 			do
 			{
 				count = min(len,maxsize);
+				if(count == 0)
+					break;
 
 				result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data);
 				if (result < 0)
