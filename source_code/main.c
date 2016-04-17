@@ -623,6 +623,8 @@ main(VOID)
 		NUMBER	DSTOffset;
 		SWITCH	NetBIOSTransport;
 		SWITCH	DumpSMB;
+		NUMBER	DumpSMBLevel;
+		KEY		DumpSMBFile;
 		SWITCH	UTF8;
 		KEY		TranslationFile;
 		KEY		Service;
@@ -647,6 +649,8 @@ main(VOID)
 		"DST=DSTOFFSET/N/K,"
 		"NETBIOS/S,"
 		"DUMPSMB/S,"
+		"DUMPSMBLEVEL/N/K,"
+		"DUMPSMBFILE/K,"
 		"UTF8/S,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
 		"SERVICE/A";
@@ -1013,8 +1017,13 @@ main(VOID)
 	/* Enable SMB packet decoding, but only if not started from Workbench. */
 	#if defined(DUMP_SMB)
 	{
+		LONG dump_smb_level = 0;
+
+		if(args.DumpSMBLevel != NULL)
+			dump_smb_level = (*args.DumpSMBLevel);
+
 		if(args.DumpSMB && WBStartup == NULL)
-			control_smb_dump(TRUE);
+			control_smb_dump(TRUE, dump_smb_level, (const char *)args.DumpSMBFile);
 	}
 	#endif /* DUMP_SMB */
 
@@ -1053,6 +1062,13 @@ main(VOID)
 	}
 
  out:
+
+	#if defined(DUMP_SMB)
+	{
+		if(args.DumpSMB && WBStartup == NULL)
+			control_smb_dump(FALSE, 0, NULL);
+	}
+	#endif /* DUMP_SMB */
 
 	Cleanup();
 
@@ -1095,8 +1111,6 @@ amitcp_strerror(int error)
 	struct TagItem tags[2];
 	STRPTR result;
 
-	ENTER();
-
 	tags[0].ti_Tag	= SBTM_GETVAL(SBTC_ERRNOSTRPTR);
 	tags[0].ti_Data	= error;
 	tags[1].ti_Tag	= TAG_END;
@@ -1105,7 +1119,6 @@ amitcp_strerror(int error)
 
 	result = (STRPTR)tags[0].ti_Data;
 
-	RETURN(result);
 	return(result);
 }
 
@@ -1118,8 +1131,6 @@ host_strerror(int error)
 	struct TagItem tags[2];
 	STRPTR result;
 
-	ENTER();
-
 	tags[0].ti_Tag	= SBTM_GETVAL(SBTC_HERRNOSTRPTR);
 	tags[0].ti_Data	= error;
 	tags[1].ti_Tag	= TAG_END;
@@ -1128,7 +1139,6 @@ host_strerror(int error)
 
 	result = (STRPTR)tags[0].ti_Data;
 
-	RETURN(result);
 	return(result);
 }
 
@@ -2062,7 +2072,7 @@ MapErrnoToIoErr(int error)
 		{ E2BIG,			ERROR_TOO_MANY_ARGS },			/* Argument list too long */
 		{ EBADF,			ERROR_INVALID_LOCK },			/* Bad file descriptor */
 		{ ENOMEM,			ERROR_NO_FREE_STORE },			/* Cannot allocate memory */
-		{ EACCES,			ERROR_OBJECT_NOT_FOUND},		/* Permission denied */
+		{ EACCES,			ERROR_OBJECT_NOT_FOUND },		/* Permission denied */
 		{ ENOTBLK,			ERROR_OBJECT_WRONG_TYPE },		/* Block device required */
 		{ EBUSY,			ERROR_OBJECT_IN_USE },			/* Device busy */
 		{ EEXIST,			ERROR_OBJECT_EXISTS },			/* File exists */
@@ -2125,6 +2135,16 @@ MapErrnoToIoErr(int error)
 			break;
 		}
 	}
+
+	#if DEBUG
+	{
+		UBYTE amigados_error_text[256];
+
+		Fault(result,NULL,amigados_error_text,sizeof(amigados_error_text));
+
+		LOG(("Translated POSIX error code %ld (%s), to AmigaDOS error code %ld (%s)\n", error, amitcp_strerror(error), result, amigados_error_text));
+	}
+	#endif /* DEBUG */
 
 	RETURN(result);
 	return(result);
