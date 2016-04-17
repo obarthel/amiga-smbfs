@@ -34,7 +34,8 @@
 /*****************************************************************************/
 
 static INLINE byte * smb_encode_word(byte *p, word data);
-static INLINE byte * smb_decode_word(byte *p, word *data);
+static INLINE byte * smb_decode_word(const byte *p, word *data);
+static INLINE byte * smb_decode_dword(const byte *p, dword *data);
 static INLINE word smb_bcc(const byte *packet);
 static INLINE int smb_verify(const byte *packet, int command, int wct, int bcc);
 static byte *smb_encode_dialect(byte *p, const byte *name, int len);
@@ -61,6 +62,149 @@ static void smb_printerr(int class, int num);
 
 /*****************************************************************************/
 
+/* error code stuff - put together by Merik Karman
+   merik -at- blackadder -dot- dsh -dot- oz -dot- au */
+typedef struct
+{
+	char *name;
+	int code;
+	char *message;
+} err_code_struct;
+
+/* Dos Error Messages */
+static const err_code_struct dos_msgs[] =
+{
+	{"ERRbadfunc", 1, "Invalid function"},
+	{"ERRbadfile", 2, "File not found"},
+	{"ERRbadpath", 3, "Directory invalid"},
+	{"ERRnofids", 4, "No file descriptors available"},
+	{"ERRnoaccess", 5, "Access denied"},
+	{"ERRbadfid", 6, "Invalid file handle"},
+	{"ERRbadmcb", 7, "Memory control blocks destroyed"},
+	{"ERRnomem", 8, "Insufficient server memory to perform the requested function"},
+	{"ERRbadmem", 9, "Invalid memory block address"},
+	{"ERRbadenv", 10, "Invalid environment"},
+	{"ERRbadformat", 11, "Invalid format"},
+	{"ERRbadaccess", 12, "Invalid open mode"},
+	{"ERRbaddata", 13, "Invalid data"},
+	{"ERR", 14, "reserved"},
+	{"ERRbaddrive", 15, "Invalid drive specified"},
+	{"ERRremcd", 16, "A Delete Directory request attempted to remove the server's current directory"},
+	{"ERRdiffdevice", 17, "Not same device"},
+	{"ERRnofiles", 18, "A File Search command can find no more files matching the specified criteria"},
+	{"ERRbadshare", 32, "The sharing mode specified for an Open conflicts with existing FIDs on the file"},
+	{"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
+	{"ERRnosuchshare", 67, "Share name not found"},
+	{"ERRfilexists", 80, "The file named in a Create Directory, Make New File or Link request already exists"},
+	{"ERRpaused", 81, "The server is temporarily paused"},
+	{"ERRtimeout", 88, "The requested operation on a named pipe or an I/O device has timed out"},
+	{"ERRnoresource", 89, "No resources currently available for this SMB request"},
+	{"ERRtoomanyuids", 90, "Too many UIDs active for this SMB connection"},
+	{"ERRbaduid", 91, "The UID supplied is not known to the session, or the user identified by the UID does not have sufficient privileges"},
+	{"ERRbadpipe", 230, "Pipe invalid"},
+	{"ERRpipebusy", 231, "All instances of the requested pipe are busy"},
+	{"ERRpipeclosing", 232, "Pipe close in progress"},
+	{"ERRnotconnected", 233, "No process on other end of pipe"},
+	{"ERRmoredata", 234, "There is more data to be returned"},
+	{"ERROR_EAS_DIDNT_FIT", 275, "Either there are no extended attributes, or the available extended attributes did not fit into the response"},
+	{"ERROR_EAS_NOT_SUPPORTED", 282, "The server file system does not support Extended Attributes"},
+
+	{NULL, -1, NULL}
+};
+
+/* Server Error Messages */
+static const err_code_struct server_msgs[] =
+{
+	{"ERRerror", 1, "Non-specific error code"},
+	{"ERRbadpw", 2, "Bad password - name/password pair in a Tree Connect or Session Setup are invalid"},
+	{"ERRbadtype", 3, "reserved"},
+	{"ERRaccess", 4, "The requester does not have the necessary access rights within the specified context for the requested function. The context is defined by the TID or the UID"},
+	{"ERRinvnid", 5, "The tree ID (TID) specified in a command was invalid"},
+	{"ERRinvnetname", 6, "Invalid network name in tree connect"},
+	{"ERRinvdevice", 7, "Invalid device - printer request made to non-printer connection or non-printer request made to printer connection"},
+	{"ERRqfull", 49, "Print queue full (files) -- returned by open print file"},
+	{"ERRqtoobig", 50, "Print queue full -- no space"},
+	{"ERRqeof", 51, "EOF on print queue dump"},
+	{"ERRinvpfid", 52, "Invalid print file FID"},
+	{"ERRsmbcmd", 64, "The server did not recognize the command received"},
+	{"ERRsrverror", 65, "The server encountered an internal error, e.g., system file unavailable"},
+	{"ERRfilespecs", 67, "The file handle (FID) and pathname parameters contained an invalid combination of values"},
+	{"ERRreserved", 68, "reserved"},
+	{"ERRbadpermits", 69, "The access permissions specified for a file or directory are not a valid combination. The server cannot set the requested attribute"},
+	{"ERRreserved", 70, "reserved"},
+	{"ERRsetattrmode", 71, "The attribute mode in the Set File Attribute request is invalid"},
+	{"ERRpaused", 81, "Server is paused"},
+	{"ERRmsgoff", 82, "Not receiving messages"},
+	{"ERRnoroom", 83, "No room to buffer message"},
+	{"ERRrmuns", 87, "Too many remote user names"},
+	{"ERRtimeout", 88, "Operation timed out"},
+	{"ERRnoresource", 89, "No resources currently available for request"},
+	{"ERRtoomanyuids", 90, "Too many UIDs active on this session"},
+	{"ERRbaduid", 91, "The UID is not known as a valid ID on this session"},
+	{"ERRusempx", 250, "Temp unable to support Raw, use MPX mode"},
+	{"ERRusestd", 251, "Temp unable to support Raw, use standard read/write"},
+	{"ERRcontmpx", 252, "Continue in MPX mode"},
+	{"ERRreserved", 253, "reserved"},
+	{"ERRbadPW", 254, "Invalid password"},
+	{"ERRaccountExpired", 2239, "User account on the target machine is disabled or has expired"},
+	{"ERRbadClient", 2240, "The client does not have permission to access this server"},
+	{"ERRbadLogonTime", 2241, "Access to the server is not permitted at this time"},
+	{"ERRpasswordExpired", 2242, "The user's password has expired"},
+	{"ERRnosupport", 0xFFFF, "Function not supported"},
+
+	{NULL, -1, NULL}
+};
+
+/* Hard Error Messages */
+static const err_code_struct hard_msgs[] =
+{
+	{"ERRnowrite", 19, "Attempt to write on write-protected diskette"},
+	{"ERRbadunit", 20, "Unknown unit"},
+	{"ERRnotready", 21, "Drive not ready"},
+	{"ERRbadcmd", 22, "Unknown command"},
+	{"ERRdata", 23, "Data error (CRC)"},
+	{"ERRbadreq", 24, "Bad request structure length"},
+	{"ERRseek", 25, "Seek error"},
+	{"ERRbadmedia", 26, "Unknown media type"},
+	{"ERRbadsector", 27, "Sector not found"},
+	{"ERRnopaper", 28, "Printer out of paper"},
+	{"ERRwrite", 29, "Write fault"},
+	{"ERRread", 30, "Read fault"},
+	{"ERRgeneral", 31, "General failure"},
+	{"ERRbadshare", 32, "A open conflicts with an existing open"},
+	{"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
+	{"ERRwrongdisk", 34, "The wrong disk was found in a drive"},
+	{"ERRFCBUnavail", 35, "No FCBs are available to process request"},
+	{"ERRsharebufexc", 36, "A sharing buffer has been exceeded"},
+	{"ERRdiskfull", 39, "The file system is full"},
+
+	{NULL, -1, NULL}
+};
+
+typedef struct
+{
+	int code;
+	char *class;
+	const err_code_struct *err_msgs;
+} err_class_struct;
+
+static const err_class_struct err_classes[] =
+{
+	{ 0, "SUCCESS", NULL },
+	{ 0x01, "ERRDOS", dos_msgs },
+	{ 0x02, "ERRSRV", server_msgs },
+	{ 0x03, "ERRHRD", hard_msgs },
+	{ 0x04, "ERRXOS", NULL },
+	{ 0xE1, "ERRRMX1", NULL },
+	{ 0xE2, "ERRRMX2", NULL },
+	{ 0xE3, "ERRRMX3", NULL },
+	{ 0xFF, "ERRCMD", NULL },
+
+	{ -1, NULL, NULL }
+};
+
+/*****************************************************************************/
+
 /*****************************************************************************
  *
  *  Encoding/Decoding section
@@ -75,10 +219,19 @@ smb_encode_word (byte * p, word data)
 }
 
 static INLINE byte *
-smb_decode_word (byte * p, word * data)
+smb_decode_word (const byte * p, word * data)
 {
-	(*data) = (word) (p[0] | ((word)p[1]) << 8);
-	return &(p[2]);
+	(*data) = ((word)p[0]) | (((word)p[1]) << 8);
+
+	return (byte *)&p[2];
+}
+
+static INLINE byte *
+smb_decode_dword (const byte * p, dword * data)
+{
+	(*data) = ((dword)p[0]) | (((dword)p[1]) << 8) | (((dword)p[2]) << 16) | (((dword)p[3]) << 24);
+
+	return (byte *)&p[4];
 }
 
 byte *
@@ -489,6 +642,50 @@ smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
 	else if (s->rcls != 0)
 	{
 		result = -smb_errno (s->rcls, s->err);
+
+		#if DEBUG
+		{
+			const err_class_struct * err_class = NULL;
+			const err_code_struct * err_code = NULL;
+			int i;
+
+			for (i = 0; err_classes[i].class; i++)
+			{
+				if (err_classes[i].code == s->rcls)
+				{
+					err_class = &err_classes[i];
+
+					if(err_class->err_msgs != NULL)
+					{
+						const err_code_struct * err = err_class->err_msgs;
+						int j;
+
+						for (j = 0; err[j].name; j++)
+						{
+							if(err[j].code == s->err)
+							{
+								err_code = &err[j];
+								break;
+							}
+						}
+					}
+
+					break;
+				}
+			}
+
+			if(err_class != NULL && err_code != NULL)
+			{
+				LOG(("translated error code %ld/%ld (%s/%s) to %ld (%s)\n",
+					s->rcls,s->err,err_class->class,err_code->message,(-result),strerror(-result)));
+			}
+			else
+			{
+				LOG(("no proper translation for error code %ld/%ld to %ld (%s)\n",
+					s->rcls,s->err,(-result),strerror(-result)));
+			}
+		}
+		#endif /* DEBUG */
 	}
 	else if ((error = smb_verify (s->packet, command, wct, bcc)) != 0)
 	{
@@ -802,13 +999,44 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 {
 	char *buf = server->packet;
 	int result;
-	long len = server->max_buffer_size - 4;
+	long len;
 	byte *p;
-
-	if (len >= count)
-		len = 0;
+	
+	/* Calculate maximum number of bytes that could be transferred with
+	 * a single SMB_COM_WRITE_RAW packet...
+	 *
+	 * 'max_buffer_size' is the maximum size of a complete SMB message
+	 * including the message header, the parameter and data blocks.
+	 *
+	 * The message header accounts for
+	 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+	 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+	 * = 32 bytes
+	 *
+	 * The parameters of a SMB_COM_WRITE_RAW command account for
+	 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
+	 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+2(dataoffset)
+	 * = 25 bytes
+	 *
+	 * The data part of a SMB_COM_WRITE_RAW command account for
+	 * 2(bytecount)+0(pad) = 2 bytes, not including
+	 * the actual payload
+	 *
+	 * This leaves 'max_buffer_size' - 59 for the payload.
+	 */
+	if(server->max_raw_size < server->max_buffer_size)
+		len = server->max_raw_size - 59 - 4;
 	else
-		len = count - len;	/* transfer the larger part using the second packet */
+		len = server->max_buffer_size - 59 - 4;
+
+	/* Number of bytes to write is smaller than the maximum
+	 * number of bytes which may be sent in a single SMB
+	 * message, including parameter and data fields?
+	 */
+	if (count <= len)
+		len = 0; /* Send a zero length SMB_COM_WRITE_RAW message, followed by the raw data. */
+	else
+		len = count - len;	/* Send some of the data as part of the SMB_COM_WRITE_RAW message, followed by the remaining raw data. */
 
 	p = smb_setup_header_exclusive (server, SMBwritebraw, server->protocol > PROTOCOL_COREPLUS ? 12 : 11, len);
 
@@ -839,11 +1067,15 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	if (result < 0)
 		goto out;
 
+	/* ZZZ if smb_request_write_raw() fails then the server may
+	 * not be able to send a response, hence the write operation will
+	 * be stuck.
+	 */
 	result = smb_request_write_raw (server, data + len, count - len);
 
 	LOG(("raw request returned %ld\n", result));
 
-	if (result > 0)
+	if (result >= 0)
 	{
 		int error;
 
@@ -855,6 +1087,8 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 		}
 		else if (server->rcls != 0)
 		{
+			LOG (("server error %ld/%ld\n", server->rcls, server->err));
+
 			result = -smb_errno (server->rcls, server->err);
 		}
 		else
@@ -868,9 +1102,13 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 			 */
 			while(SMB_CMD(server->packet) == SMBwritebraw && SMB_BCC(server->packet) == 0 && SMB_WCT(server->packet) == 1)
 			{
+				LOG (("interim update\n"));
+
 				error = smb_receive (server, sock_fd);
 				if(error < 0)
 				{
+					LOG (("smb_receive() returned %ld\n", error));
+
 					result = error;
 					break;
 				}
@@ -878,12 +1116,16 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 				error = smb_valid_packet (server->packet);
 				if(error != 0)
 				{
+					LOG (("not a valid packet\n"));
+
 					result = error;
 					break;
 				}
 
 				if (server->rcls != 0)
 				{
+					LOG (("server error %ld/%ld\n", server->rcls, server->err));
+
 					result = -smb_errno (server->rcls, server->err);
 					break;
 				}
@@ -902,6 +1144,8 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 				}
 			}
 		}
+
+		LOG (("bytes written = %ld (expected %ld)\n", result, count - len));
 
 		/* If everything went fine, the whole block has been transfered. */
 		if (result == (count - len))
@@ -1183,7 +1427,7 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 }
 
 /* This routine is used to read in directory entries from the network.
-	 Note that it is for short directory name seeks, i.e.: protocol < PROTOCOL_LANMAN2 */
+   Note that it is for short directory name seeks, i.e.: protocol < PROTOCOL_LANMAN2 */
 static int
 smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry)
 {
@@ -1374,31 +1618,37 @@ smb_get_dirent_name(char *p,int level,char ** name_ptr,int * len_ptr)
 	switch (level)
 	{
 		case 1: /* OS/2 understands this */
+
 			(*name_ptr) = p + 27;
 			(*len_ptr) = strlen(p + 27);
 			break;
 
 		case 2: /* this is what OS/2 uses */
+
 			(*name_ptr) = p + 31;
 			(*len_ptr) = strlen(p + 31);
 			break;
 
 		case 3: /* untested */
+
 			(*name_ptr) = p + 33;
 			(*len_ptr) = strlen(p + 33);
 			break;
 
 		case 4: /* untested */
+
 			(*name_ptr) = p + 37;
 			(*len_ptr) = strlen(p + 37);
 			break;
 
 		case 260: /* NT uses this, but also accepts 2 */
+
 			(*name_ptr) = p + 94;
 			(*len_ptr) = min (DVAL (p+60, 0), SMB_MAXNAMELEN);
 			break;
 
 		default:
+
 			(*name_ptr) = NULL;
 			(*len_ptr) = 0;
 			break;
@@ -1715,6 +1965,11 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 
 		p = SMB_BUF (outbuf);
 		(*p++) = 0; /* put in a null smb_name */
+		
+		/* ZZZ the following may be unnecessary, because they
+		 * likely represent random data used for alignment
+		 * padding purposes.
+		 */
 		(*p++) = 'D';
 		(*p++) = ' '; /* this was added because OS/2 does it */
 
@@ -2180,7 +2435,7 @@ smb_proc_reconnect (struct smb_server *server)
 	unsigned char full_share[SMB_MAXNAMELEN+1];
 	int full_share_len;
 	byte *packet;
-	word max_buffer_size;
+	dword max_buffer_size;
 
 	/* Reception buffer size (buffer is allocated below) is always as large as the
 	 * maximum transmission buffer size, and could be larger if the transmission
@@ -2212,6 +2467,8 @@ smb_proc_reconnect (struct smb_server *server)
 	packet = server->packet;
 
 	server->max_buffer_size = default_max_buffer_size;
+
+	LOG (("server max buffer size set to %ld\n", default_max_buffer_size));
 
 	/* Prepend a NetBIOS header? */
 	if(!server->raw_smb)
@@ -2272,7 +2529,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 	p = SMB_VWV (packet);
 
-	smb_decode_word (p, &dialect_index);
+	p = smb_decode_word (p, &dialect_index);
 
 	/* If the server does not support any of the listed
 	 * dialects, ist must return a dialect index of 0xFFFF.
@@ -2301,12 +2558,21 @@ smb_proc_reconnect (struct smb_server *server)
 		/* NT LAN Manager or newer. */
 		if (server->protocol >= PROTOCOL_NT1)
 		{
-			server->security_mode = BVAL(packet, smb_vwv1);
-			max_buffer_size = DVAL (packet, smb_vwv3 + 1);
-			server->max_raw_size = DVAL (packet, smb_vwv5 + 1);
-			server_sesskey = DVAL (packet, smb_vwv7 + 1);
-			server->capabilities = DVAL (packet, smb_vwv9 + 1);
-			server->crypt_key_length = BVAL (packet, smb_vwv16 + 1);
+			server->security_mode = (*p++);
+
+			/* Skip "max mpx count" (1 word) and "max number vcs" (1 word). */
+			p += 2 * sizeof(word);
+			
+			p = smb_decode_dword(p, &max_buffer_size);
+			LOG (("max_buffer_size = %ld\n", max_buffer_size));
+			p = smb_decode_dword(p, &server->max_raw_size);
+			p = smb_decode_dword(p, &server_sesskey);
+			p = smb_decode_dword(p, &server->capabilities);
+
+			/* Skip "system time" (1 qword) and "server time zone" (1 word). */
+			p += 2 * sizeof(dword) + sizeof(word);
+
+			server->crypt_key_length = (*p++);
 
 			memcpy(server->crypt_key,SMB_BUF(packet),server->crypt_key_length);
 		}
@@ -2317,6 +2583,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 			server->security_mode = BVAL(packet, smb_vwv1);
 			max_buffer_size = WVAL (packet, smb_vwv2);
+			LOG (("max_buffer_size = %ld\n", max_buffer_size));
 			/* Maximum raw read/write size is fixed to 65535 bytes. */
 			server->max_raw_size = 65535;
 			blkmode = WVAL (packet, smb_vwv5);
@@ -2473,7 +2740,7 @@ smb_proc_reconnect (struct smb_server *server)
 			goto fail;
 		}
 
-		smb_decode_word (packet + 32, &(server->server_uid));
+		smb_decode_word (packet + 32, &server->server_uid);
 	}
 	else
 	{
@@ -2535,7 +2802,11 @@ smb_proc_reconnect (struct smb_server *server)
 
 		/* Changed, max_buffer_size hasn't been updated if a tconX message was send instead of tcon. */
 		if (max_buffer_size != 0)
+		{
 			server->max_buffer_size = max_buffer_size;
+
+			LOG (("server max buffer size set to %ld\n", max_buffer_size));
+		}
 
 		server->tid = WVAL(packet,smb_tid);
 	}
@@ -2564,12 +2835,18 @@ smb_proc_reconnect (struct smb_server *server)
 
 		server->max_buffer_size = decoded_max_xmit;
 
+		LOG (("server max buffer size set to %ld\n", decoded_max_xmit));
+
 		SHOWVALUE(server->max_buffer_size);
 
 		/* Added by Brian Willette - We were ignoring the server's initial
 		   maxbuf value */
 		if (max_buffer_size != 0 && server->max_buffer_size > max_buffer_size)
+		{
 			server->max_buffer_size = max_buffer_size;
+
+			LOG (("server max buffer size set to %ld\n", max_buffer_size));
+		}
 
 		(void) smb_decode_word (p, &server->tid);
 	}
@@ -2579,11 +2856,19 @@ smb_proc_reconnect (struct smb_server *server)
 	/* Ok, everything is fine. max_buffer_size does not include
 	   the SMB session header of 4 bytes. */
 	if (server->max_buffer_size < 65535 - 4)
+	{
 		server->max_buffer_size += 4;
+
+		LOG (("server max buffer size set to %ld\n", server->max_buffer_size));
+	}
 
 	/* Changed, max_buffer_size hasn't been updated if a tconX message was send instead of tcon. */
 	if (server->max_buffer_size > given_max_xmit)
+	{
 		server->max_buffer_size = given_max_xmit;
+
+		LOG (("server max buffer size set to %ld\n", server->max_buffer_size));
+	}
 
 	LOG (("max_buffer_size = %ld, tid = %ld\n", server->max_buffer_size, server->tid));
 
@@ -2616,152 +2901,11 @@ smb_proc_connect (struct smb_server *server)
 	return result;
 }
 
-/* error code stuff - put together by Merik Karman
-   merik -at- blackadder -dot- dsh -dot- oz -dot- au */
-typedef struct
-{
-	char *name;
-	int code;
-	char *message;
-} err_code_struct;
-
-/* Dos Error Messages */
-static const err_code_struct dos_msgs[] =
-{
-	{"ERRbadfunc", 1, "Invalid function"},
-	{"ERRbadfile", 2, "File not found"},
-	{"ERRbadpath", 3, "Directory invalid"},
-	{"ERRnofids", 4, "No file descriptors available"},
-	{"ERRnoaccess", 5, "Access denied"},
-	{"ERRbadfid", 6, "Invalid file handle"},
-	{"ERRbadmcb", 7, "Memory control blocks destroyed"},
-	{"ERRnomem", 8, "Insufficient server memory to perform the requested function"},
-	{"ERRbadmem", 9, "Invalid memory block address"},
-	{"ERRbadenv", 10, "Invalid environment"},
-	{"ERRbadformat", 11, "Invalid format"},
-	{"ERRbadaccess", 12, "Invalid open mode"},
-	{"ERRbaddata", 13, "Invalid data"},
-	{"ERR", 14, "reserved"},
-	{"ERRbaddrive", 15, "Invalid drive specified"},
-	{"ERRremcd", 16, "A Delete Directory request attempted to remove the server's current directory"},
-	{"ERRdiffdevice", 17, "Not same device"},
-	{"ERRnofiles", 18, "A File Search command can find no more files matching the specified criteria"},
-	{"ERRbadshare", 32, "The sharing mode specified for an Open conflicts with existing FIDs on the file"},
-	{"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
-	{"ERRnosuchshare", 67, "Share name not found"},
-	{"ERRfilexists", 80, "The file named in a Create Directory, Make New File or Link request already exists"},
-	{"ERRpaused", 81, "The server is temporarily paused"},
-	{"ERRtimeout", 88, "The requested operation on a named pipe or an I/O device has timed out"},
-	{"ERRnoresource", 89, "No resources currently available for this SMB request"},
-	{"ERRtoomanyuids", 90, "Too many UIDs active for this SMB connection"},
-	{"ERRbaduid", 91, "The UID supplied is not known to the session, or the user identified by the UID does not have sufficient privileges"},
-	{"ERRbadpipe", 230, "Pipe invalid"},
-	{"ERRpipebusy", 231, "All instances of the requested pipe are busy"},
-	{"ERRpipeclosing", 232, "Pipe close in progress"},
-	{"ERRnotconnected", 233, "No process on other end of pipe"},
-	{"ERRmoredata", 234, "There is more data to be returned"},
-	{"ERROR_EAS_DIDNT_FIT", 275, "Either there are no extended attributes, or the available extended attributes did not fit into the response"},
-	{"ERROR_EAS_NOT_SUPPORTED", 282, "The server file system does not support Extended Attributes"},
-
-	{NULL, -1, NULL}
-};
-
-/* Server Error Messages */
-static const err_code_struct server_msgs[] =
-{
-	{"ERRerror", 1, "Non-specific error code"},
-	{"ERRbadpw", 2, "Bad password - name/password pair in a Tree Connect or Session Setup are invalid"},
-	{"ERRbadtype", 3, "reserved"},
-	{"ERRaccess", 4, "The requester does not have the necessary access rights within the specified context for the requested function. The context is defined by the TID or the UID"},
-	{"ERRinvnid", 5, "The tree ID (TID) specified in a command was invalid"},
-	{"ERRinvnetname", 6, "Invalid network name in tree connect"},
-	{"ERRinvdevice", 7, "Invalid device - printer request made to non-printer connection or non-printer request made to printer connection"},
-	{"ERRqfull", 49, "Print queue full (files) -- returned by open print file"},
-	{"ERRqtoobig", 50, "Print queue full -- no space"},
-	{"ERRqeof", 51, "EOF on print queue dump"},
-	{"ERRinvpfid", 52, "Invalid print file FID"},
-	{"ERRsmbcmd", 64, "The server did not recognize the command received"},
-	{"ERRsrverror", 65, "The server encountered an internal error, e.g., system file unavailable"},
-	{"ERRfilespecs", 67, "The file handle (FID) and pathname parameters contained an invalid combination of values"},
-	{"ERRreserved", 68, "reserved"},
-	{"ERRbadpermits", 69, "The access permissions specified for a file or directory are not a valid combination. The server cannot set the requested attribute"},
-	{"ERRreserved", 70, "reserved"},
-	{"ERRsetattrmode", 71, "The attribute mode in the Set File Attribute request is invalid"},
-	{"ERRpaused", 81, "Server is paused"},
-	{"ERRmsgoff", 82, "Not receiving messages"},
-	{"ERRnoroom", 83, "No room to buffer message"},
-	{"ERRrmuns", 87, "Too many remote user names"},
-	{"ERRtimeout", 88, "Operation timed out"},
-	{"ERRnoresource", 89, "No resources currently available for request"},
-	{"ERRtoomanyuids", 90, "Too many UIDs active on this session"},
-	{"ERRbaduid", 91, "The UID is not known as a valid ID on this session"},
-	{"ERRusempx", 250, "Temp unable to support Raw, use MPX mode"},
-	{"ERRusestd", 251, "Temp unable to support Raw, use standard read/write"},
-	{"ERRcontmpx", 252, "Continue in MPX mode"},
-	{"ERRreserved", 253, "reserved"},
-	{"ERRbadPW", 254, "Invalid password"},
-	{"ERRaccountExpired", 2239, "User account on the target machine is disabled or has expired"},
-	{"ERRbadClient", 2240, "The client does not have permission to access this server"},
-	{"ERRbadLogonTime", 2241, "Access to the server is not permitted at this time"},
-	{"ERRpasswordExpired", 2242, "The user's password has expired"},
-	{"ERRnosupport", 0xFFFF, "Function not supported"},
-
-	{NULL, -1, NULL}
-};
-
-/* Hard Error Messages */
-static const err_code_struct hard_msgs[] =
-{
-	{"ERRnowrite", 19, "Attempt to write on write-protected diskette"},
-	{"ERRbadunit", 20, "Unknown unit"},
-	{"ERRnotready", 21, "Drive not ready"},
-	{"ERRbadcmd", 22, "Unknown command"},
-	{"ERRdata", 23, "Data error (CRC)"},
-	{"ERRbadreq", 24, "Bad request structure length"},
-	{"ERRseek", 25, "Seek error"},
-	{"ERRbadmedia", 26, "Unknown media type"},
-	{"ERRbadsector", 27, "Sector not found"},
-	{"ERRnopaper", 28, "Printer out of paper"},
-	{"ERRwrite", 29, "Write fault"},
-	{"ERRread", 30, "Read fault"},
-	{"ERRgeneral", 31, "General failure"},
-	{"ERRbadshare", 32, "A open conflicts with an existing open"},
-	{"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
-	{"ERRwrongdisk", 34, "The wrong disk was found in a drive"},
-	{"ERRFCBUnavail", 35, "No FCBs are available to process request"},
-	{"ERRsharebufexc", 36, "A sharing buffer has been exceeded"},
-	{"ERRdiskfull", 39, "The file system is full"},
-
-	{NULL, -1, NULL}
-};
-
-typedef struct
-{
-	int code;
-	char *class;
-	const err_code_struct *err_msgs;
-} err_class_struct;
-
-static const err_class_struct err_classes[] =
-{
-	{ 0, "SUCCESS", NULL },
-	{ 0x01, "ERRDOS", dos_msgs },
-	{ 0x02, "ERRSRV", server_msgs },
-	{ 0x03, "ERRHRD", hard_msgs },
-	{ 0x04, "ERRXOS", NULL },
-	{ 0xE1, "ERRRMX1", NULL },
-	{ 0xE2, "ERRRMX2", NULL },
-	{ 0xE3, "ERRRMX3", NULL },
-	{ 0xFF, "ERRCMD", NULL },
-
-	{ -1, NULL, NULL }
-};
-
 static void
 smb_printerr (int class, int num)
 {
+	const err_code_struct *err;
 	int i, j;
-	err_code_struct *err;
 
 	for (i = 0; err_classes[i].class; i++)
 	{
