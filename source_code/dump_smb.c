@@ -47,6 +47,15 @@ extern VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString,...);
 /* This can be used to enable or disable the SMB packet dump output. */
 static int dump_smb_enabled;
 
+/* This is for controlling how much output is produced. Higher
+ * numbers yield more output.
+ */
+static int dump_smb_level;
+ 
+/* This is where the output should go. It could be a file. */
+static BPTR dump_smb_file;
+static BOOL dump_smb_stdout;
+
 /*****************************************************************************/
 
 /* This keeps track of which SMB_COM_TRANSACTION2 subcommand was last
@@ -517,7 +526,7 @@ print_smb_data(struct line_buffer * lb,int num_data_bytes_left,const unsigned ch
 			if(dword_buffer_len > 0)
 				copy_string_to_line_buffer(lb,dword_buffer,dword_buffer_len,dword_pos);
 
-			Printf("             %s\n",lb->line);
+			FPrintf(dump_smb_file,"             %s\n",lb->line);
 		}
 	}
 }
@@ -668,76 +677,76 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 		int offset = 0;
 
 		search_attributes = next_data_word(parameters,&offset);
-		Printf("search attributes = 0x%04lx\n",search_attributes);
+		FPrintf(dump_smb_file,"search attributes = 0x%04lx\n",search_attributes);
 
 		if(search_attributes & 0x0100)
-			Printf("                    SMB_SEARCH_ATTRIBUTE_READONLY\n");
+			FPrintf(dump_smb_file,"                    SMB_SEARCH_ATTRIBUTE_READONLY\n");
 
 		if(search_attributes & 0x0200)
-			Printf("                    SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
+			FPrintf(dump_smb_file,"                    SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
 
 		if(search_attributes & 0x0400)
-			Printf("                    SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
+			FPrintf(dump_smb_file,"                    SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
 
 		if(search_attributes & 0x1000)
-			Printf("                    SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
+			FPrintf(dump_smb_file,"                    SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
 
 		if(search_attributes & 0x2000)
-			Printf("                    SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
+			FPrintf(dump_smb_file,"                    SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
 
 		search_count = next_data_word(parameters,&offset);
-		Printf("search count = %ld\n",search_count);
+		FPrintf(dump_smb_file,"search count = %ld\n",search_count);
 
 		flags = next_data_word(parameters,&offset);
-		Printf("flags = 0x%04lx\n",flags);
+		FPrintf(dump_smb_file,"flags = 0x%04lx\n",flags);
 
 		if(flags & 0x0001)
-			Printf("        SMB_FIND_CLOSE_AFTER_REQUEST\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_CLOSE_AFTER_REQUEST\n");
 
 		if(flags & 0x0002)
-			Printf("        SMB_FIND_CLOSE_AT_EOS\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_CLOSE_AT_EOS\n");
 
 		if(flags & 0x0004)
-			Printf("        SMB_FIND_RETURN_RESUME_KEYS\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_RETURN_RESUME_KEYS\n");
 
 		if(flags & 0x0008)
-			Printf("        SMB_FIND_CONTINUE_FROM_LAST\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_CONTINUE_FROM_LAST\n");
 
 		if(flags & 0x0010)
-			Printf("        SMB_FIND_WITH_BACKUP_INTENT\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_WITH_BACKUP_INTENT\n");
 
 		information_level = next_data_word(parameters,&offset);
-		Printf("information level = 0x%04lx\n",information_level);
+		FPrintf(dump_smb_file,"information level = 0x%04lx\n",information_level);
 
 		last_trans2_find_information_level = information_level;
 
 		if (information_level == 0x0001)
-			Printf("                    SMB_INFO_STANDARD\n");
+			FPrintf(dump_smb_file,"                    SMB_INFO_STANDARD\n");
 		else if (information_level == 0x0002)
-			Printf("                    SMB_INFO_QUERY_EA_SIZE\n");
+			FPrintf(dump_smb_file,"                    SMB_INFO_QUERY_EA_SIZE\n");
 		else if (information_level == 0x0003)
-			Printf("                    SMB_INFO_QUERY_EAS_FROM_LIST\n");
+			FPrintf(dump_smb_file,"                    SMB_INFO_QUERY_EAS_FROM_LIST\n");
 		else if (information_level == 0x0101)
-			Printf("                    SMB_FIND_FILE_DIRECTORY_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_DIRECTORY_INFO\n");
 		else if (information_level == 0x0102)
-			Printf("                    SMB_FIND_FILE_FULL_DIRECTORY_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_FULL_DIRECTORY_INFO\n");
 		else if (information_level == 0x0103)
-			Printf("                    SMB_FIND_FILE_NAMES_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_NAMES_INFO\n");
 		else if (information_level == 0x0104)
-			Printf("                    SMB_FIND_FILE_BOTH_DIRECTORY_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_BOTH_DIRECTORY_INFO\n");
 
 		search_storage_type = next_data_dword(parameters,&offset);
-		Printf("search_storage_type = 0x%08lx\n",search_storage_type);
+		FPrintf(dump_smb_file,"search_storage_type = 0x%08lx\n",search_storage_type);
 
 		if(search_storage_type == 0x00000001)
-			Printf("                      FILE_DIRECTORY_ONLY\n");
+			FPrintf(dump_smb_file,"                      FILE_DIRECTORY_ONLY\n");
 
 		if(search_storage_type == 0x00000040)
-			Printf("                      FILE_NON_DIRECTORY_FILE\n");
+			FPrintf(dump_smb_file,"                      FILE_NON_DIRECTORY_FILE\n");
 
 		file_name = next_data_bytes(parameters,0,&offset);
 
-		Printf("file name = '%s'\n",file_name);
+		FPrintf(dump_smb_file,"file name = '%s'\n",file_name);
 
 		/* ZZZ need to deal with the 'data' provided if
 		 * information_level == SMB_INFO_QUERY_EAS_FROM_LIST.
@@ -755,55 +764,55 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 
 		sid = next_data_word(parameters,&offset);
 
-		Printf("sid = 0x%04lx\n",sid);
+		FPrintf(dump_smb_file,"sid = 0x%04lx\n",sid);
 
 		search_count = next_data_word(parameters,&offset);
-		Printf("search count = %ld\n",search_count);
+		FPrintf(dump_smb_file,"search count = %ld\n",search_count);
 
 		information_level = next_data_word(parameters,&offset);
-		Printf("information level = 0x%04lx\n",information_level);
+		FPrintf(dump_smb_file,"information level = 0x%04lx\n",information_level);
 
 		last_trans2_find_information_level = information_level;
 
 		if (information_level == 0x0001)
-			Printf("                    SMB_INFO_STANDARD\n");
+			FPrintf(dump_smb_file,"                    SMB_INFO_STANDARD\n");
 		else if (information_level == 0x0002)
-			Printf("                    SMB_INFO_QUERY_EA_SIZE\n");
+			FPrintf(dump_smb_file,"                    SMB_INFO_QUERY_EA_SIZE\n");
 		else if (information_level == 0x0003)
-			Printf("                    SMB_INFO_QUERY_EAS_FROM_LIST\n");
+			FPrintf(dump_smb_file,"                    SMB_INFO_QUERY_EAS_FROM_LIST\n");
 		else if (information_level == 0x0101)
-			Printf("                    SMB_FIND_FILE_DIRECTORY_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_DIRECTORY_INFO\n");
 		else if (information_level == 0x0102)
-			Printf("                    SMB_FIND_FILE_FULL_DIRECTORY_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_FULL_DIRECTORY_INFO\n");
 		else if (information_level == 0x0103)
-			Printf("                    SMB_FIND_FILE_NAMES_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_NAMES_INFO\n");
 		else if (information_level == 0x0104)
-			Printf("                    SMB_FIND_FILE_BOTH_DIRECTORY_INFO\n");
+			FPrintf(dump_smb_file,"                    SMB_FIND_FILE_BOTH_DIRECTORY_INFO\n");
 
 		resume_key = next_data_dword(parameters,&offset);
-		Printf("resume_key = 0x%08lx\n",resume_key);
+		FPrintf(dump_smb_file,"resume_key = 0x%08lx\n",resume_key);
 
 		flags = next_data_word(parameters,&offset);
-		Printf("flags = 0x%04lx\n",flags);
+		FPrintf(dump_smb_file,"flags = 0x%04lx\n",flags);
 
 		if(flags & 0x0001)
-			Printf("        SMB_FIND_CLOSE_AFTER_REQUEST\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_CLOSE_AFTER_REQUEST\n");
 
 		if(flags & 0x0002)
-			Printf("        SMB_FIND_CLOSE_AT_EOS\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_CLOSE_AT_EOS\n");
 
 		if(flags & 0x0004)
-			Printf("        SMB_FIND_RETURN_RESUME_KEYS\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_RETURN_RESUME_KEYS\n");
 
 		if(flags & 0x0008)
-			Printf("        SMB_FIND_CONTINUE_FROM_LAST\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_CONTINUE_FROM_LAST\n");
 
 		if(flags & 0x0010)
-			Printf("        SMB_FIND_WITH_BACKUP_INTENT\n");
+			FPrintf(dump_smb_file,"        SMB_FIND_WITH_BACKUP_INTENT\n");
 
 		file_name = next_data_bytes(parameters,0,&offset);
 
-		Printf("file name = '%s'\n",file_name);
+		FPrintf(dump_smb_file,"file name = '%s'\n",file_name);
 
 		/* ZZZ need to deal with the 'data' provided if
 		 * information_level == SMB_INFO_QUERY_EAS_FROM_LIST.
@@ -821,20 +830,20 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 		if(command == TRANS2_FIND_FIRST2)
 		{
 			sid = next_data_word(parameters,&offset);
-			Printf("sid = %ld\n",sid);
+			FPrintf(dump_smb_file,"sid = %ld\n",sid);
 		}
 
 		search_count = next_data_word(parameters,&offset);
-		Printf("search count = %ld\n",search_count);
+		FPrintf(dump_smb_file,"search count = %ld\n",search_count);
 
 		end_of_search = next_data_word(parameters,&offset);
-		Printf("end of search = 0x%04lx\n",end_of_search);
+		FPrintf(dump_smb_file,"end of search = 0x%04lx\n",end_of_search);
 
 		ea_error_offset = next_data_word(parameters,&offset);
-		Printf("ea error offset = 0x%04lx\n",ea_error_offset);
+		FPrintf(dump_smb_file,"ea error offset = 0x%04lx\n",ea_error_offset);
 
 		last_name_offset = next_data_word(parameters,&offset);
-		Printf("last name offset = 0x%04lx\n",last_name_offset);
+		FPrintf(dump_smb_file,"last name offset = 0x%04lx\n",last_name_offset);
 
 		/* SMB_FIND_FILE_BOTH_DIRECTORY_INFO */
 		if(num_data_bytes > 0 && last_trans2_find_information_level == 0x0104)
@@ -864,7 +873,7 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 
 			while(entry_offset < num_data_bytes && entry_count < search_count)
 			{
-				Printf("directory entry [%ld]:\n",entry_count++);
+				FPrintf(dump_smb_file,"directory entry [%ld]:\n",entry_count++);
 
 				next_offset = entry_offset;
 
@@ -887,68 +896,68 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 				short_name = next_data_bytes(data,24,&entry_offset);
 				file_name = next_data_bytes(data,0,&entry_offset);
 
-				Printf("\tnext entry offset = %ld\n",next_entry_offset);
-				Printf("\tfile index = 0x%08lx\n",file_index);
-				Printf("\tcreation time = 0x%08lx%08lx\n",creation_time[0],creation_time[1]);	/* ZZZ this is actually a signed value */
-				Printf("\t                %s\n",convert_filetime_to_string(creation_time));
-				Printf("\tlast access time = 0x%08lx%08lx\n",last_access_time[0],last_access_time[1]);
-				Printf("\t                   %s\n",convert_filetime_to_string(last_access_time));
-				Printf("\tlast change time = 0x%08lx%08lx\n",last_change_time[0],last_change_time[1]);
-				Printf("\t                   %s\n",convert_filetime_to_string(last_change_time));
-				Printf("\tend of file = %ls (0x%08lx%08lx)\n",convert_qword_to_string(end_of_file),end_of_file[0],end_of_file[1]);
-				Printf("\tallocation size = %s (0x%08lx%08lx)\n",convert_qword_to_string(allocation_size),allocation_size[0],allocation_size[1]);
+				FPrintf(dump_smb_file,"\tnext entry offset = %ld\n",next_entry_offset);
+				FPrintf(dump_smb_file,"\tfile index = 0x%08lx\n",file_index);
+				FPrintf(dump_smb_file,"\tcreation time = 0x%08lx%08lx\n",creation_time[0],creation_time[1]);	/* ZZZ this is actually a signed value */
+				FPrintf(dump_smb_file,"\t                %s\n",convert_filetime_to_string(creation_time));
+				FPrintf(dump_smb_file,"\tlast access time = 0x%08lx%08lx\n",last_access_time[0],last_access_time[1]);
+				FPrintf(dump_smb_file,"\t                   %s\n",convert_filetime_to_string(last_access_time));
+				FPrintf(dump_smb_file,"\tlast change time = 0x%08lx%08lx\n",last_change_time[0],last_change_time[1]);
+				FPrintf(dump_smb_file,"\t                   %s\n",convert_filetime_to_string(last_change_time));
+				FPrintf(dump_smb_file,"\tend of file = %ls (0x%08lx%08lx)\n",convert_qword_to_string(end_of_file),end_of_file[0],end_of_file[1]);
+				FPrintf(dump_smb_file,"\tallocation size = %s (0x%08lx%08lx)\n",convert_qword_to_string(allocation_size),allocation_size[0],allocation_size[1]);
 
-				Printf("\text file attributes = 0x%08lx\n",ext_file_attributes);
+				FPrintf(dump_smb_file,"\text file attributes = 0x%08lx\n",ext_file_attributes);
 
 				if(ext_file_attributes & 0x00000001)
-					Printf("\t                      ATTR_READONLY\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_READONLY\n");
 
 				if(ext_file_attributes & 0x00000002)
-					Printf("\t                      ATTR_HIDDEN\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_HIDDEN\n");
 
 				if(ext_file_attributes & 0x00000004)
-					Printf("\t                      ATTR_SYSTEM\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_SYSTEM\n");
 
 				if(ext_file_attributes & 0x00000010)
-					Printf("\t                      ATTR_DIRECTORY\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_DIRECTORY\n");
 
 				if(ext_file_attributes & 0x00000020)
-					Printf("\t                      ATTR_ARCHIVE\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_ARCHIVE\n");
 
 				if(ext_file_attributes & 0x00000080)
-					Printf("\t                      ATTR_NORMAL\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_NORMAL\n");
 
 				if(ext_file_attributes & 0x00000100)
-					Printf("\t                      ATTR_TEMPORARY\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_TEMPORARY\n");
 
 				if(ext_file_attributes & 0x00000800)
-					Printf("\t                      ATTR_COMPRESSED\n");
+					FPrintf(dump_smb_file,"\t                      ATTR_COMPRESSED\n");
 
 				if(ext_file_attributes & 0x01000000)
-					Printf("\t                      POSIX_SEMANTICS\n");
+					FPrintf(dump_smb_file,"\t                      POSIX_SEMANTICS\n");
 
 				if(ext_file_attributes & 0x02000000)
-					Printf("\t                      BACKUP_SEMANTICS\n");
+					FPrintf(dump_smb_file,"\t                      BACKUP_SEMANTICS\n");
 
 				if(ext_file_attributes & 0x04000000)
-					Printf("\t                      DELETE_ON_CLOSE\n");
+					FPrintf(dump_smb_file,"\t                      DELETE_ON_CLOSE\n");
 
 				if(ext_file_attributes & 0x08000000)
-					Printf("\t                      SEQUENTIAL_SCAN\n");
+					FPrintf(dump_smb_file,"\t                      SEQUENTIAL_SCAN\n");
 
 				if(ext_file_attributes & 0x10000000)
-					Printf("\t                      RANDOM_ACCESS\n");
+					FPrintf(dump_smb_file,"\t                      RANDOM_ACCESS\n");
 
 				if(ext_file_attributes & 0x20000000)
-					Printf("\t                      NO_BUFFERING\n");
+					FPrintf(dump_smb_file,"\t                      NO_BUFFERING\n");
 
 				if(ext_file_attributes & 0x80000000)
-					Printf("\t                      WRITE_THROUGH\n");
+					FPrintf(dump_smb_file,"\t                      WRITE_THROUGH\n");
 
-				Printf("\tfile name length = %ld\n",file_name_length);
-				Printf("\tea size = %ld\n",ea_size);
-				Printf("\tshort name length = %ld\n",short_name_length);
-				Printf("\treserved = 0x%02lx\n",reserved);
+				FPrintf(dump_smb_file,"\tfile name length = %ld\n",file_name_length);
+				FPrintf(dump_smb_file,"\tea size = %ld\n",ea_size);
+				FPrintf(dump_smb_file,"\tshort name length = %ld\n",short_name_length);
+				FPrintf(dump_smb_file,"\treserved = 0x%02lx\n",reserved);
 
 				if(short_name_length > 0)
 				{
@@ -980,11 +989,11 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 						}
 					}
 					
-					Printf("\tshort name = '%s'\n",lb.line);
+					FPrintf(dump_smb_file,"\tshort name = '%s'\n",lb.line);
 				}
 
 				if(file_name_length > 0)
-					Printf("\tfile name = '%s'\n",file_name);
+					FPrintf(dump_smb_file,"\tfile name = '%s'\n",file_name);
 
 				entry_offset = next_offset;
 			}
@@ -1009,7 +1018,7 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 
 			while(entry_offset < num_data_bytes && entry_count < search_count)
 			{
-				Printf("directory entry [%ld]:\n",entry_count++);
+				FPrintf(dump_smb_file,"directory entry [%ld]:\n",entry_count++);
 
 				resume_key = next_data_dword(data,&entry_offset);
 				creation_date = next_data_word(data,&entry_offset);
@@ -1024,43 +1033,43 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 				file_name_length = next_data_byte(data,&entry_offset);
 				file_name = (char *)next_data_bytes(data,file_name_length,&entry_offset);
 
-				Printf("\tresume key = 0x%08lx\n",resume_key);
-				Printf("\tcreation date = 0x%04lx\n",creation_date);
-				Printf("\tcreation time = 0x%04lx\n",creation_time);
-				Printf("\tcreation = %s\n",convert_smb_date_time_to_string(creation_date,creation_time));
-				Printf("\tlast access date = 0x%04lx\n",last_access_date);
-				Printf("\tlast access time = 0x%04lx\n",last_access_time);
-				Printf("\tlast access = %s\n",convert_smb_date_time_to_string(last_access_date,last_access_time));
-				Printf("\tlast write date = 0x%04lx\n",last_write_date);
-				Printf("\tlast write time = 0x%04lx\n",last_write_time);
-				Printf("\tlast write = %s\n",convert_smb_date_time_to_string(last_write_date,last_write_time));
-				Printf("\tfile data size = %lu\n",file_data_size);
-				Printf("\tallocation size = %lu\n",allocation_size);
-				Printf("\tfile attributes = 0x%08lx\n",file_attributes);
+				FPrintf(dump_smb_file,"\tresume key = 0x%08lx\n",resume_key);
+				FPrintf(dump_smb_file,"\tcreation date = 0x%04lx\n",creation_date);
+				FPrintf(dump_smb_file,"\tcreation time = 0x%04lx\n",creation_time);
+				FPrintf(dump_smb_file,"\tcreation = %s\n",convert_smb_date_time_to_string(creation_date,creation_time));
+				FPrintf(dump_smb_file,"\tlast access date = 0x%04lx\n",last_access_date);
+				FPrintf(dump_smb_file,"\tlast access time = 0x%04lx\n",last_access_time);
+				FPrintf(dump_smb_file,"\tlast access = %s\n",convert_smb_date_time_to_string(last_access_date,last_access_time));
+				FPrintf(dump_smb_file,"\tlast write date = 0x%04lx\n",last_write_date);
+				FPrintf(dump_smb_file,"\tlast write time = 0x%04lx\n",last_write_time);
+				FPrintf(dump_smb_file,"\tlast write = %s\n",convert_smb_date_time_to_string(last_write_date,last_write_time));
+				FPrintf(dump_smb_file,"\tfile data size = %lu\n",file_data_size);
+				FPrintf(dump_smb_file,"\tallocation size = %lu\n",allocation_size);
+				FPrintf(dump_smb_file,"\tfile attributes = 0x%08lx\n",file_attributes);
 
 				if((file_attributes & 0x001f) == 0)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_NORMAL\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_NORMAL\n");
 
 				if(file_attributes & 0x0001)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
 
 				if(file_attributes & 0x0002)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
 
 				if(file_attributes & 0x0004)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
 
 				if(file_attributes & 0x0008)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_VOLUME\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_VOLUME\n");
 
 				if(file_attributes & 0x0010)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
 
 				if(file_attributes & 0x0020)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
-				Printf("\tfile name length = %ld\n",file_name_length);
-				Printf("\tfile name = '%s'\n",file_name);
+				FPrintf(dump_smb_file,"\tfile name length = %ld\n",file_name_length);
+				FPrintf(dump_smb_file,"\tfile name = '%s'\n",file_name);
 			}
 		}
 	}
@@ -1167,8 +1176,8 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			memmove(filename,data,num_data_bytes);
 			filename[num_data_bytes] = '\0';
 			
-			Printf("buffer format = %ld\n",filename[0]);
-			Printf("directory name = '%s'\n",filename+1);
+			FPrintf(dump_smb_file,"buffer format = %ld\n",filename[0]);
+			FPrintf(dump_smb_file,"directory name = '%s'\n",filename+1);
 		}
 	}
 	else if (command == SMB_COM_DELETE_DIRECTORY)
@@ -1183,8 +1192,8 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			memmove(filename,data,num_data_bytes);
 			filename[num_data_bytes] = '\0';
 			
-			Printf("buffer format = %ld\n",filename[0]);
-			Printf("directory name = '%s'\n",filename+1);
+			FPrintf(dump_smb_file,"buffer format = %ld\n",filename[0]);
+			FPrintf(dump_smb_file,"directory name = '%s'\n",filename+1);
 		}
 	}
 	else if (command == SMB_COM_OPEN)
@@ -1202,28 +1211,28 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			filename[num_data_bytes] = '\0';
 			
 			access_mode = vwv[0];
-			Printf("access mode = 0x%04lx\n",access_mode);
+			FPrintf(dump_smb_file,"access mode = 0x%04lx\n",access_mode);
 
 			switch(access_mode & 0x0007)
 			{
 				case 0:
 
-					Printf("              Open for reading\n");
+					FPrintf(dump_smb_file,"              Open for reading\n");
 					break;
 
 				case 1:
 
-					Printf("              Open for writing\n");
+					FPrintf(dump_smb_file,"              Open for writing\n");
 					break;
 
 				case 2:
 
-					Printf("              Open for reading and writing\n");
+					FPrintf(dump_smb_file,"              Open for reading and writing\n");
 					break;
 
 				case 3:
 
-					Printf("              Open for execution\n");
+					FPrintf(dump_smb_file,"              Open for execution\n");
 					break;
 
 				default:
@@ -1235,27 +1244,27 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			{
 				case 0:
 
-					Printf("              Compatibility mode\n");
+					FPrintf(dump_smb_file,"              Compatibility mode\n");
 					break;
 
 				case 1:
 
-					Printf("              Deny read/write/execute others (exclusive use requested)\n");
+					FPrintf(dump_smb_file,"              Deny read/write/execute others (exclusive use requested)\n");
 					break;
 
 				case 2:
 
-					Printf("              Deny write to others\n");
+					FPrintf(dump_smb_file,"              Deny write to others\n");
 					break;
 
 				case 3:
 
-					Printf("              Deny read/execute to others\n");
+					FPrintf(dump_smb_file,"              Deny read/execute to others\n");
 					break;
 
 				case 4:
 
-					Printf("              Deny nothing to others\n");
+					FPrintf(dump_smb_file,"              Deny nothing to others\n");
 					break;
 
 				default:
@@ -1267,22 +1276,22 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			{
 				case 0:
 
-					Printf("              Unknown locality of reference\n");
+					FPrintf(dump_smb_file,"              Unknown locality of reference\n");
 					break;
 
 				case 1:
 
-					Printf("              Mainly sequential access\n");
+					FPrintf(dump_smb_file,"              Mainly sequential access\n");
 					break;
 
 				case 2:
 
-					Printf("              Mainly random access\n");
+					FPrintf(dump_smb_file,"              Mainly random access\n");
 					break;
 
 				case 3:
 
-					Printf("              Random access with some locality\n");
+					FPrintf(dump_smb_file,"              Random access with some locality\n");
 					break;
 
 				default:
@@ -1291,33 +1300,33 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			}
 
 			if(access_mode & 0x1000)
-				Printf("              Perform caching on file\n");
+				FPrintf(dump_smb_file,"              Perform caching on file\n");
 			else
-				Printf("              Do not cache the file\n");
+				FPrintf(dump_smb_file,"              Do not cache the file\n");
 
 			if(access_mode & 0x4000)
-				Printf("              No read ahead or write behind is allowed on this file or device\n");
+				FPrintf(dump_smb_file,"              No read ahead or write behind is allowed on this file or device\n");
 
 			search_attribute = vwv[1];
-			Printf("search attribute = 0x%04lx\n",search_attribute);
+			FPrintf(dump_smb_file,"search attribute = 0x%04lx\n",search_attribute);
 
 			if(search_attribute & 0x0100)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
 
 			if(search_attribute & 0x0200)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
 
 			if(search_attribute & 0x0400)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
 
 			if(search_attribute & 0x1000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
 
 			if(search_attribute & 0x2000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
 
-			Printf("buffer format = %ld\n",filename[0]);
-			Printf("file pathname = '%s'\n",filename+1);
+			FPrintf(dump_smb_file,"buffer format = %ld\n",filename[0]);
+			FPrintf(dump_smb_file,"file pathname = '%s'\n",filename+1);
 		}
 		else
 		{
@@ -1327,60 +1336,60 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			if(num_parameter_words <= 0)
 				return;
 
-			Printf("file handle = 0x%04lx\n",vwv[0]);
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",vwv[0]);
 
 			file_attributes = vwv[1];
-			Printf("file attributes = 0x%04lx\n",file_attributes);
+			FPrintf(dump_smb_file,"file attributes = 0x%04lx\n",file_attributes);
 
 			if((file_attributes & 0x001f) == 0)
-				Printf("                  SMB_FILE_ATTRIBUTE_NORMAL\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_NORMAL\n");
 
 			if(file_attributes & 0x0001)
-				Printf("                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
 
 			if(file_attributes & 0x0002)
-				Printf("                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
 
 			if(file_attributes & 0x0004)
-				Printf("                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
 
 			if(file_attributes & 0x0008)
-				Printf("                  SMB_FILE_ATTRIBUTE_VOLUME\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_VOLUME\n");
 
 			if(file_attributes & 0x0010)
-				Printf("                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
 
 			if(file_attributes & 0x0020)
-				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
-			Printf("last modified = 0x%08lx\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
-			Printf("                %s\n",convert_utime_to_string((((unsigned long)vwv[3]) << 16) | vwv[2]));
+			FPrintf(dump_smb_file,"last modified = 0x%08lx\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
+			FPrintf(dump_smb_file,"                %s\n",convert_utime_to_string((((unsigned long)vwv[3]) << 16) | vwv[2]));
 
-			Printf("file size = %lu\n",(((unsigned long )vwv[5]) << 16) | vwv[4]);
+			FPrintf(dump_smb_file,"file size = %lu\n",(((unsigned long )vwv[5]) << 16) | vwv[4]);
 
 			access_mode = vwv[6];
-			Printf("access mode = 0x%04lx\n",access_mode);
+			FPrintf(dump_smb_file,"access mode = 0x%04lx\n",access_mode);
 
 			switch(access_mode & 0x0007)
 			{
 				case 0:
 
-					Printf("              Open for reading\n");
+					FPrintf(dump_smb_file,"              Open for reading\n");
 					break;
 
 				case 1:
 
-					Printf("              Open for writing\n");
+					FPrintf(dump_smb_file,"              Open for writing\n");
 					break;
 
 				case 2:
 
-					Printf("              Open for reading and writing\n");
+					FPrintf(dump_smb_file,"              Open for reading and writing\n");
 					break;
 
 				case 3:
 
-					Printf("              Open for execution\n");
+					FPrintf(dump_smb_file,"              Open for execution\n");
 					break;
 
 				default:
@@ -1392,27 +1401,27 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			{
 				case 0:
 
-					Printf("              Compatibility mode\n");
+					FPrintf(dump_smb_file,"              Compatibility mode\n");
 					break;
 
 				case 1:
 
-					Printf("              Deny read/write/execute others (exclusive use requested)\n");
+					FPrintf(dump_smb_file,"              Deny read/write/execute others (exclusive use requested)\n");
 					break;
 
 				case 2:
 
-					Printf("              Deny write to others\n");
+					FPrintf(dump_smb_file,"              Deny write to others\n");
 					break;
 
 				case 3:
 
-					Printf("              Deny read/execute to others\n");
+					FPrintf(dump_smb_file,"              Deny read/execute to others\n");
 					break;
 
 				case 4:
 
-					Printf("              Deny nothing to others\n");
+					FPrintf(dump_smb_file,"              Deny nothing to others\n");
 					break;
 
 				default:
@@ -1424,22 +1433,22 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			{
 				case 0:
 
-					Printf("              Unknown locality of reference\n");
+					FPrintf(dump_smb_file,"              Unknown locality of reference\n");
 					break;
 
 				case 1:
 
-					Printf("              Mainly sequential access\n");
+					FPrintf(dump_smb_file,"              Mainly sequential access\n");
 					break;
 
 				case 2:
 
-					Printf("              Mainly random access\n");
+					FPrintf(dump_smb_file,"              Mainly random access\n");
 					break;
 
 				case 3:
 
-					Printf("              Random access with some locality\n");
+					FPrintf(dump_smb_file,"              Random access with some locality\n");
 					break;
 
 				default:
@@ -1448,12 +1457,12 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			}
 
 			if(access_mode & 0x1000)
-				Printf("              Perform caching on file\n");
+				FPrintf(dump_smb_file,"              Perform caching on file\n");
 			else
-				Printf("              Do not cache the file\n");
+				FPrintf(dump_smb_file,"              Do not cache the file\n");
 
 			if(access_mode & 0x4000)
-				Printf("              No read ahead or write behind is allowed on this file or device\n");
+				FPrintf(dump_smb_file,"              No read ahead or write behind is allowed on this file or device\n");
 		}
 	}
 	else if (command == SMB_COM_CREATE)
@@ -1470,49 +1479,49 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			filename[num_data_bytes] = '\0';
 			
 			file_attributes = vwv[0];
-			Printf("file attributes = 0x%04lx\n",file_attributes);
+			FPrintf(dump_smb_file,"file attributes = 0x%04lx\n",file_attributes);
 
 			if((file_attributes & 0x001f) == 0)
-				Printf("                  SMB_FILE_ATTRIBUTE_NORMAL\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_NORMAL\n");
 
 			if(file_attributes & 0x0001)
-				Printf("                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
 
 			if(file_attributes & 0x0002)
-				Printf("                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
 
 			if(file_attributes & 0x0004)
-				Printf("                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
 
 			if(file_attributes & 0x0008)
-				Printf("                  SMB_FILE_ATTRIBUTE_VOLUME\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_VOLUME\n");
 
 			if(file_attributes & 0x0010)
-				Printf("                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
 
 			if(file_attributes & 0x0020)
-				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
-			Printf("creation time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
-			Printf("                %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
-			Printf("buffer format = %ld\n",filename[0]);
-			Printf("file pathname = '%s'\n",filename+1);
+			FPrintf(dump_smb_file,"creation time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			FPrintf(dump_smb_file,"                %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
+			FPrintf(dump_smb_file,"buffer format = %ld\n",filename[0]);
+			FPrintf(dump_smb_file,"file pathname = '%s'\n",filename+1);
 		}
 		else
 		{
 			if(num_parameter_words <= 0)
 				return;
 
-			Printf("file handle = 0x%04lx\n",vwv[0]);
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",vwv[0]);
 		}
 	}
 	else if (command == SMB_COM_CLOSE)
 	{
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
-			Printf("file handle = 0x%04lx\n",vwv[0]);
-			Printf("last time modified = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
-			Printf("                     %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",vwv[0]);
+			FPrintf(dump_smb_file,"last time modified = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			FPrintf(dump_smb_file,"                     %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
 		}
 	}
 	else if (command == SMB_COM_DELETE)
@@ -1529,25 +1538,25 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			filename[num_data_bytes] = '\0';
 			
 			search_attributes = vwv[0];
-			Printf("search attributes = 0x%04lx\n",search_attributes);
+			FPrintf(dump_smb_file,"search attributes = 0x%04lx\n",search_attributes);
 
 			if(search_attributes & 0x0100)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
 
 			if(search_attributes & 0x0200)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
 
 			if(search_attributes & 0x0400)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
 
 			if(search_attributes & 0x1000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
 
 			if(search_attributes & 0x2000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
 
-			Printf("buffer format = %ld\n",filename[0]);
-			Printf("file name = '%s'\n",filename+1);
+			FPrintf(dump_smb_file,"buffer format = %ld\n",filename[0]);
+			FPrintf(dump_smb_file,"file name = '%s'\n",filename+1);
 		}
 	}
 	else if (command == SMB_COM_RENAME)
@@ -1560,33 +1569,33 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int len;
 			
 			search_attributes = vwv[0];
-			Printf("search attributes = 0x%04lx\n",search_attributes);
+			FPrintf(dump_smb_file,"search attributes = 0x%04lx\n",search_attributes);
 
 			if(search_attributes & 0x0100)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
 
 			if(search_attributes & 0x0200)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
 
 			if(search_attributes & 0x0400)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
 
 			if(search_attributes & 0x1000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
 
 			if(search_attributes & 0x2000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
 
 			old_file_name = data;
 			len = strlen(old_file_name);
 
 			new_file_name = &old_file_name[len+1];
 
-			Printf("buffer format 1 = %ld\n",old_file_name[0]);
-			Printf("old file name = '%s'\n",old_file_name+1);
+			FPrintf(dump_smb_file,"buffer format 1 = %ld\n",old_file_name[0]);
+			FPrintf(dump_smb_file,"old file name = '%s'\n",old_file_name+1);
 
-			Printf("buffer format 2 = %ld\n",new_file_name[0]);
-			Printf("new file name = '%s'\n",new_file_name+1);
+			FPrintf(dump_smb_file,"buffer format 2 = %ld\n",new_file_name[0]);
+			FPrintf(dump_smb_file,"new file name = '%s'\n",new_file_name+1);
 		}
 	}
 	else if (command == SMB_COM_QUERY_INFORMATION)
@@ -1601,8 +1610,8 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			memmove(filename,data,num_data_bytes);
 			filename[num_data_bytes] = '\0';
 			
-			Printf("buffer format = 0x%02lx\n",filename[0]);
-			Printf("file pathname = '%s'\n",filename+1);
+			FPrintf(dump_smb_file,"buffer format = 0x%02lx\n",filename[0]);
+			FPrintf(dump_smb_file,"file pathname = '%s'\n",filename+1);
 		}
 		else
 		{
@@ -1612,32 +1621,32 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				return;
 
 			file_attributes = vwv[0];
-			Printf("file attributes = 0x%04lx\n",file_attributes);
+			FPrintf(dump_smb_file,"file attributes = 0x%04lx\n",file_attributes);
 
 			if((file_attributes & 0x001f) == 0)
-				Printf("                  SMB_FILE_ATTRIBUTE_NORMAL\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_NORMAL\n");
 
 			if(file_attributes & 0x0001)
-				Printf("                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
 
 			if(file_attributes & 0x0002)
-				Printf("                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
 
 			if(file_attributes & 0x0004)
-				Printf("                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
 
 			if(file_attributes & 0x0008)
-				Printf("                  SMB_FILE_ATTRIBUTE_VOLUME\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_VOLUME\n");
 
 			if(file_attributes & 0x0010)
-				Printf("                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
 
 			if(file_attributes & 0x0020)
-				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
-			Printf("last write time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
-			Printf("                  %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
-			Printf("file size = %lu\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
+			FPrintf(dump_smb_file,"last write time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			FPrintf(dump_smb_file,"                  %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
+			FPrintf(dump_smb_file,"file size = %lu\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
 		}
 	}
 	else if (command == SMB_COM_SET_INFORMATION)
@@ -1654,42 +1663,42 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			filename[num_data_bytes] = '\0';
 			
 			file_attributes = vwv[0];
-			Printf("file attributes = 0x%04lx\n",file_attributes);
+			FPrintf(dump_smb_file,"file attributes = 0x%04lx\n",file_attributes);
 
 			if((file_attributes & 0x001f) == 0)
-				Printf("                  SMB_FILE_ATTRIBUTE_NORMAL\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_NORMAL\n");
 
 			if(file_attributes & 0x0001)
-				Printf("                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
 
 			if(file_attributes & 0x0002)
-				Printf("                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
 
 			if(file_attributes & 0x0004)
-				Printf("                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
 
 			if(file_attributes & 0x0008)
-				Printf("                  SMB_FILE_ATTRIBUTE_VOLUME\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_VOLUME\n");
 
 			if(file_attributes & 0x0010)
-				Printf("                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
 
 			if(file_attributes & 0x0020)
-				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
-			Printf("creation time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
-			Printf("                %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
-			Printf("file pathname = '%s'\n",filename+1);
+			FPrintf(dump_smb_file,"creation time = 0x%08lx\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			FPrintf(dump_smb_file,"                %s\n",convert_utime_to_string((((unsigned long)vwv[2]) << 16) | vwv[1]));
+			FPrintf(dump_smb_file,"file pathname = '%s'\n",filename+1);
 		}
 	}
 	else if (command == SMB_COM_READ)
 	{
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
-			Printf("file handle = 0x%04lx\n",(signed short)vwv[0]);
-			Printf("count of bytes to read = %ld\n",vwv[1]);
-			Printf("read offset in bytes = %lu\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
-			Printf("estimate of remaining bytes to be read = %ld\n",vwv[4]);
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",(signed short)vwv[0]);
+			FPrintf(dump_smb_file,"count of bytes to read = %ld\n",vwv[1]);
+			FPrintf(dump_smb_file,"read offset in bytes = %lu\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
+			FPrintf(dump_smb_file,"estimate of remaining bytes to be read = %ld\n",vwv[4]);
 		}
 		else
 		{
@@ -1700,19 +1709,19 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			if(num_parameter_words <= 0)
 				return;
 
-			Printf("count of bytes returned = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"count of bytes returned = %ld\n",vwv[0]);
 
 			buffer_format = next_data_byte(data,&offset);
 			count_of_bytes_read = next_data_word(data,&offset);
 
-			Printf("buffer format = %lu\n",buffer_format);
-			Printf("count of bytes read = %lu\n",count_of_bytes_read);
+			FPrintf(dump_smb_file,"buffer format = %lu\n",buffer_format);
+			FPrintf(dump_smb_file,"count of bytes read = %lu\n",count_of_bytes_read);
 
-			if(count_of_bytes_read > 0)
+			if(dump_smb_level > 1 && count_of_bytes_read > 0)
 			{
 				struct line_buffer lb;
 
-				Printf("raw data (%ld bytes) =\n",count_of_bytes_read);
+				FPrintf(dump_smb_file,"raw data (%ld bytes) =\n",count_of_bytes_read);
 
 				print_smb_data(&lb,count_of_bytes_read,next_data_bytes(data,count_of_bytes_read,&offset));
 			}
@@ -1726,22 +1735,22 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			unsigned short data_length;
 			int offset = 0;
 
-			Printf("file handle = 0x%04lx\n",vwv[0]);
-			Printf("count of bytes to write = %ld\n",vwv[1]);
-			Printf("write offset in bytes = %lu\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
-			Printf("estimate of remaining bytes to be written = %ld\n",vwv[4]);
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",vwv[0]);
+			FPrintf(dump_smb_file,"count of bytes to write = %ld\n",vwv[1]);
+			FPrintf(dump_smb_file,"write offset in bytes = %lu\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
+			FPrintf(dump_smb_file,"estimate of remaining bytes to be written = %ld\n",vwv[4]);
 
 			buffer_format = next_data_byte(data,&offset);
 			data_length = next_data_word(data,&offset);
 
-			Printf("buffer format = %lu\n",buffer_format);
-			Printf("data length = %lu\n",data_length);
+			FPrintf(dump_smb_file,"buffer format = %lu\n",buffer_format);
+			FPrintf(dump_smb_file,"data length = %lu\n",data_length);
 
-			if(data_length > 0)
+			if(dump_smb_level > 1 && data_length > 0)
 			{
 				struct line_buffer lb;
 
-				Printf("raw data (%ld bytes) =\n",data_length);
+				FPrintf(dump_smb_file,"raw data (%ld bytes) =\n",data_length);
 
 				print_smb_data(&lb,data_length,next_data_bytes(data,data_length,&offset));
 			}
@@ -1751,7 +1760,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			if(num_parameter_words <= 0)
 				return;
 
-			Printf("count of bytes written = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"count of bytes written = %ld\n",vwv[0]);
 		}
 	}
 	else if (command == SMB_COM_SEEK)
@@ -1760,51 +1769,51 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		{
 			int mode;
 
-			Printf("file handle = 0x%04lx\n",vwv[0]);
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",vwv[0]);
 
 			mode = vwv[1];
-			Printf("mode = 0x%04lx\n",mode);
+			FPrintf(dump_smb_file,"mode = 0x%04lx\n",mode);
 
 			switch(mode)
 			{
 				case 0:
 
-					Printf("              Seek from the start of the file\n");
+					FPrintf(dump_smb_file,"              Seek from the start of the file\n");
 					break;
 
 				case 1:
 
-					Printf("              Seek from the current position\n");
+					FPrintf(dump_smb_file,"              Seek from the current position\n");
 					break;
 
 				case 2:
 
-					Printf("              Seek from the end of the file\n");
+					FPrintf(dump_smb_file,"              Seek from the end of the file\n");
 					break;
 			}
 
-			Printf("offset = %ld\n",(long)((((unsigned long)vwv[3]) << 16) | vwv[2]));
+			FPrintf(dump_smb_file,"offset = %ld\n",(long)((((unsigned long)vwv[3]) << 16) | vwv[2]));
 		}
 		else
 		{
 			if(num_parameter_words <= 0)
 				return;
 
-			Printf("absolute position = %lu\n",(((unsigned long)vwv[1]) << 16) | vwv[0]);
+			FPrintf(dump_smb_file,"absolute position = %lu\n",(((unsigned long)vwv[1]) << 16) | vwv[0]);
 		}
 	}
 	else if (command == SMB_COM_READ_RAW)
 	{
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
-			Printf("file handle = 0x%04lx\n",(signed short)vwv[0]);
-			Printf("offset = %lu\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
-			Printf("maximum count of bytes to return = %ld\n",vwv[3]);
-			Printf("minimum count of byte to return = %ld\n",vwv[4]);
-			Printf("timeout = %lu\n",(((unsigned long)vwv[6]) << 16) | vwv[5]);
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",(signed short)vwv[0]);
+			FPrintf(dump_smb_file,"offset = %lu\n",(((unsigned long)vwv[2]) << 16) | vwv[1]);
+			FPrintf(dump_smb_file,"maximum count of bytes to return = %ld\n",vwv[3]);
+			FPrintf(dump_smb_file,"minimum count of byte to return = %ld\n",vwv[4]);
+			FPrintf(dump_smb_file,"timeout = %lu\n",(((unsigned long)vwv[6]) << 16) | vwv[5]);
 
 			if(num_parameter_words == 0x0A)
-				Printf("offset high = %lu\n",(((unsigned long)vwv[9]) << 16) | vwv[8]);
+				FPrintf(dump_smb_file,"offset high = %lu\n",(((unsigned long)vwv[9]) << 16) | vwv[8]);
 		}
 	}
 	else if (command == SMB_COM_WRITE_RAW)
@@ -1814,70 +1823,73 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			unsigned short data_length;
 			unsigned short data_offset;
 
-			Printf("file handle = 0x%04lx\n",vwv[0]);
-			Printf("cound of bytes = %lu\n",vwv[1]);
-			Printf("offset = %lu\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
-			Printf("timeout = %lu\n",(((unsigned long)vwv[6]) << 16) | vwv[5]);
-			Printf("write mode = %ld\n",vwv[7]);
+			FPrintf(dump_smb_file,"file handle = 0x%04lx\n",vwv[0]);
+			FPrintf(dump_smb_file,"count of bytes = %lu\n",vwv[1]);
+			FPrintf(dump_smb_file,"offset = %lu\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
+			FPrintf(dump_smb_file,"timeout = %lu\n",(((unsigned long)vwv[6]) << 16) | vwv[5]);
+			FPrintf(dump_smb_file,"write mode = %ld\n",vwv[7]);
 
 			if(vwv[7] & 0x0001)
-				Printf("             Writethrough mode\n");
+				FPrintf(dump_smb_file,"             Writethrough mode\n");
 
 			if(vwv[7] & 0x0002)
-				Printf("             Read bytes available\n");
+				FPrintf(dump_smb_file,"             Read bytes available\n");
 
 			if(vwv[7] & 0x0004)
-				Printf("             Named pipe raw\n");
+				FPrintf(dump_smb_file,"             Named pipe raw\n");
 
 			if(vwv[7] & 0x0008)
-				Printf("             Named pipe start\n");
+				FPrintf(dump_smb_file,"             Named pipe start\n");
 
 			data_length = vwv[8];
 			data_offset = vwv[9];
 
-			Printf("data length = %lu\n",data_length);
-			Printf("data offset = %lu\n",data_offset);
+			FPrintf(dump_smb_file,"data length = %lu\n",data_length);
+			FPrintf(dump_smb_file,"data offset = %lu\n",data_offset);
 
 			if(num_parameter_words == 0x0E)
-				Printf("offset high = %lu\n",(((unsigned long)vwv[11]) << 16) | vwv[10]);
+				FPrintf(dump_smb_file,"offset high = %lu\n",(((unsigned long)vwv[11]) << 16) | vwv[10]);
 
 			if(data_length > 0)
 			{
-				struct line_buffer lb;
-
 				if(header->data_offset < data_offset)
-					Printf("padding bytes = %ld\n",data_offset - header->data_offset);
+					FPrintf(dump_smb_file,"padding bytes = %ld\n",data_offset - header->data_offset);
 
-				Printf("raw data (%ld bytes) =\n",data_length);
+				if(dump_smb_level > 1)
+				{
+					struct line_buffer lb;
 
-				print_smb_data(&lb,num_data_bytes,&header->raw_packet[data_offset]);
+					FPrintf(dump_smb_file,"raw data (%ld bytes) =\n",data_length);
+
+					print_smb_data(&lb,num_data_bytes,&header->raw_packet[data_offset]);
+				}
 			}
 		}
 		else
 		{
 			if(num_parameter_words > 0)
-				Printf("number of bytes remaining to be written = %lu\n",vwv[0]);
+				FPrintf(dump_smb_file,"number of bytes remaining to be written = %lu\n",vwv[0]);
 		}
 	}
 	else if (command == SMB_COM_WRITE_COMPLETE)
 	{
 		if(smb_packet_source == smb_packet_to_consumer && num_parameter_words > 0)
-			Printf("total number of bytes written = %lu\n",vwv[0]);
+			FPrintf(dump_smb_file,"total number of bytes written = %lu\n",vwv[0]);
 	}
 	else if (command == SMB_COM_SET_INFORMATION2)
 	{
 		if(smb_packet_source == smb_packet_from_consumer)
 		{
-			Printf("fid = %ld\n",vwv[0]);
-			Printf("creation date = 0x%04lx\n",vwv[1]);
-			Printf("creation time = 0x%04lx\n",vwv[2]);
-			Printf("creation = %s\n",convert_smb_date_time_to_string(vwv[1],vwv[2]));
-			Printf("last access date = 0x%04lx\n",vwv[3]);
-			Printf("last access time = 0x%04lx\n",vwv[4]);
-			Printf("last access = %s\n",convert_smb_date_time_to_string(vwv[3],vwv[4]));
-			Printf("last write date = 0x%04lx\n",vwv[5]);
-			Printf("last write time = 0x%04lx\n",vwv[6]);
-			Printf("last write = %s\n",convert_smb_date_time_to_string(vwv[5],vwv[6]));
+			FPrintf(dump_smb_file,"fid = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"creation date = 0x%04lx\n",vwv[1]);
+			FPrintf(dump_smb_file,"creation time = 0x%04lx\n",vwv[2]);
+			FPrintf(dump_smb_file,"creation = %s\n",convert_smb_date_time_to_string(vwv[1],vwv[2]));
+			FPrintf(dump_smb_file,"last access date = 0x%04lx\n",vwv[3]);
+			FPrintf(dump_smb_file,"last access time = 0x%04lx\n",vwv[4]);
+			FPrintf(dump_smb_file,"last access = %s\n",convert_smb_date_time_to_string(vwv[3],vwv[4]));
+			FPrintf(dump_smb_file,"last write date = 0x%04lx\n",vwv[5]);
+			FPrintf(dump_smb_file,"last write time = 0x%04lx\n",vwv[6]);
+			FPrintf(dump_smb_file,"last write = %s\n",convert_smb_date_time_to_string(vwv[5],vwv[6]));
 		}
 	}
 	else if (command == SMB_COM_QUERY_INFORMATION2)
@@ -1886,42 +1898,42 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		{
 			int file_attributes;
 
-			Printf("fid = %ld\n",vwv[0]);
-			Printf("creation date = 0x%04lx\n",vwv[1]);
-			Printf("creation time = 0x%04lx\n",vwv[2]);
-			Printf("creation = %s\n",convert_smb_date_time_to_string(vwv[1],vwv[2]));
-			Printf("last access date = 0x%04lx\n",vwv[3]);
-			Printf("last access time = 0x%04lx\n",vwv[4]);
-			Printf("last access = %s\n",convert_smb_date_time_to_string(vwv[3],vwv[4]));
-			Printf("last write date = 0x%04lx\n",vwv[5]);
-			Printf("last write time = 0x%04lx\n",vwv[6]);
-			Printf("last write = %s\n",convert_smb_date_time_to_string(vwv[5],vwv[6]));
-			Printf("file data size = %lu\n",(((unsigned long)vwv[8]) << 16) | vwv[7]);
-			Printf("file allocation size = %lu\n",(((unsigned long)vwv[10]) << 16) | vwv[9]);
+			FPrintf(dump_smb_file,"fid = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"creation date = 0x%04lx\n",vwv[1]);
+			FPrintf(dump_smb_file,"creation time = 0x%04lx\n",vwv[2]);
+			FPrintf(dump_smb_file,"creation = %s\n",convert_smb_date_time_to_string(vwv[1],vwv[2]));
+			FPrintf(dump_smb_file,"last access date = 0x%04lx\n",vwv[3]);
+			FPrintf(dump_smb_file,"last access time = 0x%04lx\n",vwv[4]);
+			FPrintf(dump_smb_file,"last access = %s\n",convert_smb_date_time_to_string(vwv[3],vwv[4]));
+			FPrintf(dump_smb_file,"last write date = 0x%04lx\n",vwv[5]);
+			FPrintf(dump_smb_file,"last write time = 0x%04lx\n",vwv[6]);
+			FPrintf(dump_smb_file,"last write = %s\n",convert_smb_date_time_to_string(vwv[5],vwv[6]));
+			FPrintf(dump_smb_file,"file data size = %lu\n",(((unsigned long)vwv[8]) << 16) | vwv[7]);
+			FPrintf(dump_smb_file,"file allocation size = %lu\n",(((unsigned long)vwv[10]) << 16) | vwv[9]);
 
 			file_attributes = vwv[11];
-			Printf("file attributes = 0x%04lx\n",file_attributes);
+			FPrintf(dump_smb_file,"file attributes = 0x%04lx\n",file_attributes);
 
 			if((file_attributes & 0x001f) == 0)
-				Printf("                  SMB_FILE_ATTRIBUTE_NORMAL\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_NORMAL\n");
 
 			if(file_attributes & 0x0001)
-				Printf("                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
 
 			if(file_attributes & 0x0002)
-				Printf("                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
 
 			if(file_attributes & 0x0004)
-				Printf("                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
 
 			if(file_attributes & 0x0008)
-				Printf("                  SMB_FILE_ATTRIBUTE_VOLUME\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_VOLUME\n");
 
 			if(file_attributes & 0x0010)
-				Printf("                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
 
 			if(file_attributes & 0x0020)
-				Printf("                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 		}
 	}
 	else if (command == SMB_COM_LOCKING_ANDX)
@@ -1934,51 +1946,51 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int offset;
 			int i;
 
-			Printf("fid = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"fid = %ld\n",vwv[0]);
 
 			type_of_lock = vwv[1] & 0xff;
-			Printf("type of lock = %ld\n",type_of_lock);
+			FPrintf(dump_smb_file,"type of lock = %ld\n",type_of_lock);
 
 			if(type_of_lock & 0x01)
-				Printf("                  SHARED_LOCK\n");
+				FPrintf(dump_smb_file,"                  SHARED_LOCK\n");
 			else
-				Printf("                  READ_WRITE_LOCK\n");
+				FPrintf(dump_smb_file,"                  READ_WRITE_LOCK\n");
 
 			if(type_of_lock & 0x02)
-				Printf("                  OPLOCK_RELEASE\n");
+				FPrintf(dump_smb_file,"                  OPLOCK_RELEASE\n");
 
 			if(type_of_lock & 0x04)
-				Printf("                  CHANGE_LOCK_TYPE\n");
+				FPrintf(dump_smb_file,"                  CHANGE_LOCK_TYPE\n");
 
 			if(type_of_lock & 0x08)
-				Printf("                  CANCEL_LOCK\n");
+				FPrintf(dump_smb_file,"                  CANCEL_LOCK\n");
 
 			if(type_of_lock & 0x10)
-				Printf("                  LARGE_FILES\n");
+				FPrintf(dump_smb_file,"                  LARGE_FILES\n");
 
-			Printf("new oplock level = 0x%02lx\n",(vwv[1] >> 8) & 0xff);
+			FPrintf(dump_smb_file,"new oplock level = 0x%02lx\n",(vwv[1] >> 8) & 0xff);
 
-			Printf("timeout = %lu\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
+			FPrintf(dump_smb_file,"timeout = %lu\n",(((unsigned long)vwv[3]) << 16) | vwv[2]);
 
 			number_of_requested_unlocks = vwv[4];
 
-			Printf("number of requested unlocks = %ld\n",number_of_requested_unlocks);
+			FPrintf(dump_smb_file,"number of requested unlocks = %ld\n",number_of_requested_unlocks);
 
 			number_of_requested_locks = vwv[5];
 
-			Printf("number of requested locks = %ld\n",number_of_requested_locks);
+			FPrintf(dump_smb_file,"number of requested locks = %ld\n",number_of_requested_locks);
 
 			offset = 0;
 
 			for(i = 0 ; i < number_of_requested_unlocks ; i++)
 			{
-				Printf("unlock range[%ld] pid=%ld, byte offset = %lu, length in bytes = %lu\n",
+				FPrintf(dump_smb_file,"unlock range[%ld] pid=%ld, byte offset = %lu, length in bytes = %lu\n",
 					i,next_data_word(data,&offset),next_data_dword(data,&offset),next_data_dword(data,&offset));
 			}
 
 			for(i = 0 ; i < number_of_requested_locks ; i++)
 			{
-				Printf("lock range[%ld] pid=%ld, byte offset = %lu, length in bytes = %lu\n",
+				FPrintf(dump_smb_file,"lock range[%ld] pid=%ld, byte offset = %lu, length in bytes = %lu\n",
 					i,next_data_word(data,&offset),next_data_dword(data,&offset),next_data_dword(data,&offset));
 			}
 		}
@@ -1998,37 +2010,37 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int setup_count;
 			int i;
 
-			Printf("total parameter count = %ld\n",vwv[0]);
-			Printf("total data count = %ld\n",vwv[1]);
-			Printf("max parameter count = %ld\n",vwv[2]);
-			Printf("max data count = %ld\n",vwv[3]);
-			Printf("max setup count = %ld\n",vwv[4] & 0xff);
+			FPrintf(dump_smb_file,"total parameter count = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"total data count = %ld\n",vwv[1]);
+			FPrintf(dump_smb_file,"max parameter count = %ld\n",vwv[2]);
+			FPrintf(dump_smb_file,"max data count = %ld\n",vwv[3]);
+			FPrintf(dump_smb_file,"max setup count = %ld\n",vwv[4] & 0xff);
 
 			flags = vwv[5];
-			Printf("flags = 0x%04lx\n",flags);
+			FPrintf(dump_smb_file,"flags = 0x%04lx\n",flags);
 
 			if(flags & 0x0001)
-				Printf("        DISCONNECT_TID\n");
+				FPrintf(dump_smb_file,"        DISCONNECT_TID\n");
 
 			if(flags & 0x0002)
-				Printf("        NO_RESPONSE\n");
+				FPrintf(dump_smb_file,"        NO_RESPONSE\n");
 
-			Printf("timeout = %lu\n",(((unsigned long)vwv[7]) << 16) | vwv[6]);
+			FPrintf(dump_smb_file,"timeout = %lu\n",(((unsigned long)vwv[7]) << 16) | vwv[6]);
 
 			transaction_parameter_count = vwv[9];
-			Printf("parameter count = %ld\n",transaction_parameter_count);
+			FPrintf(dump_smb_file,"parameter count = %ld\n",transaction_parameter_count);
 
 			transaction_parameter_offset = vwv[10];
-			Printf("parameter offset = %ld (header parameter offset = %ld)\n",transaction_parameter_offset,header->parameter_offset);
+			FPrintf(dump_smb_file,"parameter offset = %ld (header parameter offset = %ld)\n",transaction_parameter_offset,header->parameter_offset);
 
 			transaction_data_count = vwv[11];
-			Printf("data count = %ld\n",transaction_data_count);
+			FPrintf(dump_smb_file,"data count = %ld\n",transaction_data_count);
 
 			transaction_data_offset = vwv[12];
-			Printf("data offset = %ld (header data offset = %ld)\n",transaction_data_offset,header->data_offset);
+			FPrintf(dump_smb_file,"data offset = %ld (header data offset = %ld)\n",transaction_data_offset,header->data_offset);
 
 			setup_count = vwv[13] & 0xff;
-			Printf("setup count = %ld\n",setup_count);
+			FPrintf(dump_smb_file,"setup count = %ld\n",setup_count);
 
 			setup_words = &vwv[14];
 
@@ -2038,34 +2050,34 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 				subcommand_name = get_smb_transaction2_subcommand_name(setup_words[0]);
 				if(subcommand_name != NULL)
-					Printf("subcommand = %s\n",subcommand_name);
+					FPrintf(dump_smb_file,"subcommand = %s\n",subcommand_name);
 				else
-					Printf("subcommand = %ld\n",setup_words[0]);
+					FPrintf(dump_smb_file,"subcommand = %ld\n",setup_words[0]);
 
 				for(i = 0 ; i < setup_count ; i++)
-					Printf("setup word [%ld] = 0x%04lx\n",i,setup_words[i]);
+					FPrintf(dump_smb_file,"setup word [%ld] = 0x%04lx\n",i,setup_words[i]);
 			}
 			else
 			{
 				last_smb_com_transaction_subcommand = -1;
 			}
 
-			if(transaction_parameter_count > 0 && transaction_parameter_offset + transaction_parameter_count <= header->raw_packet_size)
+			if(dump_smb_level > 1 && transaction_parameter_count > 0 && transaction_parameter_offset + transaction_parameter_count <= header->raw_packet_size)
 			{
 				const unsigned char * transaction_parameter_contents = (unsigned char *)&header->raw_packet[transaction_parameter_offset];
 				struct line_buffer lb;
 
-				Printf("transaction parameters =\n");
+				FPrintf(dump_smb_file,"transaction parameters =\n");
 
 				print_smb_data(&lb,transaction_parameter_count,transaction_parameter_contents);
 			}
 
-			if(transaction_data_count > 0 && transaction_data_offset + transaction_data_count <= header->raw_packet_size)
+			if(dump_smb_level > 1 && transaction_data_count > 0 && transaction_data_offset + transaction_data_count <= header->raw_packet_size)
 			{
 				const unsigned char * transaction_data_contents = (unsigned char *)&header->raw_packet[transaction_data_offset];
 				struct line_buffer lb;
 
-				Printf("transaction data =\n");
+				FPrintf(dump_smb_file,"transaction data =\n");
 
 				print_smb_data(&lb,transaction_data_count,transaction_data_contents);
 			}
@@ -2083,25 +2095,25 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int setup_count;
 			int i;
 
-			Printf("total parameter count = %ld\n",vwv[0]);
-			Printf("total data count = %ld\n",vwv[1]);
+			FPrintf(dump_smb_file,"total parameter count = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"total data count = %ld\n",vwv[1]);
 
 			transaction_parameter_count = vwv[3];
-			Printf("parameter count = %ld\n",transaction_parameter_count);
+			FPrintf(dump_smb_file,"parameter count = %ld\n",transaction_parameter_count);
 
 			transaction_parameter_offset = vwv[4];
-			Printf("parameter offset = %ld\n",transaction_parameter_offset);
+			FPrintf(dump_smb_file,"parameter offset = %ld\n",transaction_parameter_offset);
 
-			Printf("parameter displacement = %ld\n",vwv[5]);
+			FPrintf(dump_smb_file,"parameter displacement = %ld\n",vwv[5]);
 
 			transaction_data_count = vwv[6];
-			Printf("data count = %ld\n",transaction_data_count);
+			FPrintf(dump_smb_file,"data count = %ld\n",transaction_data_count);
 
 			transaction_data_offset = vwv[7];
-			Printf("data offset = %ld\n",transaction_data_offset);
+			FPrintf(dump_smb_file,"data offset = %ld\n",transaction_data_offset);
 
 			setup_count = vwv[8] & 0xff;
-			Printf("setup count = %ld\n",setup_count);
+			FPrintf(dump_smb_file,"setup count = %ld\n",setup_count);
 
 			setup_words = &vwv[9];
 
@@ -2109,30 +2121,30 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			{
 				subcommand_name = get_smb_transaction2_subcommand_name(setup_words[0]);
 				if(subcommand_name != NULL)
-					Printf("subcommand = %s\n",subcommand_name);
+					FPrintf(dump_smb_file,"subcommand = %s\n",subcommand_name);
 				else
-					Printf("subcommand = %ld\n",setup_words[0]);
+					FPrintf(dump_smb_file,"subcommand = %ld\n",setup_words[0]);
 
 				for(i = 0 ; i < setup_count ; i++)
-					Printf("setup word [%ld] = 0x%04lx\n",i,setup_words[i]);
+					FPrintf(dump_smb_file,"setup word [%ld] = 0x%04lx\n",i,setup_words[i]);
 			}
 
-			if(transaction_parameter_count > 0 && transaction_parameter_offset + transaction_parameter_count <= header->raw_packet_size)
+			if(dump_smb_level > 1 && transaction_parameter_count > 0 && transaction_parameter_offset + transaction_parameter_count <= header->raw_packet_size)
 			{
 				const unsigned char * transaction_parameter_contents = (unsigned char *)&header->raw_packet[transaction_parameter_offset];
 				struct line_buffer lb;
 
-				Printf("transaction parameters =\n");
+				FPrintf(dump_smb_file,"transaction parameters =\n");
 
 				print_smb_data(&lb,transaction_parameter_count,transaction_parameter_contents);
 			}
 
-			if(transaction_data_count > 0 && transaction_data_offset + transaction_data_count <= header->raw_packet_size)
+			if(dump_smb_level > 1 && transaction_data_count > 0 && transaction_data_offset + transaction_data_count <= header->raw_packet_size)
 			{
 				const unsigned char * transaction_data_contents = (unsigned char *)&header->raw_packet[transaction_data_offset];
 				struct line_buffer lb;
 
-				Printf("transaction data =\n");
+				FPrintf(dump_smb_file,"transaction data =\n");
 
 				print_smb_data(&lb,transaction_data_count,transaction_data_contents);
 			}
@@ -2159,20 +2171,20 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 			service = &password[len+1];
 
-			Printf("buffer format 1 = %ld\n",path[0]);
-			Printf("path = '%s'\n",path+1);
-			Printf("buffer format 2 = %ld\n",password[0]);
-			Printf("password = '%s'\n",password+1);
-			Printf("buffer format 3 = %ld\n",service[0]);
-			Printf("service = '%s'\n",service+1);
+			FPrintf(dump_smb_file,"buffer format 1 = %ld\n",path[0]);
+			FPrintf(dump_smb_file,"path = '%s'\n",path+1);
+			FPrintf(dump_smb_file,"buffer format 2 = %ld\n",password[0]);
+			FPrintf(dump_smb_file,"password = '%s'\n",password+1);
+			FPrintf(dump_smb_file,"buffer format 3 = %ld\n",service[0]);
+			FPrintf(dump_smb_file,"service = '%s'\n",service+1);
 		}
 		else
 		{
 			if(num_parameter_words <= 0)
 				return;
 
-			Printf("max buffer size = %ld\n",vwv[0]);
-			Printf("tid = %ld\n",vwv[1]);
+			FPrintf(dump_smb_file,"max buffer size = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"tid = %ld\n",vwv[1]);
 		}
 	}
 	else if (command == SMB_COM_NEGOTIATE)
@@ -2195,7 +2207,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			
 			while(dialect < &args[num_data_bytes])
 			{
-				Printf("dialect[%ld] = '%s'\n",dialect_index++,&dialect[1]);
+				FPrintf(dump_smb_file,"dialect[%ld] = '%s'\n",dialect_index++,&dialect[1]);
 				
 				len = strlen(&dialect[1]);
 				
@@ -2218,109 +2230,109 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				int output_offset;
 				unsigned long system_time[2];
 
-				Printf("dialect index = %ld\n",next_data_word(parameters,&offset));
+				FPrintf(dump_smb_file,"dialect index = %ld\n",next_data_word(parameters,&offset));
 
 				security_mode = next_data_byte(parameters,&offset);
-				Printf("security mode = %ld\n",security_mode);
+				FPrintf(dump_smb_file,"security mode = %ld\n",security_mode);
 
 				if(security_mode & 0x01)
-					Printf("                NEGOTIATE_USER_SECURITY\n");
+					FPrintf(dump_smb_file,"                NEGOTIATE_USER_SECURITY\n");
 
 				if(security_mode & 0x02)
-					Printf("                NEGOTIATE_ENCRYPT_PASSWORDS\n");
+					FPrintf(dump_smb_file,"                NEGOTIATE_ENCRYPT_PASSWORDS\n");
 
 				if(security_mode & 0x04)
-					Printf("                NEGOTIATE_SECURITY_SIGNATURES_ENABLE\n");
+					FPrintf(dump_smb_file,"                NEGOTIATE_SECURITY_SIGNATURES_ENABLE\n");
 
 				if(security_mode & 0x08)
-					Printf("                NEGOTIATE_SECURITY_SIGNATURES_REQUIRED\n");
+					FPrintf(dump_smb_file,"                NEGOTIATE_SECURITY_SIGNATURES_REQUIRED\n");
 
 				if(security_mode & 0xF0)
-					Printf("                Reserved = 0x%lx\n",security_mode >> 4);
+					FPrintf(dump_smb_file,"                Reserved = 0x%lx\n",security_mode >> 4);
 
-				Printf("max mpx count = %ld\n",next_data_word(parameters,&offset));
-				Printf("max number cvs = %ld\n",next_data_word(parameters,&offset));
-				Printf("max buffer size = %lu\n",next_data_dword(parameters,&offset));
-				Printf("max raw size = %lu\n",next_data_dword(parameters,&offset));
-				Printf("session key = %lu\n",next_data_dword(parameters,&offset));
+				FPrintf(dump_smb_file,"max mpx count = %ld\n",next_data_word(parameters,&offset));
+				FPrintf(dump_smb_file,"max number cvs = %ld\n",next_data_word(parameters,&offset));
+				FPrintf(dump_smb_file,"max buffer size = %lu\n",next_data_dword(parameters,&offset));
+				FPrintf(dump_smb_file,"max raw size = %lu\n",next_data_dword(parameters,&offset));
+				FPrintf(dump_smb_file,"session key = %lu\n",next_data_dword(parameters,&offset));
 
 				capabilities = next_data_dword(parameters,&offset);
-				Printf("capabilities = 0x%08lx\n",capabilities);
+				FPrintf(dump_smb_file,"capabilities = 0x%08lx\n",capabilities);
 
 				if(capabilities & 0x00000001)
-					Printf("               CAP_RAW_MODE\n");
+					FPrintf(dump_smb_file,"               CAP_RAW_MODE\n");
 
 				if(capabilities & 0x00000002)
-					Printf("               CAP_MPX_MODE\n");
+					FPrintf(dump_smb_file,"               CAP_MPX_MODE\n");
 
 				if(capabilities & 0x00000004)
-					Printf("               CAP_UNICODE\n");
+					FPrintf(dump_smb_file,"               CAP_UNICODE\n");
 
 				if(capabilities & 0x00000008)
-					Printf("               CAP_LARGE_FILES\n");
+					FPrintf(dump_smb_file,"               CAP_LARGE_FILES\n");
 
 				if(capabilities & 0x00000010)
-					Printf("               CAP_NT_SMBS\n");
+					FPrintf(dump_smb_file,"               CAP_NT_SMBS\n");
 
 				if(capabilities & 0x00000020)
-					Printf("               CAP_RPC_REMOTE_APIS\n");
+					FPrintf(dump_smb_file,"               CAP_RPC_REMOTE_APIS\n");
 
 				if(capabilities & 0x00000040)
-					Printf("               CAP_STATUS32\n");
+					FPrintf(dump_smb_file,"               CAP_STATUS32\n");
 
 				if(capabilities & 0x00000080)
-					Printf("               CAP_LEVEL_II_OPLOCKS\n");
+					FPrintf(dump_smb_file,"               CAP_LEVEL_II_OPLOCKS\n");
 
 				if(capabilities & 0x00000100)
-					Printf("               CAP_LOCK_AND_READ\n");
+					FPrintf(dump_smb_file,"               CAP_LOCK_AND_READ\n");
 
 				if(capabilities & 0x00000200)
-					Printf("               CAP_NT_FIND\n");
+					FPrintf(dump_smb_file,"               CAP_NT_FIND\n");
 
 				if(capabilities & 0x00000400)
-					Printf("               CAP_BULK_TRANSFER\n");
+					FPrintf(dump_smb_file,"               CAP_BULK_TRANSFER\n");
 
 				if(capabilities & 0x00000800)
-					Printf("               CAP_COMPRESSED_DATA\n");
+					FPrintf(dump_smb_file,"               CAP_COMPRESSED_DATA\n");
 
 				if(capabilities & 0x00001000)
-					Printf("               CAP_DFS\n");
+					FPrintf(dump_smb_file,"               CAP_DFS\n");
 
 				if(capabilities & 0x00002000)
-					Printf("               CAP_QUADWORD_ALIGNED\n");
+					FPrintf(dump_smb_file,"               CAP_QUADWORD_ALIGNED\n");
 
 				if(capabilities & 0x00004000)
-					Printf("               CAP_LARGE_READX\n");
+					FPrintf(dump_smb_file,"               CAP_LARGE_READX\n");
 
 				if(capabilities & 0x00008000)
-					Printf("               CAP_LARGE_WRITEX\n");
+					FPrintf(dump_smb_file,"               CAP_LARGE_WRITEX\n");
 
 				if(capabilities & 0x00800000)
-					Printf("               CAP_UNIX\n");
+					FPrintf(dump_smb_file,"               CAP_UNIX\n");
 
 				if(capabilities & 0x20000000)
-					Printf("               CAP_BULK_TRANSFER\n");
+					FPrintf(dump_smb_file,"               CAP_BULK_TRANSFER\n");
 
 				if(capabilities & 0x40000000)
-					Printf("               CAP_COMPRESSED_DATA\n");
+					FPrintf(dump_smb_file,"               CAP_COMPRESSED_DATA\n");
 
 				if(capabilities & 0x80000000)
-					Printf("               CAP_EXTENDED_SECURITY\n");
+					FPrintf(dump_smb_file,"               CAP_EXTENDED_SECURITY\n");
 
 				next_data_qword(parameters,system_time,&offset);
 
-				Printf("system time = 0x%08lx%08lx\n",system_time[0],system_time[1]);
-				Printf("              %s\n",convert_filetime_to_string(system_time));
-				Printf("server time zone = %ld\n",(signed short)next_data_word(parameters,&offset));	/* ZZZ this is a signed 16 bit integer */
+				FPrintf(dump_smb_file,"system time = 0x%08lx%08lx\n",system_time[0],system_time[1]);
+				FPrintf(dump_smb_file,"              %s\n",convert_filetime_to_string(system_time));
+				FPrintf(dump_smb_file,"server time zone = %ld\n",(signed short)next_data_word(parameters,&offset));	/* ZZZ this is a signed 16 bit integer */
 
 				challenge_length = next_data_byte(parameters,&offset);
-				Printf("challenge length = %ld\n",challenge_length);
+				FPrintf(dump_smb_file,"challenge length = %ld\n",challenge_length);
 
 				if(challenge_length > 0)
 				{
 					if(challenge_length == 8)
 					{
-						Printf("challenge = %02lx %02lx %02lx %02lx %02lx %02lx %02lx %02lx\n",
+						FPrintf(dump_smb_file,"challenge = %02lx %02lx %02lx %02lx %02lx %02lx %02lx %02lx\n",
 							data[0],data[1],data[2],data[3],
 							data[4],data[5],data[6],data[7]);
 					}
@@ -2355,14 +2367,14 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 					}
 				}
 				
-				Printf("Domain name = '%s'\n",lb.line);
+				FPrintf(dump_smb_file,"Domain name = '%s'\n",lb.line);
 			}
 			else
 			{
 				if(num_parameter_words <= 0)
 					return;
 
-				Printf("dialect index = %ld\n",vwv[0]);
+				FPrintf(dump_smb_file,"dialect index = %ld\n",vwv[0]);
 			}
 		}
 	}
@@ -2392,71 +2404,71 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int unicode_password_length;
 			unsigned long capabilities;
 
-			Printf("consumer's maximum buffer size = %ld\n",vwv[0]);
-			Printf("actual maximum multiplexed pending requests = %ld\n",vwv[1]);
-			Printf("vc number = %ld\n",vwv[2]);
-			Printf("session key = 0x%08lx\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
+			FPrintf(dump_smb_file,"consumer's maximum buffer size = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"actual maximum multiplexed pending requests = %ld\n",vwv[1]);
+			FPrintf(dump_smb_file,"vc number = %ld\n",vwv[2]);
+			FPrintf(dump_smb_file,"session key = 0x%08lx\n",(((unsigned long)vwv[4]) << 16) | vwv[3]);
 
 			oem_password_length = vwv[5];
-			Printf("oem password length = %ld\n",oem_password_length);
+			FPrintf(dump_smb_file,"oem password length = %ld\n",oem_password_length);
 
 			unicode_password_length = vwv[6];
-			Printf("unicode password length = %ld\n",unicode_password_length);
+			FPrintf(dump_smb_file,"unicode password length = %ld\n",unicode_password_length);
 
 			capabilities = (((unsigned long)vwv[10]) << 16) | vwv[9];
 
-			Printf("capabilities = 0x%08lx\n",capabilities);
+			FPrintf(dump_smb_file,"capabilities = 0x%08lx\n",capabilities);
 			
 			if(capabilities & 0x00000001)
-				Printf("               CAP_RAW_MODE\n");
+				FPrintf(dump_smb_file,"               CAP_RAW_MODE\n");
 
 			if(capabilities & 0x00000002)
-				Printf("               CAP_MPX_MODE\n");
+				FPrintf(dump_smb_file,"               CAP_MPX_MODE\n");
 
 			if(capabilities & 0x00000004)
-				Printf("               CAP_UNICODE\n");
+				FPrintf(dump_smb_file,"               CAP_UNICODE\n");
 
 			if(capabilities & 0x00000008)
-				Printf("               CAP_LARGE_FILES\n");
+				FPrintf(dump_smb_file,"               CAP_LARGE_FILES\n");
 
 			if(capabilities & 0x00000010)
-				Printf("               CAP_NT_SMBS\n");
+				FPrintf(dump_smb_file,"               CAP_NT_SMBS\n");
 
 			if(capabilities & 0x00000020)
-				Printf("               CAP_RPC_REMOTE_APIS\n");
+				FPrintf(dump_smb_file,"               CAP_RPC_REMOTE_APIS\n");
 
 			if(capabilities & 0x00000040)
-				Printf("               CAP_STATUS32\n");
+				FPrintf(dump_smb_file,"               CAP_STATUS32\n");
 
 			if(capabilities & 0x00000080)
-				Printf("               CAP_LEVEL_II_OPLOCKS\n");
+				FPrintf(dump_smb_file,"               CAP_LEVEL_II_OPLOCKS\n");
 
 			if(capabilities & 0x00000100)
-				Printf("               CAP_LOCK_AND_READ\n");
+				FPrintf(dump_smb_file,"               CAP_LOCK_AND_READ\n");
 
 			if(capabilities & 0x00000200)
-				Printf("               CAP_NT_FIND\n");
+				FPrintf(dump_smb_file,"               CAP_NT_FIND\n");
 
 			if(capabilities & 0x00000400)
-				Printf("               CAP_BULK_TRANSFER\n");
+				FPrintf(dump_smb_file,"               CAP_BULK_TRANSFER\n");
 
 			if(capabilities & 0x00000800)
-				Printf("               CAP_COMPRESSED_DATA\n");
+				FPrintf(dump_smb_file,"               CAP_COMPRESSED_DATA\n");
 
 			if(capabilities & 0x00001000)
-				Printf("               CAP_DFS\n");
+				FPrintf(dump_smb_file,"               CAP_DFS\n");
 
 			if(capabilities & 0x00002000)
-				Printf("               CAP_QUADWORD_ALIGNED\n");
+				FPrintf(dump_smb_file,"               CAP_QUADWORD_ALIGNED\n");
 
 			if(capabilities & 0x00004000)
-				Printf("               CAP_LARGE_READX\n");
+				FPrintf(dump_smb_file,"               CAP_LARGE_READX\n");
 
 			if(capabilities & 0x00800000)
-				Printf("               CAP_UNIX\n");
+				FPrintf(dump_smb_file,"               CAP_UNIX\n");
 
 			if(capabilities & 0x80000000)
-				Printf("               CAP_EXTENDED_SECURITY\n");
+				FPrintf(dump_smb_file,"               CAP_EXTENDED_SECURITY\n");
 
 			if(num_data_bytes > 0)
 			{
@@ -2501,10 +2513,10 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				}
 			}
 			
-			Printf("account name = '%s'\n",account_name);
-			Printf("primary domain = '%s'\n",primary_domain);
-			Printf("native os = '%s'\n",native_os);
-			Printf("native lan man = '%s'\n",native_lan_man);
+			FPrintf(dump_smb_file,"account name = '%s'\n",account_name);
+			FPrintf(dump_smb_file,"primary domain = '%s'\n",primary_domain);
+			FPrintf(dump_smb_file,"native os = '%s'\n",native_os);
+			FPrintf(dump_smb_file,"native lan man = '%s'\n",native_lan_man);
 		}
 		else
 		{
@@ -2514,13 +2526,13 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				return;
 
 			request_mode = vwv[0];
-			Printf("request mode = 0x%04lx\n",request_mode);
+			FPrintf(dump_smb_file,"request mode = 0x%04lx\n",request_mode);
 
 			if(request_mode & 0x0001)
-				Printf("               SMB_SETUP_GUEST\n");
+				FPrintf(dump_smb_file,"               SMB_SETUP_GUEST\n");
 
 			if(request_mode & 0x0002)
-				Printf("               SMB_SETUP_USE_LANMAN_KEY\n");
+				FPrintf(dump_smb_file,"               SMB_SETUP_USE_LANMAN_KEY\n");
 
 			if(num_data_bytes > 0)
 			{
@@ -2539,9 +2551,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 					primary_domain = &native_lan_man[len+1];
 				}
 			
-				Printf("native os = '%s'\n",native_os);
-				Printf("native lan man = '%s'\n",native_lan_man);
-				Printf("primary domain = '%s'\n",primary_domain);
+				FPrintf(dump_smb_file,"native os = '%s'\n",native_os);
+				FPrintf(dump_smb_file,"native lan man = '%s'\n",native_lan_man);
+				FPrintf(dump_smb_file,"primary domain = '%s'\n",primary_domain);
 			}
 		}
 	}
@@ -2565,14 +2577,14 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int password_length;
 
 			flags = vwv[0];
-			Printf("flags = 0x%04lx\n",flags);
+			FPrintf(dump_smb_file,"flags = 0x%04lx\n",flags);
 
 			if(flags & 0x0001)
-				Printf("        TREE_CONNECT_ANDX_DISCONNECT_TID\n");
+				FPrintf(dump_smb_file,"        TREE_CONNECT_ANDX_DISCONNECT_TID\n");
 
 			password_length = vwv[1];
 
-			Printf("password length = %ld\n",password_length);
+			FPrintf(dump_smb_file,"password length = %ld\n",password_length);
 
 			password = args;
 			len = password_length;
@@ -2590,9 +2602,9 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 			dev_name = &path[len];
 			
-			Printf("path = '%s'\n",path);
-			// Printf("password = '%s'\n",password);
-			Printf("dev name = '%s'\n",dev_name);
+			FPrintf(dump_smb_file,"path = '%s'\n",path);
+			// FPrintf(dump_smb_file,"password = '%s'\n",password);
+			FPrintf(dump_smb_file,"dev name = '%s'\n",dev_name);
 		}
 		else
 		{
@@ -2609,18 +2621,18 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			/* ZZZ this could be Unicode text. */
 			native_file_system = &service[len];
 
-			Printf("service = '%s'\n",service);
-			Printf("native file system = '%s'\n",native_file_system);
+			FPrintf(dump_smb_file,"service = '%s'\n",service);
+			FPrintf(dump_smb_file,"native file system = '%s'\n",native_file_system);
 		}
 	}
 	else if (command == SMB_COM_QUERY_INFORMATION_DISK)
 	{
 		if(smb_packet_source == smb_packet_to_consumer && num_parameter_words > 3)
 		{
-			Printf("allocation units/server = %ld\n",vwv[0]);
-			Printf("blocks/allocation unit = %ld\n",vwv[1]);
-			Printf("block size (in bytes) = %ld\n",vwv[2]);
-			Printf("free allocation units = %ld\n",vwv[3]);
+			FPrintf(dump_smb_file,"allocation units/server = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"blocks/allocation unit = %ld\n",vwv[1]);
+			FPrintf(dump_smb_file,"block size (in bytes) = %ld\n",vwv[2]);
+			FPrintf(dump_smb_file,"free allocation units = %ld\n",vwv[3]);
 		}
 	}
 	else if (command == SMB_COM_SEARCH)
@@ -2634,38 +2646,38 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 			int len;
 			int offset;
 
-			Printf("max count = %ld\n",vwv[0]);
+			FPrintf(dump_smb_file,"max count = %ld\n",vwv[0]);
 
 			search_attributes = vwv[1];
-			Printf("search attributes = 0x%04lx\n",search_attributes);
+			FPrintf(dump_smb_file,"search attributes = 0x%04lx\n",search_attributes);
 
 			if(search_attributes & 0x0100)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_READONLY\n");
 
 			if(search_attributes & 0x0200)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_HIDDEN\n");
 
 			if(search_attributes & 0x0400)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_SYSTEM\n");
 
 			if(search_attributes & 0x1000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_DIRECTORY\n");
 
 			if(search_attributes & 0x2000)
-				Printf("                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
+				FPrintf(dump_smb_file,"                   SMB_SEARCH_ATTRIBUTE_ARCHIVE\n");
 
 			file_name = (char *)data;
 			len = strlen(file_name);
 
-			Printf("buffer format = %ld\n",file_name[0]);
-			Printf("file name = '%s'\n",file_name+1);
+			FPrintf(dump_smb_file,"buffer format = %ld\n",file_name[0]);
+			FPrintf(dump_smb_file,"file name = '%s'\n",file_name+1);
 
 			resume_key_data = (unsigned char *)&file_name[len+1];
 			offset = 0;
 
 			resume_key_length = next_data_word(resume_key_data,&offset);
 
-			Printf("resume key length = %ld\n",resume_key_length);
+			FPrintf(dump_smb_file,"resume key length = %ld\n",resume_key_length);
 
 			if(resume_key_length == 21)
 			{
@@ -2677,21 +2689,21 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 				server_state = next_data_bytes(resume_key_data,16,&offset);
 				client_state = next_data_bytes(resume_key_data,4,&offset);
 
-				Printf("resume key reserved = %02lx\n",reserved);
+				FPrintf(dump_smb_file,"resume key reserved = %02lx\n",reserved);
 
-				Printf("resume key server state = ");
+				FPrintf(dump_smb_file,"resume key server state = ");
 
 				for(i = 0 ; i < 16 ; i++)
-					Printf("%02lx",server_state[i]);
+					FPrintf(dump_smb_file,"%02lx",server_state[i]);
 
-				Printf("\n");
+				FPrintf(dump_smb_file,"\n");
 
-				Printf("resume key client state = ");
+				FPrintf(dump_smb_file,"resume key client state = ");
 
 				for(i = 0 ; i < 4 ; i++)
-					Printf("%02lx",client_state[i]);
+					FPrintf(dump_smb_file,"%02lx",client_state[i]);
 
-				Printf("\n");
+				FPrintf(dump_smb_file,"\n");
 			}
 		}
 		else
@@ -2715,78 +2727,78 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 			count = vwv[0];
 
-			Printf("count = %ld\n",count);
+			FPrintf(dump_smb_file,"count = %ld\n",count);
 
 			offset = 0;
 
 			buffer_format = next_data_byte(data,&offset);
 
-			Printf("buffer format = %ld\n",buffer_format);
+			FPrintf(dump_smb_file,"buffer format = %ld\n",buffer_format);
 
 			data_length = next_data_word(data,&offset);
 
-			Printf("data length = %ld\n",data_length);
+			FPrintf(dump_smb_file,"data length = %ld\n",data_length);
 
 			for(j = 0 ; j < count ; j++)
 			{
-				Printf("directory entry [%ld]:\n",j);
+				FPrintf(dump_smb_file,"directory entry [%ld]:\n",j);
 
 				reserved = next_data_byte(data,&offset);
 				server_state = next_data_bytes(data,16,&offset);
 				client_state = next_data_bytes(data,4,&offset);
 
-				Printf("\tresume key reserved = %02lx\n",reserved);
+				FPrintf(dump_smb_file,"\tresume key reserved = %02lx\n",reserved);
 
-				Printf("\tresume key server state = ");
+				FPrintf(dump_smb_file,"\tresume key server state = ");
 
 				for(i = 0 ; i < 16 ; i++)
-					Printf("%02lx",server_state[i]);
+					FPrintf(dump_smb_file,"%02lx",server_state[i]);
 
-				Printf("\n");
+				FPrintf(dump_smb_file,"\n");
 
-				Printf("\tresume key client state = ");
+				FPrintf(dump_smb_file,"\tresume key client state = ");
 
 				for(i = 0 ; i < 4 ; i++)
-					Printf("%02lx",client_state[i]);
+					FPrintf(dump_smb_file,"%02lx",client_state[i]);
 
-				Printf("\n");
+				FPrintf(dump_smb_file,"\n");
 
 				file_attributes = next_data_byte(data,&offset);
 
-				Printf("file attributes = 0x%04lx\n",file_attributes);
+				FPrintf(dump_smb_file,"file attributes = 0x%04lx\n",file_attributes);
 
 				if((file_attributes & 0x001f) == 0)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_NORMAL\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_NORMAL\n");
 
 				if(file_attributes & 0x0001)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_READ_ONLY\n");
 
 				if(file_attributes & 0x0002)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_HIDDEN\n");
 
 				if(file_attributes & 0x0004)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_SYSTEM\n");
 
 				if(file_attributes & 0x0008)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_VOLUME\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_VOLUME\n");
 
 				if(file_attributes & 0x0010)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_DIRECTORY\n");
 
 				if(file_attributes & 0x0020)
-					Printf("\t                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
+					FPrintf(dump_smb_file,"\t                  SMB_FILE_ATTRIBUTE_ARCHIVE\n");
 
 				last_write_time = next_data_word(data,&offset);
 				last_write_date = next_data_word(data,&offset);
 
-				Printf("\tlast write time = 0x%04lx\n",last_write_time);
-				Printf("\tlast write date = 0x%04lx\n",last_write_date);
-				Printf("\tlast write = %s\n",convert_smb_date_time_to_string(last_write_date,last_write_time));
-				Printf("\tfile size = %lu\n",next_data_dword(data,&offset));
+				FPrintf(dump_smb_file,"\tlast write time = 0x%04lx\n",last_write_time);
+				FPrintf(dump_smb_file,"\tlast write date = 0x%04lx\n",last_write_date);
+				FPrintf(dump_smb_file,"\tlast write = %s\n",convert_smb_date_time_to_string(last_write_date,last_write_time));
+				FPrintf(dump_smb_file,"\tfile size = %lu\n",next_data_dword(data,&offset));
 
 				file_name = (const char *)next_data_bytes(data,13,&offset);
 
-				Printf("\tfile name = '%s'\n",file_name);
+				FPrintf(dump_smb_file,"\tfile name = '%s'\n",file_name);
 			}
 		}
 	}
@@ -2806,7 +2818,7 @@ print_smb_parameters(int num_parameter_words,const unsigned char *parameters)
 		{
 			word_value = parameters[j] + (((int)parameters[j+1]) << 8);
 
-			Printf("                  %04lx: %04lx (bytes: %02lx%02lx)\n",i,word_value,parameters[j],parameters[j+1]);
+			FPrintf(dump_smb_file,"                  %04lx: %04lx (bytes: %02lx%02lx)\n",i,word_value,parameters[j],parameters[j+1]);
 		}
 	}
 }
@@ -4016,16 +4028,16 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 		{ nt_status_quota_list_inconsistent, "quota list inconsistent" },
 		{ nt_status_file_is_offline, "file is offline" },
 		//{ nt_status_notify_enum_dir, "notify enum dir" },
-		{ -1, NULL }
+		{ -1, NULL }
 	};
 
 	const char * command_name;
 	struct line_buffer lb;
 
 	if(smb_packet_source == smb_packet_from_consumer)
-		Printf("message type = Request (client --> server)\n");
+		FPrintf(dump_smb_file,"message type = Request (client --> server)\n");
 	else
-		Printf("message type = Response (server --> client)\n");
+		FPrintf(dump_smb_file,"message type = Response (server --> client)\n");
 
 	if(header->flags2 & SMB_FLAGS2_32BIT_STATUS)
 	{
@@ -4046,7 +4058,7 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 			}
 		}
 
-		Printf("status = [%08lx] severity:%s, facility:%s (%ld), code:%s (%ld)\n",header->status,
+		FPrintf(dump_smb_file,"status = [%08lx] severity:%s, facility:%s (%ld), code:%s (%ld)\n",header->status,
 			severity ? "failure" : "success",facility ? "?" : "default",facility,error_code_name,error_code);
 	}
 	else
@@ -4119,12 +4131,12 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 				break;
 		}
 
-		Printf("status = [%08lx] error:%s (%ld), code:%s (%ld)\n",header->status,
+		FPrintf(dump_smb_file,"status = [%08lx] error:%s (%ld), code:%s (%ld)\n",header->status,
 			error_class_name,error_class_value,
 			error_code_name,error_code_value);
 	}
 
-	Printf("flags = ");
+	FPrintf(dump_smb_file,"flags = ");
 
 	init_line_buffer(&lb);
 
@@ -4163,9 +4175,9 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 	else
 		add_lb_flag(&lb,"support-lockread=no");
 
-	Printf("%s\n",lb.line);
+	FPrintf(dump_smb_file,"%s\n",lb.line);
 
-	Printf("flags2 = ");
+	FPrintf(dump_smb_file,"flags2 = ");
 
 	init_line_buffer(&lb);
 
@@ -4214,17 +4226,17 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 	else
 		add_lb_flag(&lb,"client-names-supported=8.3");
 
-	Printf("%s\n",lb.line);
+	FPrintf(dump_smb_file,"%s\n",lb.line);
 
-	Printf("signature = %04lx%04lx%04lx%04lx\n",header->extra.signature[0],header->extra.signature[1],
+	FPrintf(dump_smb_file,"signature = %04lx%04lx%04lx%04lx\n",header->extra.signature[0],header->extra.signature[1],
 		header->extra.signature[2],header->extra.signature[3]);
 
-	Printf("tid = %04lx\n",header->tid);
-	Printf("pid = %04lx\n",header->pid);
-	Printf("uid = %04lx\n",header->uid);
-	Printf("mid = %04lx\n",header->mid);
+	FPrintf(dump_smb_file,"tid = %04lx\n",header->tid);
+	FPrintf(dump_smb_file,"pid = %04lx\n",header->pid);
+	FPrintf(dump_smb_file,"uid = %04lx\n",header->uid);
+	FPrintf(dump_smb_file,"mid = %04lx\n",header->mid);
 
-	Printf("length = %ld (packet size:%ld, buffer size:%ld)\n",header_length,packet_size,max_buffer_size);
+	FPrintf(dump_smb_file,"length = %ld (packet size:%ld, buffer size:%ld)\n",header_length,packet_size,max_buffer_size);
 
 	if(is_smb_andx_command(header->command))
 	{
@@ -4235,19 +4247,19 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 		command_name = get_smb_command_name(header->command);
 
 		if(command_name != NULL)
-			Printf("command = %s (ANDX)\n",command_name);
+			FPrintf(dump_smb_file,"command = %s (ANDX)\n",command_name);
 		else
-			Printf("command = 0x%02lx (ANDX)\n",header->command);
+			FPrintf(dump_smb_file,"command = 0x%02lx (ANDX)\n",header->command);
 
-		Printf("parameter words = %ld\n",header->num_parameter_words - 2);
+		FPrintf(dump_smb_file,"parameter words = %ld\n",header->num_parameter_words - 2);
 		
 		if(header->num_parameter_words - 2 > 0)
 			print_smb_parameters(header->num_parameter_words - 2,&header->parameters[4]);
 
-		Printf("data bytes = %ld\n",header->num_data_bytes);
+		FPrintf(dump_smb_file,"data bytes = %ld\n",header->num_data_bytes);
 
 		/* If there are any data bytes, print them like "type hex .." would. */
-		if(header->num_data_bytes > 0)
+		if(dump_smb_level > 0 && header->num_data_bytes > 0)
 			print_smb_data(&lb,header->num_data_bytes,header->data);
 
 		print_smb_contents(header, header->command, smb_packet_source, header->num_parameter_words - 2,
@@ -4262,22 +4274,22 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 			command_name = get_smb_command_name(andx_header[0]);
 
 			if(command_name != NULL)
-				Printf("command = %s (ANDX)\n",command_name);
+				FPrintf(dump_smb_file,"command = %s (ANDX)\n",command_name);
 			else
-				Printf("command = 0x%02lx (ANDX)\n",header->command);
+				FPrintf(dump_smb_file,"command = 0x%02lx (ANDX)\n",header->command);
 
-			Printf("andx_offset = 0x%02lx\n",(((int)andx_header[3]) << 8) + andx_header[2]);
+			FPrintf(dump_smb_file,"andx_offset = 0x%02lx\n",(((int)andx_header[3]) << 8) + andx_header[2]);
 
-			Printf("parameter words = %ld\n",num_parameter_words);
+			FPrintf(dump_smb_file,"parameter words = %ld\n",num_parameter_words);
 	
 			if(num_parameter_words > 0)
 				print_smb_parameters(num_parameter_words,&andx_header[4]);
 
 			num_data_bytes = andx_header[4 + num_parameter_words * 2] + (((int)andx_header[4 + num_parameter_words * 2 + 1]) << 8);
 
-			Printf("data bytes = %ld\n",num_data_bytes);
+			FPrintf(dump_smb_file,"data bytes = %ld\n",num_data_bytes);
 
-			if(num_data_bytes > 0)
+			if(dump_smb_level > 0 && num_data_bytes > 0)
 				print_smb_data(&lb,num_data_bytes,&andx_header[4 + num_parameter_words * 2 + 2]);
 
 			print_smb_contents(header, andx_header[0], smb_packet_source, num_parameter_words, &andx_header[4],
@@ -4291,19 +4303,19 @@ print_smb_header(const struct smb_header * header,int header_length,const unsign
 		command_name = get_smb_command_name(header->command);
 
 		if(command_name != NULL)
-			Printf("command = %s\n",command_name);
+			FPrintf(dump_smb_file,"command = %s\n",command_name);
 		else
-			Printf("command = 0x%02lx\n",header->command);
+			FPrintf(dump_smb_file,"command = 0x%02lx\n",header->command);
 
-		Printf("parameter words = %ld\n",header->num_parameter_words);
+		FPrintf(dump_smb_file,"parameter words = %ld\n",header->num_parameter_words);
 		
 		if(header->num_parameter_words > 0)
 			print_smb_parameters(header->num_parameter_words,(unsigned char *)header->parameters);
 
-		Printf("data bytes = %ld\n",header->num_data_bytes);
+		FPrintf(dump_smb_file,"data bytes = %ld\n",header->num_data_bytes);
 
 		/* If there are any data bytes, print them like "type hex .." would. */
-		if(header->num_data_bytes > 0)
+		if(dump_smb_level > 0 && header->num_data_bytes > 0)
 			print_smb_data(&lb,header->num_data_bytes,header->data);
 
 		print_smb_contents(header, header->command, smb_packet_source, header->num_parameter_words, header->parameters,
@@ -4366,43 +4378,43 @@ dump_netbios_header(const char *file_name,int line_number,const unsigned char *n
 				break;
 		}
 
-		Printf("---\n");
-		Printf("%s:%ld\n",file_name,line_number);
+		FPrintf(dump_smb_file,"---\n");
+		FPrintf(dump_smb_file,"%s:%ld\n",file_name,line_number);
 
-		Printf("netbios session type=%s (0x%02lx), flags=0x%02lx, length=%ld\n",
+		FPrintf(dump_smb_file,"netbios session type=%s (0x%02lx), flags=0x%02lx, length=%ld\n",
 			session_type_label,session_type,session_flags,session_length);
 
 		if (session_type == 0x83 && netbios_payload != NULL && netbios_payload_size > 0)
 		{
 			int error_code = *netbios_payload;
 
-			Printf("error code = 0x%02lx\n",error_code);
+			FPrintf(dump_smb_file,"error code = 0x%02lx\n",error_code);
 
 			switch(error_code)
 			{
 				case 0x80:
 
-					Printf("             Not listening on called name\n");
+					FPrintf(dump_smb_file,"             Not listening on called name\n");
 					break;
 
 				case 0x81:
 
-					Printf("             Not listening for calling name\n");
+					FPrintf(dump_smb_file,"             Not listening for calling name\n");
 					break;
 
 				case 0x82:
 
-					Printf("             Called name not present\n");
+					FPrintf(dump_smb_file,"             Called name not present\n");
 					break;
 
 				case 0x83:
 
-					Printf("             Insufficient resources\n");
+					FPrintf(dump_smb_file,"             Insufficient resources\n");
 					break;
 
 				case 0x8f:
 
-					Printf("             Unspecific error\n");
+					FPrintf(dump_smb_file,"             Unspecific error\n");
 					break;
 			}
 		}
@@ -4410,7 +4422,7 @@ dump_netbios_header(const char *file_name,int line_number,const unsigned char *n
 		{
 			struct line_buffer lb;
 
-			Printf("session data (%ld bytes) =\n",netbios_payload_size);
+			FPrintf(dump_smb_file,"session data (%ld bytes) =\n",netbios_payload_size);
 
 			print_smb_data(&lb,netbios_payload_size,netbios_payload);
 		}
@@ -4428,16 +4440,19 @@ dump_smb(const char *file_name,int line_number,int is_raw_data,
 	{
 		if(is_raw_data)
 		{
-			struct line_buffer lb;
+			if(dump_smb_level > 1)
+			{
+				struct line_buffer lb;
 
-			Printf("---\n");
-			Printf("%s:%ld\n",file_name,line_number);
+				FPrintf(dump_smb_file,"---\n");
+				FPrintf(dump_smb_file,"%s:%ld\n",file_name,line_number);
 
-			Printf("raw data (%ld bytes) =\n",length);
+				FPrintf(dump_smb_file,"raw data (%ld bytes) =\n",length);
 
-			print_smb_data(&lb,length,packet);
+				print_smb_data(&lb,length,packet);
 
-			Printf("---\n\n");
+				FPrintf(dump_smb_file,"---\n\n");
+			}
 		}
 		else
 		{
@@ -4449,13 +4464,13 @@ dump_smb(const char *file_name,int line_number,int is_raw_data,
 				num_bytes_read = fill_header(packet,length,&header);
 				if(num_bytes_read <= length)
 				{
-					Printf("---\n");
-					Printf("%s:%ld\n",file_name,line_number);
+					FPrintf(dump_smb_file,"---\n");
+					FPrintf(dump_smb_file,"%s:%ld\n",file_name,line_number);
 
 					print_smb_header(&header,num_bytes_read,packet,length,
 						smb_packet_source,max_buffer_size);
 
-					Printf("---\n\n");
+					FPrintf(dump_smb_file,"---\n\n");
 				}
 			}
 		}
@@ -4465,9 +4480,54 @@ dump_smb(const char *file_name,int line_number,int is_raw_data,
 /*****************************************************************************/
 
 void
-control_smb_dump(int enable)
+control_smb_dump(int enable,int level,const char * file_name)
 {
+	/* Close the output file if necessary. */
+	if(!enable && !dump_smb_stdout && dump_smb_file != (BPTR)NULL)
+		Close(dump_smb_file);
+
+	dump_smb_file = (BPTR)NULL;
+	
 	dump_smb_enabled = enable;
+	dump_smb_level = level;
+	
+	if(enable)
+	{
+		dump_smb_stdout = TRUE;
+
+		/* Write the output to a file? */
+		if(file_name != NULL)
+		{
+			/* Try to append the output to an existing file. */
+			dump_smb_file = Open(file_name,MODE_OLDFILE);
+			if(dump_smb_file == (BPTR)NULL)
+			{
+				/* File does not exist? Then create a new file. */
+				if(IoErr() == ERROR_OBJECT_NOT_FOUND)
+				{
+					dump_smb_file = Open(file_name,MODE_NEWFILE);
+					if(dump_smb_file != (BPTR)NULL)
+						ChangeMode(CHANGE_FH,dump_smb_file,SHARED_LOCK);
+				}
+			}
+			else
+			{
+				/* File exists; seek to the end of it. */
+				Seek(dump_smb_file,0,OFFSET_END);
+			}
+
+			/* If a file was created or opened for appending
+			 * output to it, make sure it will get closed
+			 * eventually.
+			 */
+			if(dump_smb_file != (BPTR)NULL)
+				dump_smb_stdout = FALSE;
+		}
+		
+		/* No file was opened: output to STDOUT. */
+		if(dump_smb_file == (BPTR)NULL)
+			dump_smb_file = Output();
+	}
 }
 
 /*****************************************************************************/

@@ -200,7 +200,7 @@ extern void dump_smb(const char *file_name,int line_number,int is_raw_data,
 	const void * packet,int length,enum smb_packet_source_t smb_packet_source,
 	int max_buffer_size);
 
-extern void control_smb_dump(int enable);
+extern void control_smb_dump(int enable,int level,const char * file_name);
 
 /*****************************************************************************/
 
