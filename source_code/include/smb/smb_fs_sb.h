@@ -23,7 +23,7 @@ struct smb_server
 									   data blocks */
 	dword max_raw_size;				/* Maximum SMB_COM_WRITE_RAW and
 									   SMB_COM_READ_RAW data. */
-	int max_recv;		/* added by CS */
+	int max_recv;					/* added by CS */
 	word server_uid;
 	word tid;
 
@@ -47,6 +47,12 @@ struct smb_server
 
 	/* olsen (2012-12-10): raw SMB over TCP instead of NBT transport? */
 	int raw_smb;
+
+	/* olsen (2016-04-20): Use write-behind with SMB_COM_WRITE_RAW? */
+	int write_behind;
+
+	/* olsen (2016-04-20): Prefer SMB_COM_WRITE_RAW to SMB_COM_WRITE? */
+	int prefer_write_raw;
 };
 
 #define NEGOTIATE_USER_SECURITY 0x01	/* If set, the server supports
