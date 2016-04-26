@@ -185,7 +185,7 @@ STATIC BOOL IsReservedName(STRPTR name);
 STATIC LONG MapErrnoToIoErr(int error);
 STATIC VOID TranslateBName(UBYTE *name, UBYTE *map);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, APTR bstring);
 STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
 STATIC LONG Action_DeleteObject(struct FileLock *parent, APTR bcpl_name, LONG *error_ptr);
@@ -622,6 +622,8 @@ main(VOID)
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
 		SWITCH	NetBIOSTransport;
+		SWITCH	WriteBehind;
+		SWITCH	PreferWriteRaw;
 		SWITCH	DumpSMB;
 		NUMBER	DumpSMBLevel;
 		KEY		DumpSMBFile;
@@ -648,6 +650,8 @@ main(VOID)
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
 		"NETBIOS/S,"
+		"WRITEBEHIND/S,"
+		"PREFERWRITERAW/S,"
 		"DUMPSMB/S,"
 		"DUMPSMBLEVEL/N/K,"
 		"DUMPSMBFILE/K,"
@@ -871,6 +875,12 @@ main(VOID)
 		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
 			args.NetBIOSTransport = TRUE;
 
+		if(FindToolType(Icon->do_ToolTypes,"WRITEBEHIND") != NULL)
+			args.WriteBehind = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"PREFERWRITERAW") != NULL)
+			args.PreferWriteRaw = TRUE;
+
 		if(FindToolType(Icon->do_ToolTypes,"UTF8") != NULL)
 			args.UTF8 = TRUE;
 
@@ -1043,6 +1053,8 @@ main(VOID)
 		args.TimeZoneOffset,
 		args.DSTOffset,
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
+		args.WriteBehind,
+		args.PreferWriteRaw,
 		args.DeviceName,
 		args.VolumeName,
 		args.TranslationFile))
@@ -2409,6 +2421,8 @@ Setup(
 	LONG *	opt_time_zone_offset,
 	LONG *	opt_dst_offset,
 	BOOL	opt_raw_smb,
+	BOOL	opt_write_behind,
+	BOOL	opt_prefer_write_raw,
 	STRPTR	device_name,
 	STRPTR	volume_name,
 	STRPTR	translation_file)
@@ -2574,7 +2588,7 @@ Setup(
 		}
 	}
 
-	error = smba_start(service,workgroup,username,opt_password,opt_clientname,opt_servername,opt_cachesize,opt_max_transmit,opt_raw_smb,&ServerData);
+	error = smba_start(service,workgroup,username,opt_password,opt_clientname,opt_servername,opt_cachesize,opt_max_transmit,opt_raw_smb,opt_write_behind,opt_prefer_write_raw,&ServerData);
 	if(error < 0)
 		goto out;
 
