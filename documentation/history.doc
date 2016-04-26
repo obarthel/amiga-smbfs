@@ -1028,3 +1028,48 @@ smbfs 1.106 (17.4.2016)
 
 - The raw read/write functions now respect the upper limit
   for the amount of data to be written, as given by the server.
+
+
+smbfs 1.107 (20.4.2016)
+
+- Added WRITEBEHIND and PREFERWRITERAW options. WRITEBEHIND will
+  allow SMB_COM_WRITE_RAW commands to complete asynchronously.
+  PREFERWRITERAW will make the file system use SMB_COM_WRITE_RAW
+  over SMB_COM_WRITE when it has a choice.
+
+
+smbfs 1.108 (23.4.2016)
+
+- Now properly handles the error code returned when Samba
+  is asked to remove a non-empty directory. The error is
+  translated to ENOTEMPTY.
+
+
+smbfs 1.109 (23.4.2016)
+
+- Activated the PREFERWRITERAW option which had not been wired
+  up yet. Oops :-(  Turns out that with this option enabled
+  write operations are indeed slower than the with the
+  adaptive SMB_COM_WRITE/SMB_COM_WRITE_RAW code, on account that
+  that SMB_COM_WRITE_RAW transmits the data in two packets, plus
+  overhead for the server response.
+
+- Recalculated the threshold below which a write operation will
+  be performed using SMB_COM_WRITE instead of SMB_COM_WRITE_RAW.
+
+- Fixed how the WRITEBEHIND option for the SMB_COM_WRITE_RAW
+  command is implemented: the client must not wait for the
+  server to acknowledge the command.
+
+- Investigated the performance difference between SMB_COM_WRITE_RAW
+  using the "write behind" and "write through" modes. In my tests
+  the difference came down to about 10% performance gain for
+  the "write behind" mode.
+
+- Compared the performance of plain SMB_COM_WRITE (Windows 7) and
+  the adaptive SMB_COM_WRITE/SMB_COM_WRITE_RAW (Samba 3.0.25).
+  The adaptive SMB_COM_WRITE/SMB_COM_WRITE_RAW is about as fast
+  as the plain SMB_COM_WRITE, with "Windows 7" running on the
+  same machine as WinUAE (with AmigaOS 3.9) and Samba running
+  on a local server connected via GBit Ethernet. This means that
+  SMB_COM_WRITE is significantly slower with Windows 7.
