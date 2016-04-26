@@ -1867,7 +1867,10 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 		}
 		else
 		{
-			if(num_parameter_words > 0)
+			/* The number of bytes remaining to be written is valid only
+			 * if it's not 0xFFFF.
+			 */
+			if(num_parameter_words > 0 && vwv[0] != 0xFFFF)
 				FPrintf(dump_smb_file,"number of bytes remaining to be written = %lu\n",vwv[0]);
 		}
 	}
