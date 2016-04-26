@@ -592,7 +592,8 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 			num_bytes_written = result;
 
 			/* Wait for the server to respond. */
-			result = smb_receive (server, sock_fd);
+			if(!server->write_behind)
+				result = smb_receive (server, sock_fd);
 		}
 		else
 		{
