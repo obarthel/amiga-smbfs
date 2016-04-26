@@ -66,7 +66,8 @@ struct smba_file
 /*****************************************************************************/
 
 static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name,
-	int cache_size, int max_transmit, int opt_raw_smb, smba_server_t **result);
+	int cache_size, int max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw,
+	smba_server_t **result);
 static INLINE int make_open(smba_file_t *f, int need_fid);
 static int write_attr(smba_file_t *f);
 static void invalidate_dircache(struct smba_server *server, char *path);
@@ -79,7 +80,8 @@ static int extract_service (char *service, char *server, size_t server_size, cha
 
 static int
 smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name,
-	int cache_size, int max_transmit, int opt_raw_smb, smba_server_t ** result)
+	int cache_size, int max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw,
+	smba_server_t ** result)
 {
 	smba_server_t *res;
 	struct smb_mount_data data;
@@ -104,6 +106,14 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
 	/* Olaf (2012-12-10): force raw SMB over TCP rather than NetBIOS. */
 	if(opt_raw_smb)
 		res->server.raw_smb = 1;
+
+	/* olsen (2016-04-20): Use write-behind with SMB_COM_WRITE_RAW. */
+	if(opt_write_behind)
+		res->server.write_behind = 1;
+
+	/* olsen (2016-04-20): Prefer the use of SMB_COM_WRITE_RAW over SMB_COM_WRITE. */
+	if(opt_prefer_write_raw)
+		res->server.prefer_write_raw = 1;
 
 	errnum = smba_setup_dircache (res,cache_size);
 	if(errnum < 0)
@@ -533,6 +543,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 int
 smba_write (smba_file_t * f, char *data, long len, long offset)
 {
+	dword max_buffer_size;
 	int maxsize, count, result;
 	int num_bytes_written = 0;
 	int errnum;
@@ -543,6 +554,8 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		result = errnum;
 		goto out;
 	}
+
+	max_buffer_size = f->server->server.max_buffer_size;
 
 	/* Calculate maximum number of bytes that could be transferred with
 	 * a single SMBwrite packet...
@@ -566,7 +579,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 	 * This leaves 'max_buffer_size' - 48 for the payload.
 	 */
 	/*maxsize = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
-	maxsize = f->server->server.max_buffer_size - 48 - 4;
+	maxsize = max_buffer_size - 48 - 4;
 
 	LOG (("len = %ld, maxsize = %ld\n", len, maxsize));
 
@@ -592,11 +605,30 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		if (f->server->server.capabilities & CAP_RAW_MODE)
 		{
 			dword max_raw_size = f->server->server.max_raw_size;
+			int prefer_write_raw = f->server->server.prefer_write_raw;
 			int max_xmit;
 			int n;
 
-			/* Try to send the maximum number of bytes with the two SMBwritebraw packets. */
-			max_xmit = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;
+			/* Try to send the maximum number of bytes with the two SMBwritebraw packets.
+			 * This is how it breaks down:
+			 *
+			 * The message header accounts for
+			 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+			 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+			 * = 32 bytes
+			 *
+			 * The parameters of a SMB_COM_WRITE_RAW command account for
+			 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
+			 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+
+			 * 2(dataoffset) = 25 bytes
+			 *
+			 * The data poart of a SMB_COM_WRITE_RAW command accounts for
+			 * 2(bytecount) = 2 bytes
+			 *
+			 * This leaves 'max_buffer_size' - 59 for the payload.
+			 */
+			/*max_xmit = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
+			max_xmit = max_buffer_size - 59 - 4 + min(max_buffer_size, max_raw_size);
 
 			LOG (("len = %ld, max_xmit = %ld\n", len, max_xmit));
 
@@ -605,9 +637,9 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 			 * the data is transfered as before: Only by the second packet. This
 			 * prevents the CPU from copying the data into the transferbuffer.
 			 */
-			if (max_xmit < len)
+			if (prefer_write_raw || max_xmit < len)
 			{
-				max_xmit = f->server->server.max_buffer_size - 4;
+				max_xmit = max_buffer_size - 4;
 
 				LOG (("max_xmit changed to %ld\n", max_xmit));
 			}
@@ -616,7 +648,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 			{
 				n = min(len,max_xmit);
 
-				if (n <= maxsize)
+				if (!prefer_write_raw && n <= maxsize)
 				{
 					LOG (("n (%ld) <= maxsize (%ld)\n", n, maxsize));
 
@@ -1455,7 +1487,8 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 
 int
 smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,
-	char *opt_servername,int opt_cachesize,int opt_max_transmit,int opt_raw_smb,smba_server_t ** result)
+	char *opt_servername,int opt_cachesize,int opt_max_transmit,int opt_raw_smb,int opt_write_behind,
+	int opt_prefer_write_raw,smba_server_t ** result)
 {
 	smba_connect_parameters_t par;
 	smba_server_t *the_server = NULL;
@@ -1599,7 +1632,7 @@ smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_passw
 	par.username = username;
 	par.password = password;
 
-	error = smba_connect (&par, ipAddr, use_extended, workgroup, opt_cachesize, opt_max_transmit, opt_raw_smb, &the_server);
+	error = smba_connect (&par, ipAddr, use_extended, workgroup, opt_cachesize, opt_max_transmit, opt_raw_smb, opt_write_behind, opt_prefer_write_raw, &the_server);
 	if(error < 0)
 	{
 		ReportError("Could not connect to server (%ld, %s).",-error,amitcp_strerror(-error));
