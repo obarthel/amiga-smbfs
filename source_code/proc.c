@@ -101,6 +101,7 @@ static const err_code_struct dos_msgs[] =
 	{"ERRnoresource", 89, "No resources currently available for this SMB request"},
 	{"ERRtoomanyuids", 90, "Too many UIDs active for this SMB connection"},
 	{"ERRbaduid", 91, "The UID supplied is not known to the session, or the user identified by the UID does not have sufficient privileges"},
+	{"ERROR_DIRECTORY_NOT_EMPTY", 145, "The directory is not empty"},
 	{"ERRbadpipe", 230, "Pipe invalid"},
 	{"ERRpipebusy", 231, "All instances of the requested pipe are busy"},
 	{"ERRpipeclosing", 232, "Pipe close in progress"},
@@ -483,7 +484,8 @@ smb_errno (int errcls, int error)
 			{ ERRlock,EDEADLK },
 			{ ERRfilexists,EEXIST },
 			{ 87,0 },/* Unknown error! */
-			{ 183,EEXIST },/* This next error seems to occur on an mv when the destination exists */
+			{ 145,ENOTEMPTY},/* Directory is not empty; this is what Samba reports (2016-04-23) */
+			{ 183,EEXIST },/* This next error seems to occur on an mv when the destination exists ("object name collision") */
 			{ -1,-1 }
 		};
 
@@ -1044,7 +1046,12 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	DSET (buf, smb_vwv1, count);
 	DSET (buf, smb_vwv3, offset);
 	DSET (buf, smb_vwv5, 0); /* timeout */
-	WSET (buf, smb_vwv7, 1); /* send final result response */
+
+	if(server->write_behind)
+		WSET (buf, smb_vwv7, 0); /* do not send a final result response. */
+	else
+		WSET (buf, smb_vwv7, 1); /* send final result response */
+
 	DSET (buf, smb_vwv8, 0); /* reserved */
 
 	if (server->protocol > PROTOCOL_COREPLUS)
@@ -1090,6 +1097,13 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 			LOG (("server error %ld/%ld\n", server->rcls, server->err));
 
 			result = -smb_errno (server->rcls, server->err);
+		}
+		else if (server->write_behind)
+		{
+			/* We just assume success; the next file operation to follow
+			 * will set an error status if something went wrong.
+			 */
+			result = (count - len);
 		}
 		else
 		{
