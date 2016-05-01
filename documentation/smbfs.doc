@@ -138,8 +138,8 @@ described below. The command template looks like this:
    CASE=CASESENSITIVE/S,OMITHIDDEN/S,QUIET/S,CLIENT=CLIENTNAME/K,
    SERVER=SERVERNAME/K,DEVICE=DEVICENAME/K,VOLUME=VOLUMENAME/K,
    CACHE=CACHESIZE/N/K,MAXTRANSMIT/N/K,DEBUGLEVEL=DEBUG/N/K,
-   TZ=TIMEZONEOFFSET/N/K,DST=DSTOFFSET/N/K,NETBIOS/S,DUMPSMB/S,
-   DUMPSMBLEVEL/N/K,DUMPSMBFILE/K,UTF8/S,
+   DEBUGFILE/K,TZ=TIMEZONEOFFSET/N/K,DST=DSTOFFSET/N/K,NETBIOS/S,
+   DUMPSMB/S,DUMPSMBLEVEL/N/K,DUMPSMBFILE/K,UTF8/S,
    TRANSLATE=TRANSLATIONFILE/K,SERVICE/A
 
 The individual options serve the following purposes:
@@ -319,10 +319,19 @@ The individual options serve the following purposes:
       doing, it just tries to respond to file system requests. To obtain
       debugging output you may want to use the DEBUG option and specify a
       debug level greater than 0. The larger the number you specify the more
-      debugging output will be created. Note that all debugging output will be
-      produced using the operating system's debug output functionality which
-      requires that you have a capturing program like 'Sashimi' running in the
-      background.
+      debugging output will be created.
+
+      Note that unless you state which file debug output should be written to
+      all debugging output will be sent to the shell. If you launched
+      smbfs from Workbench, debug output will be produced using the operating
+      system's debug output functionality which requires that you have a
+      capturing program like 'Sashimi' running in the background.
+
+   DEBUGFILE/K
+
+      If you want to capture the debug output of smbfs and have it stored
+      in a file for reference, please state the name of the file here.
+      If the file already exists debug output will be appended to it.
 
    TZ=TIMEZONEOFFSET/N/K
 

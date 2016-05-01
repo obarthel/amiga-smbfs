@@ -1073,3 +1073,10 @@ smbfs 1.109 (23.4.2016)
   same machine as WinUAE (with AmigaOS 3.9) and Samba running
   on a local server connected via GBit Ethernet. This means that
   SMB_COM_WRITE is significantly slower with Windows 7.
+
+
+smbfs 1.110 (1.5.2016)
+
+- Added the DEBUGFILE/K option. Not everybody has Sashimi or
+  a tool like it running in the background, which makes sharing
+  file system level debug information difficult.
