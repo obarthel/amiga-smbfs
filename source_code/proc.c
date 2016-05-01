@@ -2627,11 +2627,13 @@ smb_proc_reconnect (struct smb_server *server)
 			smb_encrypt(password,server->crypt_key,password);
 			password_len = 24;
 
+			/*
 			PRINTHEADER();
 			PRINTF(("password: "));
 			for(i = 0 ; i < 24 ; i++)
 				PRINTF(("%02lx ",password[i]));
 			PRINTF(("\n"));
+			*/
 
 			memset(nt_password,0,sizeof(nt_password));
 			strlcpy(nt_password,server->mount_data.password,sizeof(nt_password));
@@ -2639,17 +2641,21 @@ smb_proc_reconnect (struct smb_server *server)
 			smb_nt_encrypt(nt_password,server->crypt_key,nt_password);
 			nt_password_len = 24;
 
+			/*
 			PRINTHEADER();
 			PRINTF(("nt_password: "));
 			for(i = 0 ; i < 24 ; i++)
 				PRINTF(("%02lx ",nt_password[i]));
 			PRINTF(("\n"));
+			*/
 
+			/*
 			PRINTHEADER();
 			PRINTF(("crypt_key: "));
 			for(i = 0 ; i < server->crypt_key_length ; i++)
 				PRINTF(("%02lx ",server->crypt_key[i]));
 			PRINTF(("\n"));
+			*/
 		}
 		else
 		{
