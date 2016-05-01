@@ -38,6 +38,7 @@
 #include <string.h>
 
 extern struct Library * AbsExecBase;
+extern struct Library * DOSBase;
 
 #define SysBase AbsExecBase
 
@@ -56,11 +57,20 @@ extern void __stdargs kputc(char c);
 
 /****************************************************************************/
 
+static BPTR debug_file = (BPTR)NULL;
 static int indent_level = 0;
 int __debug_level = DEBUGLEVEL_CallTracing;
 
 static char program_name[40];
 static int program_name_len = 0;
+
+/****************************************************************************/
+
+void
+_SETDEBUGFILE(BPTR file)
+{
+	debug_file = file;
+}
 
 /****************************************************************************/
 
@@ -129,14 +139,27 @@ void
 _INDENT(void)
 {
 	if(program_name_len > 0)
-		kprintf("(%s) ",program_name);
+	{
+		if(debug_file == (BPTR)NULL)
+			kprintf("(%s) ",program_name);
+		else
+			FPrintf(debug_file,"(%s) ",program_name);
+	}
 
 	if(__debug_level >= DEBUGLEVEL_CallTracing)
 	{
 		int i;
 
-		for(i = 0 ; i < indent_level ; i++)
-			kprintf("   ");
+		if(debug_file == (BPTR)NULL)
+		{
+			for(i = 0 ; i < indent_level ; i++)
+				kprintf("   ");
+		}
+		else
+		{
+			for(i = 0 ; i < indent_level ; i++)
+				FPrintf(debug_file,"   ");
+		}
 	}
 }
 
@@ -174,17 +197,33 @@ _SHOWVALUE(
 
 		_INDENT();
 
-		kprintf(fmt,file,line,name,value,value);
+		if(debug_file == (BPTR)NULL)
+			kprintf(fmt,file,line,name,value,value);
+		else
+			FPrintf(debug_file,fmt,file,line,name,value,value);
 
 		if(size == 1 && value < 256)
 		{
-			if(value < ' ' || (value >= 127 && value < 160))
-				kprintf(", '\\x%02lx'",value);
+			if(debug_file == (BPTR)NULL)
+			{
+				if(value < ' ' || (value >= 127 && value < 160))
+					kprintf(", '\\x%02lx'",value);
+				else
+					kprintf(", '%lc'",value);
+			}
 			else
-				kprintf(", '%lc'",value);
+			{
+				if(value < ' ' || (value >= 127 && value < 160))
+					FPrintf(debug_file,", '\\x%02lx'",value);
+				else
+					FPrintf(debug_file,", '%lc'",value);
+			}
 		}
 
-		kprintf("\n");
+		if(debug_file == (BPTR)NULL)
+			kprintf("\n");
+		else
+			FPrintf(debug_file,"\n");
 	}
 }
 
@@ -208,7 +247,10 @@ _SHOWPOINTER(
 		else
 			fmt = "%s:%ld:%s = NULL\n";
 
-		kprintf(fmt,file,line,name,pointer);
+		if(debug_file == (BPTR)NULL)
+			kprintf(fmt,file,line,name,pointer);
+		else
+			FPrintf(debug_file,fmt,file,line,name,pointer);
 	}
 }
 
@@ -224,7 +266,11 @@ _SHOWSTRING(
 	if(__debug_level >= DEBUGLEVEL_Reports)
 	{
 		_INDENT();
-		kprintf("%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+
+		if(debug_file == (BPTR)NULL)
+			kprintf("%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+		else
+			FPrintf(debug_file,"%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
 	}
 }
 
@@ -239,7 +285,11 @@ _SHOWMSG(
 	if(__debug_level >= DEBUGLEVEL_Reports)
 	{
 		_INDENT();
-		kprintf("%s:%ld:%s\n",file,line,string);
+
+		if(debug_file == (BPTR)NULL)
+			kprintf("%s:%ld:%s\n",file,line,string);
+		else
+			FPrintf(debug_file,"%s:%ld:%s\n",file,line,string);
 	}
 }
 
@@ -253,7 +303,11 @@ _DPRINTF_HEADER(
 	if(__debug_level >= DEBUGLEVEL_Reports)
 	{
 		_INDENT();
-		kprintf("%s:%ld:",file,line);
+
+		if(debug_file == (BPTR)NULL)
+			kprintf("%s:%ld:",file,line);
+		else
+			FPrintf(debug_file,"%s:%ld:",file,line);
 	}
 }
 
@@ -285,10 +339,18 @@ _DPRINTF(const char *fmt,...)
 		va_list args;
 
 		va_start(args,fmt);
-		RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
+
+		if(debug_file == (BPTR)NULL)
+			RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
+		else
+			VFPrintf(debug_file,fmt,args);
+
 		va_end(args);
 
-		kprintf("\n");
+		if(debug_file == (BPTR)NULL)
+			kprintf("\n");
+		else
+			FPrintf(debug_file,"\n");
 	}
 }
 
@@ -300,7 +362,12 @@ _DLOG(const char *fmt,...)
 		va_list args;
 
 		va_start(args,fmt);
-		RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
+
+		if(debug_file == (BPTR)NULL)
+			RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
+		else
+			VFPrintf(debug_file,fmt,args);
+
 		va_end(args);
 	}
 }
@@ -316,7 +383,11 @@ _ENTER(
 	if(__debug_level >= DEBUGLEVEL_CallTracing)
 	{
 		_INDENT();
-		kprintf("%s:%ld:Entering %s\n",file,line,function);
+
+		if(debug_file == (BPTR)NULL)
+			kprintf("%s:%ld:Entering %s\n",file,line,function);
+		else
+			FPrintf(debug_file,"%s:%ld:Entering %s\n",file,line,function);
 	}
 
 	indent_level++;
@@ -333,7 +404,11 @@ _LEAVE(
 	if(__debug_level >= DEBUGLEVEL_CallTracing)
 	{
 		_INDENT();
-		kprintf("%s:%ld: Leaving %s\n",file,line,function);
+
+		if(debug_file == (BPTR)NULL)
+			kprintf("%s:%ld: Leaving %s\n",file,line,function);
+		else
+			FPrintf(debug_file,"%s:%ld: Leaving %s\n",file,line,function);
 	}
 }
 
@@ -349,7 +424,11 @@ _RETURN(
 	if(__debug_level >= DEBUGLEVEL_CallTracing)
 	{
 		_INDENT();
-		kprintf("%s:%ld: Leaving %s (result 0x%08lx, %ld)\n",file,line,function,result,result);
+
+		if(debug_file == (BPTR)NULL)
+			kprintf("%s:%ld: Leaving %s (result 0x%08lx, %ld)\n",file,line,function,result,result);
+		else
+			FPrintf(debug_file,"%s:%ld: Leaving %s (result 0x%08lx, %ld)\n",file,line,function,result,result);
 	}
 }
 
@@ -368,7 +447,7 @@ _ASSERT(
 		STATIC BOOL ScrollMode	= FALSE;
 		STATIC BOOL BatchMode	= FALSE;
 
-		if(BatchMode == FALSE)
+		if(BatchMode == FALSE && debug_file == (BPTR)NULL)
 		{
 			if(x == 0)
 			{
@@ -415,11 +494,23 @@ _ASSERT(
 		if(x == 0)
 		{
 			_INDENT();
-			kprintf("%s:%ld:Expression `%s' failed assertion in %s().\n",
-			        file,
-			        line,
-			        xs,
-			        function);
+
+			if(debug_file == (BPTR)NULL)
+			{
+				kprintf("%s:%ld:Expression `%s' failed assertion in %s().\n",
+				        file,
+				        line,
+				        xs,
+				        function);
+			}
+			else
+			{
+				FPrintf(debug_file,"%s:%ld:Expression `%s' failed assertion in %s().\n",
+				        file,
+				        line,
+				        xs,
+				        function);
+			}
 		}
 	}
 	#endif	/* CONFIRM */

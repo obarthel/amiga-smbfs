@@ -35,6 +35,12 @@
 
 /****************************************************************************/
 
+#ifndef _DOS_DOS_H
+#include <dos/dos.h>
+#endif /* _DOS_DOS_H */
+
+/****************************************************************************/
+
 #ifdef ASSERT
 #undef ASSERT
 #endif	/* ASSERT */
@@ -57,6 +63,7 @@
  void _DPRINTF_HEADER(const char *file,int line);
  void _DPRINTF(const char *format,...);
  void _DLOG(const char *format,...);
+ void _SETDEBUGFILE(BPTR file);
  int  _SETDEBUGLEVEL(int level);
  void _PUSHDEBUGLEVEL(int level);
  void _POPDEBUGLEVEL(void);
@@ -79,6 +86,7 @@
  #define SETDEBUGLEVEL(l)	_SETDEBUGLEVEL(l)
  #define PUSHDEBUGLEVEL(l)	_PUSHDEBUGLEVEL(l)
  #define POPDEBUGLEVEL()	_POPDEBUGLEVEL()
+ #define SETDEBUGFILE(f)	_SETDEBUGFILE(f)
  #define SETPROGRAMNAME(n)	_SETPROGRAMNAME(n)
  #define GETDEBUGLEVEL()	_GETDEBUGLEVEL()
  #define INDENT()			_INDENT()
@@ -104,6 +112,7 @@
  #define PUSHDEBUGLEVEL(l)	((void)0)
  #define POPDEBUGLEVEL()	((void)0)
  #define SETPROGRAMNAME(n)	((void)0)
+ #define SETDEBUGFILE(f)	((void)0)
  #define GETDEBUGLEVEL()	(0)
  #define INDENT()			((void)0)
 

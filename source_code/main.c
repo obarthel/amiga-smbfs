@@ -619,6 +619,7 @@ main(VOID)
 		NUMBER	CacheSize;
 		NUMBER	MaxTransmit;
 		NUMBER	DebugLevel;
+		KEY		DebugFile;
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
 		SWITCH	NetBIOSTransport;
@@ -647,6 +648,7 @@ main(VOID)
 		"CACHE=CACHESIZE/N/K,"
 		"MAXTRANSMIT/N/K,"
 		"DEBUGLEVEL=DEBUG/N/K,"
+		"DEBUGFILE/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
 		"NETBIOS/S,"
@@ -659,6 +661,8 @@ main(VOID)
 		"TRANSLATE=TRANSLATIONFILE/K,"
 		"SERVICE/A";
 
+	BPTR debug_file = (BPTR)NULL;
+	BOOL close_debug_file = FALSE;
 	UBYTE program_name[MAX_FILENAME_LEN];
 	LONG result = RETURN_FAIL;
 	LONG number;
@@ -857,6 +861,10 @@ main(VOID)
 			args.DebugLevel = &number;
 		}
 
+		str = FindToolType(Icon->do_ToolTypes,"DEBUGFILE");
+		if(str != NULL)
+			args.DebugFile = str;
+
 		str = FindToolType(Icon->do_ToolTypes,"TZ");
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"TIMEZONEOFFSET");
@@ -1016,6 +1024,40 @@ main(VOID)
 	OmitHidden = (BOOL)args.OmitHidden;
 	TranslateUTF8 = (BOOL)args.UTF8;
 
+	#if DEBUG
+	{
+		if(args.DebugFile != NULL)
+		{
+			/* Try to append the output to an existing file. */
+			debug_file = Open(args.DebugFile,MODE_OLDFILE);
+			if(debug_file == (BPTR)NULL)
+			{
+				/* File does not exist? Then create a new file. */
+				if(IoErr() == ERROR_OBJECT_NOT_FOUND)
+				{
+					debug_file = Open(args.DebugFile,MODE_NEWFILE);
+					if(debug_file != (BPTR)NULL)
+						ChangeMode(CHANGE_FH,debug_file,SHARED_LOCK);
+				}
+			}
+			else
+			{
+				/* File exists; seek to the end of it. */
+				Seek(debug_file,0,OFFSET_END);
+			}
+
+			close_debug_file = TRUE;
+		}
+		else
+		{
+			if(WBStartup == NULL)
+				debug_file = Output();
+		}
+
+		SETDEBUGFILE(debug_file);
+	}
+	#endif /* DEBUG */
+
 	/* Configure the debugging options. */
 	SETPROGRAMNAME(FilePart(program_name));
 
@@ -1081,6 +1123,9 @@ main(VOID)
 			control_smb_dump(FALSE, 0, NULL);
 	}
 	#endif /* DUMP_SMB */
+
+	if(close_debug_file && debug_file != (BPTR)NULL)
+		Close(debug_file);
 
 	Cleanup();
 
