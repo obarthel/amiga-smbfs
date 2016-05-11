@@ -37,6 +37,7 @@ WARNINGS = \
 	-Wundef -Wbad-function-cast -Wmissing-declarations
 
 OPTIONS = -DNDEBUG
+#OPTIONS = -DDEBUG=1 -DDUMP_SMB=1
 OPTIMIZE = -O3
 DEBUG = -ggdb
 
@@ -48,11 +49,11 @@ LFLAGS = -nostartfiles -nostdlib -L.
 
 ###########################################################################
 
-OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o utf-8-iso-8859-1-conversion.o
+OBJS = main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o utf-8-iso-8859-1-conversion.o assert.o
 
 ###########################################################################
 
-LIBS = -lc
+LIBS = -lc -ldebug
 
 ###########################################################################
 
@@ -65,7 +66,7 @@ $(PROJECT): $(OBJS)
 
 ###########################################################################
 
-assert.o : assert.c
+assert.o : assert.c assert.h
 crypt.o : crypt.c system_headers.h assert.h smbfs.h
 main.o : main.c system_headers.h assert.h smbfs.h smb_abstraction.h smbfs_rev.h dump_smb.h utf-8-iso-8859-1-conversion.h
 proc.o : proc.c system_headers.h assert.h smbfs.h quad_math.h
