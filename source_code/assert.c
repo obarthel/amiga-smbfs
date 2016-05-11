@@ -20,23 +20,24 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+/*****************************************************************************/
+
+#define __USE_INLINE__
+#define __NOGLOBALIFACE__
+#define __NOLIBBASE__
+
 /****************************************************************************/
 
 #include <dos/dos.h>
 
-#include <clib/exec_protos.h>
-#include <clib/dos_protos.h>
-
-#ifdef __SASC
-#include <pragmas/exec_pragmas.h>
-#include <pragmas/dos_pragmas.h>
-#else
-#include <inline/exec.h>
-#include <inline/dos.h>
-#endif /* __SASC */
+#include <proto/exec.h>
+#include <proto/dos.h>
 
 #include <string.h>
 
+/****************************************************************************/
+
+#if defined(__SASC)
 extern struct Library * AbsExecBase;
 extern struct Library * DOSBase;
 
@@ -44,6 +45,20 @@ extern struct Library * DOSBase;
 
 extern void kprintf(const char *,...);
 extern void __stdargs kputc(char c);
+
+#elif defined (__GNUC__) && defined(__amigaos4__)
+
+extern struct Library * SysBase;
+extern struct Library * DOSBase;
+
+extern struct ExecIFace *	IExec;
+extern struct DOSIFace *	IDOS;
+extern struct SocketIFace *	ISocket;
+
+extern void kprintf(const char *,...);
+extern void kputc(char c);
+
+#endif /* __GNUC__ */
 
 /****************************************************************************/
 
@@ -311,19 +326,25 @@ _DPRINTF_HEADER(
 	}
 }
 
-#ifdef __SASC
+#if defined(__SASC)
 
-static void __asm
-putch(register __d0 UBYTE c)
+static void __asm putch(register __d0 UBYTE c)
 {
 	if(c != '\0')
 		kputc(c);
 }
 
-#else
+#elif defined(__GNUC__) && defined(__amigaos4__)
 
-static void
-putch(UBYTE c __asm("d0"))
+static void putch(UBYTE c)
+{
+	if(c != '\0')
+		kputc(c);
+}
+
+#elif defined(__GNUC__)
+
+static void putch(UBYTE c __asm("d0"))
 {
 	if(c != '\0')
 		kputc(c);

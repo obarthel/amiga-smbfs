@@ -51,7 +51,7 @@
 #define PUSH_ALL()	PUSHDEBUGLEVEL(2)
 #define POP()		POPDEBUGLEVEL()
 
-#if defined(DEBUG) /*&& defined(__SASC)*/
+#if defined(DEBUG) && defined(__SASC)
  void _ASSERT(int x,const char *xs,const char *file,int line,const char *function);
  void _SHOWVALUE(unsigned long value,int size,const char *name,const char *file,int line);
  void _SHOWPOINTER(void *p,const char *name,const char *file,int line);
@@ -83,6 +83,50 @@
  #define PRINTHEADER()		_DPRINTF_HEADER(__FILE__,__LINE__)
  #define PRINTF(s)			_DLOG s
  #define LOG(s)				do { _DPRINTF_HEADER(__FILE__,__LINE__); _DLOG("<%s()>:",__FUNC__); _DLOG s; } while(0)
+ #define SETDEBUGLEVEL(l)	_SETDEBUGLEVEL(l)
+ #define PUSHDEBUGLEVEL(l)	_PUSHDEBUGLEVEL(l)
+ #define POPDEBUGLEVEL()	_POPDEBUGLEVEL()
+ #define SETDEBUGFILE(f)	_SETDEBUGFILE(f)
+ #define SETPROGRAMNAME(n)	_SETPROGRAMNAME(n)
+ #define GETDEBUGLEVEL()	_GETDEBUGLEVEL()
+ #define INDENT()			_INDENT()
+
+ extern int __debug_level;
+
+ #undef DEBUG
+ #define DEBUG 1
+#elif defined(DEBUG) && defined(__GNUC__)
+ void _ASSERT(int x,const char *xs,const char *file,int line,const char *function);
+ void _SHOWVALUE(unsigned long value,int size,const char *name,const char *file,int line);
+ void _SHOWPOINTER(void *p,const char *name,const char *file,int line);
+ void _SHOWSTRING(const char *string,const char *name,const char *file,int line);
+ void _SHOWMSG(const char *msg,const char *file,int line);
+ void _ENTER(const char *file,int line,const char *function);
+ void _LEAVE(const char *file,int line,const char *function);
+ void _RETURN(const char *file,int line,const char *function,unsigned long result);
+ void _DPRINTF_HEADER(const char *file,int line);
+ void _DPRINTF(const char *format,...);
+ void _DLOG(const char *format,...);
+ void _SETDEBUGFILE(BPTR file);
+ int  _SETDEBUGLEVEL(int level);
+ void _PUSHDEBUGLEVEL(int level);
+ void _POPDEBUGLEVEL(void);
+ int  _GETDEBUGLEVEL(void);
+ void _SETPROGRAMNAME(char *name);
+ void _INDENT(void);
+
+ #define ASSERT(x)			_ASSERT((int)(x),#x,__FILE__,__LINE__,__FUNCTION__)
+ #define ENTER()			_ENTER(__FILE__,__LINE__,__FUNCTION__)
+ #define LEAVE()			_LEAVE(__FILE__,__LINE__,__FUNCTION__)
+ #define RETURN(r)			_RETURN(__FILE__,__LINE__,__FUNCTION__,(unsigned long)r)
+ #define SHOWVALUE(v)		_SHOWVALUE((ULONG)v,sizeof(v),#v,__FILE__,__LINE__)
+ #define SHOWPOINTER(p)		_SHOWPOINTER(p,#p,__FILE__,__LINE__)
+ #define SHOWSTRING(s)		_SHOWSTRING(s,#s,__FILE__,__LINE__)
+ #define SHOWMSG(s)			_SHOWMSG(s,__FILE__,__LINE__)
+ #define D(s)				do { _DPRINTF_HEADER(__FILE__,__LINE__); _DPRINTF s; } while(0)
+ #define PRINTHEADER()		_DPRINTF_HEADER(__FILE__,__LINE__)
+ #define PRINTF(s)			_DLOG s
+ #define LOG(s)				do { _DPRINTF_HEADER(__FILE__,__LINE__); _DLOG("<%s()>:",__FUNCTION__); _DLOG s; } while(0)
  #define SETDEBUGLEVEL(l)	_SETDEBUGLEVEL(l)
  #define PUSHDEBUGLEVEL(l)	_PUSHDEBUGLEVEL(l)
  #define POPDEBUGLEVEL()	_POPDEBUGLEVEL()
