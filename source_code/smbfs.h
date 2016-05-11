@@ -79,6 +79,13 @@
 
 /*****************************************************************************/
 
+/* smbfs file system signature (SMB\0), as suggested by Chris Handley
+ * and Chris Young.
+ */
+#define ID_SMB_DISK 0x534D4200
+
+/*****************************************************************************/
+
 #ifndef min
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #endif /* min */

@@ -2774,7 +2774,13 @@ Setup(
 
 	VolumeNode->dol_Task = FileSystemPort;
 	DateStamp(&VolumeNode->dol_misc.dol_volume.dol_VolumeDate);
-	VolumeNode->dol_misc.dol_volume.dol_DiskType = ID_DOS_DISK;
+
+	/* Allow the file system to be identified by looking at the
+	 * contents of the volume node. We put "SMB\0" into the
+	 * dol_DiskType field. This was suggested by Chris Handley
+	 * and Chris Young. Thank you very much!
+	 */
+	VolumeNode->dol_misc.dol_volume.dol_DiskType = ID_SMB_DISK;
 
 	if(DeviceNode != NULL)
 	{
