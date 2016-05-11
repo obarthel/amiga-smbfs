@@ -1080,3 +1080,11 @@ smbfs 1.110 (1.5.2016)
 - Added the DEBUGFILE/K option. Not everybody has Sashimi or
   a tool like it running in the background, which makes sharing
   file system level debug information difficult.
+
+
+smbfs 1.111 (11.5.2016)
+
+- You can now identify smbfs by checking the DosList->dol_misc.dol_volume.dol_DiskType
+  field. It will read back as 0x534D4200, which is equivalent to the signature
+  "SMB\0". This change was suggested by Chris Handley and Chris Young.
+  Thank you very much!
