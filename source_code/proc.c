@@ -22,14 +22,46 @@
 
 /*****************************************************************************/
 
-#define SMB_VWV(packet)		((packet) + SMB_HEADER_LEN)
+/* Byte offsets into the packet buffer reference the following data
+ * (with the first four octets used by the NetBIOS session header):
+ *
+ *  0:	WORD netbios_session[2]	= NetBIOS session header
+ *  4:	BYTE smb_idf[4]			= contains 0xFF, 'SMB'
+ *  8:	BYTE smb_com			= command code
+ *  9:	BYTE smb_rcls			= error code class
+ * 10:	BYTE smb_reh			= reserved (contains AH if DOS INT-24 ERR)
+ * 11:	WORD smb_err			= error code
+ * 13:	BYTE smb_reb			= reserved
+ * 14:	WORD smb_res[7]			= reserved
+ * 28:	WORD smb_tid			= tree id #
+ * 30:	WORD smb_pid			= caller's process id #
+ * 32:	WORD smb_uid			= user id #
+ * 34:	WORD smb_mid			= mutiplex id #
+ * 36:	BYTE smb_wct			= count of parameter words
+ * 37:	WORD smb_vwv[]			= variable # words of params
+ * 39:	WORD smb_bcc			= # bytes of data following
+ * 41:	BYTE smb_data[]			= data bytes
+ */
+
+#define SMB_VWV(packet)		(&(packet)[37])
 #define SMB_CMD(packet)		((packet)[8])
-#define SMB_WCT(packet)		((packet)[SMB_HEADER_LEN - 1])
+#define SMB_WCT(packet)		((packet)[36])
 #define SMB_BCC(packet)		smb_bcc(packet)
-#define SMB_BUF(packet)		((packet) + SMB_HEADER_LEN + SMB_WCT(packet) * 2 + 2)
+#define SMB_BUF(packet)		((packet) + 37 + SMB_WCT(packet) * sizeof(word) + sizeof(word))
+
+/*****************************************************************************/
 
 #define SMB_DIRINFO_SIZE	43
 #define SMB_STATUS_SIZE		21
+
+/*****************************************************************************/
+
+/* Some message size calculations include the size of the NetBIOS session
+ * header, which may not be necessary. The "message size" in question is not
+ * the same as the underlying transport layer, which in this case is
+ * NetBIOS over TCP.
+ */
+#define NETBIOS_HEADER_SIZE 4
 
 /*****************************************************************************/
 
@@ -406,7 +438,7 @@ smb_len (const byte * packet)
 static INLINE word
 smb_bcc (const byte * packet)
 {
-	int pos = SMB_HEADER_LEN + SMB_WCT (packet) * sizeof (word);
+	int pos = 37 + SMB_WCT (packet) * sizeof (word);
 
 	return (word)(packet[pos] | ((word)packet[pos + 1]) << 8);
 }
@@ -422,10 +454,10 @@ smb_valid_packet (const byte * packet)
 	smb_len (packet),
 	SMB_WCT (packet),
 	SMB_BCC (packet),
-	SMB_HEADER_LEN,
-	SMB_WCT (packet) * 2,
+	33,
+	SMB_WCT (packet),
 	SMB_BCC (packet),
-	SMB_HEADER_LEN + SMB_WCT (packet) * 2 + SMB_BCC (packet) + 2));
+	33 + SMB_WCT (packet) * sizeof(word) + sizeof(word) + SMB_BCC (packet)));
 
 	/* olsen: During protocol negotiation Samba 3.2.5 may return SMB responses which contain
 	          more data than is called for. I'm not sure what the right approach to handle
@@ -435,8 +467,8 @@ smb_valid_packet (const byte * packet)
 		   && packet[5] == 'S'
 		   && packet[6] == 'M'
 		   && packet[7] == 'B'
-		   && (smb_len (packet) + 4 >= (dword)
-				(SMB_HEADER_LEN + SMB_WCT (packet) * 2 + SMB_BCC (packet) + 2))) ? 0 : (-EIO);
+		   && (smb_len (packet) >= (dword)
+				(33 + SMB_WCT (packet) * sizeof(word) + sizeof(word) + SMB_BCC (packet)))) ? 0 : (-EIO);
 
 	return result;
 }
@@ -572,7 +604,7 @@ print_char (char c)
 }
 
 static void
-smb_dump_packet (byte * packet)
+smb_dump_packet (const byte * packet)
 {
 	int i, j, len;
 	int errcls, error;
@@ -748,7 +780,7 @@ smb_request_ok_unlock (struct smb_server *s, int command, int wct, int bcc)
 static byte *
 smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
 {
-	dword xmit_len = SMB_HEADER_LEN + wct * sizeof (word) + bcc + 2;
+	dword xmit_len = 33 + wct * sizeof (word) + bcc + sizeof (word);
 	byte *p = server->packet;
 	byte *buf = server->packet;
 
@@ -780,10 +812,16 @@ smb_setup_header (struct smb_server *server, byte command, word wct, word bcc)
 	}
 
 	(*p++) = wct;
-	p += 2 * wct;
+	p += wct * sizeof(word);
+
 	WSET (p, 0, bcc);
 
-	return p + 2;
+	LOG (("total packet size=%ld, max receive size=%ld, packet buffer size=%ld\n", p + sizeof(word) + bcc - server->packet, server->max_recv, server->packet_size));
+
+	if(p + sizeof(word) + bcc - server->packet > (int)server->packet_size)
+		LOG (("Danger: total packet size (%ld) > packet buffer allocation (%ld)!\n", p + sizeof(word) + bcc - server->packet, server->packet_size));
+
+	return p + sizeof(word);
 }
 
 /* smb_setup_header_exclusive waits on server->lock and locks the
@@ -1000,7 +1038,9 @@ int
 smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data)
 {
 	char *buf = server->packet;
+	int num_bytes_written = 0;
 	int result;
+	long max_len;
 	long len;
 	byte *p;
 	
@@ -1027,18 +1067,18 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	 * This leaves 'max_buffer_size' - 59 for the payload.
 	 */
 	if(server->max_raw_size < server->max_buffer_size)
-		len = server->max_raw_size - 59 - 4;
+		max_len = server->max_raw_size - 59 - NETBIOS_HEADER_SIZE;
 	else
-		len = server->max_buffer_size - 59 - 4;
+		max_len = server->max_buffer_size - 59 - NETBIOS_HEADER_SIZE;
 
 	/* Number of bytes to write is smaller than the maximum
 	 * number of bytes which may be sent in a single SMB
 	 * message, including parameter and data fields?
 	 */
-	if (count <= len)
+	if (count <= max_len)
 		len = 0; /* Send a zero length SMB_COM_WRITE_RAW message, followed by the raw data. */
 	else
-		len = count - len;	/* Send some of the data as part of the SMB_COM_WRITE_RAW message, followed by the remaining raw data. */
+		len = count - max_len;	/* Send some of the data as part of the SMB_COM_WRITE_RAW message, followed by the remaining raw data. */
 
 	p = smb_setup_header_exclusive (server, SMBwritebraw, server->protocol > PROTOCOL_COREPLUS ? 12 : 11, len);
 
@@ -1074,96 +1114,106 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	if (result < 0)
 		goto out;
 
-	/* ZZZ if smb_request_write_raw() fails then the server may
-	 * not be able to send a response, hence the write operation will
-	 * be stuck.
-	 */
-	result = smb_request_write_raw (server, data + len, count - len);
+	num_bytes_written += len;
 
-	LOG(("raw request returned %ld\n", result));
+	data += len;
+	count -= len;
 
-	if (result >= 0)
+	if(count > 0)
 	{
-		int error;
+		result = smb_request_write_raw (server, data, count);
 
-		/* We have to do the checks of smb_request_ok here as well */
-		if ((error = smb_valid_packet (server->packet)) != 0)
-		{
-			LOG (("not a valid packet!\n"));
-			result = error;
-		}
-		else if (server->rcls != 0)
-		{
-			LOG (("server error %ld/%ld\n", server->rcls, server->err));
+		LOG(("raw request returned %ld\n", result));
 
-			result = -smb_errno (server->rcls, server->err);
-		}
-		else if (server->write_behind)
+		if (result >= 0)
 		{
-			/* We just assume success; the next file operation to follow
-			 * will set an error status if something went wrong.
-			 */
-			result = (count - len);
-		}
-		else
-		{
-			int sock_fd = server->mount_data.fd;
+			int error;
 
-			/* SMBwritebraw may be followed by the server sending
-			 * several interim update responses of SMBwritebraw,
-			 * which are eventually followed by a final response
-			 * of SMBwritec (complete).
-			 */
-			while(SMB_CMD(server->packet) == SMBwritebraw && SMB_BCC(server->packet) == 0 && SMB_WCT(server->packet) == 1)
+			if (server->write_behind)
 			{
-				LOG (("interim update\n"));
+				/* We just assume success; the next file operation to follow
+				 * will set an error status if something went wrong.
+				 */
+				result = num_bytes_written + count;
+			}
+			/* We have to do the checks of smb_request_ok here as well */
+			else if ((error = smb_valid_packet (server->packet)) != 0)
+			{
+				LOG (("not a valid packet!\n"));
+				result = error;
+			}
+			else if (server->rcls != 0)
+			{
+				LOG (("server error %ld/%ld\n", server->rcls, server->err));
 
-				error = smb_receive (server, sock_fd);
-				if(error < 0)
+				result = -smb_errno (server->rcls, server->err);
+			}
+			else
+			{
+				int sock_fd = server->mount_data.fd;
+
+				SHOWMSG("checking for interim update");
+
+				/* SMBwritebraw may be followed by the server sending
+				 * several interim update responses of SMBwritebraw,
+				 * which are eventually followed by a final response
+				 * of SMBwritec (complete).
+				 */
+				while(SMB_CMD(server->packet) == SMBwritebraw && SMB_BCC(server->packet) == 0)
 				{
-					LOG (("smb_receive() returned %ld\n", error));
+					LOG (("interim update\n"));
 
-					result = error;
-					break;
+					error = smb_receive (server, sock_fd);
+					if(error < 0)
+					{
+						LOG (("smb_receive() returned %ld\n", error));
+
+						result = error;
+						break;
+					}
+					
+					LOG (("received: SMB_CMD=%ld, SMB_BCC=%ld, SMB_WCT=%ld\n", SMB_CMD(server->packet), SMB_BCC(server->packet), SMB_WCT(server->packet)));
+
+					error = smb_valid_packet (server->packet);
+					if(error != 0)
+					{
+						LOG (("not a valid packet\n"));
+
+						result = error;
+						break;
+					}
+
+					if (server->rcls != 0)
+					{
+						LOG (("server error %ld/%ld\n", server->rcls, server->err));
+
+						result = -smb_errno (server->rcls, server->err);
+						break;
+					}
 				}
 
-				error = smb_valid_packet (server->packet);
-				if(error != 0)
+				/* If everything went fine so far, this should be the
+				 * final packet which concludes the transfer.
+				 */
+				if(result >= 0)
 				{
-					LOG (("not a valid packet\n"));
+					SHOWMSG("checking for final update");
 
-					result = error;
-					break;
-				}
+					error = smb_verify (server->packet, SMBwritec, 0, 0);
+					if (error != 0)
+					{
+						LOG (("smb_verify failed\n"));
+						result = error;
+					}
+					else
+					{
+						SHOWMSG("final update has arrived.");
 
-				if (server->rcls != 0)
-				{
-					LOG (("server error %ld/%ld\n", server->rcls, server->err));
-
-					result = -smb_errno (server->rcls, server->err);
-					break;
+						result = num_bytes_written + count;
+					}
 				}
 			}
-
-			/* If everything went fine so far, this should be the
-			 * final packet which concludes the transfer.
-			 */
-			if(result >= 0)
-			{
-				error = smb_verify (server->packet, SMBwritec, 1, 0);
-				if (error != 0)
-				{
-					LOG (("smb_verify failed\n"));
-					result = error;
-				}
-			}
 		}
-
-		LOG (("bytes written = %ld (expected %ld)\n", result, count - len));
-
-		/* If everything went fine, the whole block has been transfered. */
-		if (result == (count - len))
-			result = count;
 	}
 
  out:
@@ -1455,7 +1505,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 	word bcc;
 	word count;
 	char status[SMB_STATUS_SIZE];
-	int entries_asked = (server->max_buffer_size - 100) / SMB_DIRINFO_SIZE;
+	int entries_asked = (server->max_recv - 100) / SMB_DIRINFO_SIZE;
 	int dirlen = strlen (path);
 	char * mask;
 
@@ -1878,7 +1928,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 static int
 smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry)
 {
-	int max_matches = 512; /* this should actually be based on the max_buffer_size value */
+	int max_matches = 512; /* this should actually be based on the max_recv value */
 
 	/* NT uses 260, OS/2 uses 2. Both accept 1. */
 	int info_level = server->protocol < PROTOCOL_NT1 ? 1 : 260;
@@ -1915,12 +1965,12 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	/* ZZZ experimental 'max_matches' adjustment */
 	/*
 	if(info_level == 260)
-		max_matches = server->max_buffer_size / 360;
+		max_matches = server->max_recv / 360;
 	else
-		max_matches = server->max_buffer_size / 40;
+		max_matches = server->max_recv / 40;
 	*/
 
-	SHOWVALUE(server->max_buffer_size);
+	SHOWVALUE(server->max_recv);
 	SHOWVALUE(max_matches);
 
 	mask = malloc (dirlen);
@@ -1966,7 +2016,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 		WSET (outbuf, smb_tpscnt, 12 + masklen + 1);
 		WSET (outbuf, smb_tdscnt, 0);
 		WSET (outbuf, smb_mprcnt, 10);
-		WSET (outbuf, smb_mdrcnt, server->max_buffer_size);
+		WSET (outbuf, smb_mdrcnt, server->max_recv);
 		WSET (outbuf, smb_msrcnt, 0);
 		WSET (outbuf, smb_flags, 0);
 		DSET (outbuf, smb_timeout, 0);
@@ -2434,11 +2484,15 @@ smb_proc_reconnect (struct smb_server *server)
 		{PROTOCOL_NT1,		"NT LANMAN 1.0"},
 	};
 
+	/* Add a bit of fudge to account for the NetBIOS session
+	 * header and whatever else might show up...
+	 */
+	const int packet_fudge_size = 512;
 	const int num_prots = sizeof(prots) / sizeof(prots[0]);
 	const char dev[] = "A:";
 	int i, plength;
 	const int default_max_buffer_size = 1024; /* Space needed for first request. */
-	int given_max_xmit = server->mount_data.given_max_xmit;
+	int given_max_xmit;
 	int result;
 	word dialect_index;
 	byte *p;
@@ -2450,13 +2504,7 @@ smb_proc_reconnect (struct smb_server *server)
 	int full_share_len;
 	byte *packet;
 	dword max_buffer_size;
-
-	/* Reception buffer size (buffer is allocated below) is always as large as the
-	 * maximum transmission buffer size, and could be larger if the transmission
-	 * buffer size is smaller than 8000 bytes.
-	 */
-	if (server->max_recv <= 0)
-		server->max_recv = given_max_xmit < 8000 ? 8000 : given_max_xmit;
+	int packet_size;
 
 	if ((result = smb_connect (server)) < 0) /* this is really a plain connect() call */
 	{
@@ -2467,10 +2515,46 @@ smb_proc_reconnect (struct smb_server *server)
 	/* Here we assume that the connection is valid */
 	server->state = CONN_VALID;
 
+	server->max_buffer_size = default_max_buffer_size;
+	SHOWVALUE(server->max_buffer_size);
+
+	/* Minimum receive buffer size is 8000 bytes, but cannot
+	 * be larger than 65535 bytes.
+	 */
+	if (0 < server->mount_data.given_max_xmit && server->mount_data.given_max_xmit < 8000)
+		given_max_xmit = 8000;
+	else if (0 < server->mount_data.given_max_xmit && server->mount_data.given_max_xmit < 65536)
+		given_max_xmit = server->mount_data.given_max_xmit;
+	else
+		given_max_xmit = 65534; /* 2014/10/4 fm: use 65534 since some NASs report -1 but return max of 65534 bytes */
+
+	if (server->max_recv <= 0)
+		server->max_recv = given_max_xmit;
+
+	SHOWVALUE(server->max_recv);
+
+	/* We need to allocate memory for the buffer which is used both
+	 * for reception and transmission of messages. This means that it has
+	 * to be large enough to account for both uses. The maximum
+	 * transmit buffer size reported by the server may be smaller than
+	 * the maximum message size which smbfs is prepared to accept, or
+	 * it could be the other way round.
+	 */
+	packet_size = server->max_recv;
+	if (packet_size < server->max_buffer_size)
+		packet_size = server->max_buffer_size;
+
+	SHOWVALUE(packet_size);
+
 	if (server->packet != NULL)
 		free (server->packet);
 
-	server->packet = malloc (server->max_recv);
+	server->packet_size = packet_size + packet_fudge_size;
+
+	/* Add a bit of fudge to account for the NetBIOS session
+	 * header and whatever else might show up...
+	 */
+	server->packet = malloc (packet_size + packet_fudge_size);
 	if (server->packet == NULL)
 	{
 		LOG (("smb_proc_connect: No memory! Bailing out.\n"));
@@ -2479,10 +2563,6 @@ smb_proc_reconnect (struct smb_server *server)
 	}
 
 	packet = server->packet;
-
-	server->max_buffer_size = default_max_buffer_size;
-
-	LOG (("server max buffer size set to %ld\n", default_max_buffer_size));
 
 	/* Prepend a NetBIOS header? */
 	if(!server->raw_smb)
@@ -2578,8 +2658,9 @@ smb_proc_reconnect (struct smb_server *server)
 			p += 2 * sizeof(word);
 			
 			p = smb_decode_dword(p, &max_buffer_size);
-			LOG (("max_buffer_size = %ld\n", max_buffer_size));
+			SHOWVALUE (max_buffer_size);
 			p = smb_decode_dword(p, &server->max_raw_size);
+			SHOWVALUE (server->max_raw_size);
 			p = smb_decode_dword(p, &server_sesskey);
 			p = smb_decode_dword(p, &server->capabilities);
 
@@ -2597,7 +2678,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 			server->security_mode = BVAL(packet, smb_vwv1);
 			max_buffer_size = WVAL (packet, smb_vwv2);
-			LOG (("max_buffer_size = %ld\n", max_buffer_size));
+			SHOWVALUE (max_buffer_size);
 			/* Maximum raw read/write size is fixed to 65535 bytes. */
 			server->max_raw_size = 65535;
 			blkmode = WVAL (packet, smb_vwv5);
@@ -2764,7 +2845,7 @@ smb_proc_reconnect (struct smb_server *server)
 	}
 	else
 	{
-		max_buffer_size = 0;
+		max_buffer_size = server->max_buffer_size;
 		server->capabilities = 0;
 
 		password_len = strlen(server->mount_data.password)+1;
@@ -2820,14 +2901,6 @@ smb_proc_reconnect (struct smb_server *server)
 
 		SHOWVALUE(SMB_WCT(packet));
 
-		/* Changed, max_buffer_size hasn't been updated if a tconX message was send instead of tcon. */
-		if (max_buffer_size != 0)
-		{
-			server->max_buffer_size = max_buffer_size;
-
-			LOG (("server max buffer size set to %ld\n", max_buffer_size));
-		}
-
 		server->tid = WVAL(packet,smb_tid);
 	}
 	else
@@ -2853,44 +2926,54 @@ smb_proc_reconnect (struct smb_server *server)
 		p = SMB_VWV (packet);
 		p = smb_decode_word (p, &decoded_max_xmit);
 
-		server->max_buffer_size = decoded_max_xmit;
-
-		LOG (("server max buffer size set to %ld\n", decoded_max_xmit));
-
-		SHOWVALUE(server->max_buffer_size);
-
-		/* Added by Brian Willette - We were ignoring the server's initial
-		   maxbuf value */
-		if (max_buffer_size != 0 && server->max_buffer_size > max_buffer_size)
-		{
-			server->max_buffer_size = max_buffer_size;
-
-			LOG (("server max buffer size set to %ld\n", max_buffer_size));
-		}
+		max_buffer_size = decoded_max_xmit;
 
 		(void) smb_decode_word (p, &server->tid);
 	}
 
-	SHOWVALUE(server->max_buffer_size);
+	LOG (("max_buffer_size = %ld, tid = %ld\n", max_buffer_size, server->tid));
 
-	/* Ok, everything is fine. max_buffer_size does not include
-	   the SMB session header of 4 bytes. */
-	if (server->max_buffer_size < 65535 - 4)
+	/* Let's get paranoid. Make sure that we can actually receive
+	 * as much data as the buffer size allows, in a single consecutive
+	 * buffer which follows the SMB message header.
+	 */
+	if(packet_size < (int)max_buffer_size)
 	{
-		server->max_buffer_size += 4;
+		SHOWVALUE(packet_size);
+		
+		/* We need to allocate a larger packet buffer. */
+		packet_size = max_buffer_size;
+		
+		D(("packet size updated to %ld bytes\n", packet_size));
+		
+		free (server->packet);
 
-		LOG (("server max buffer size set to %ld\n", server->max_buffer_size));
+		/* Add a bit of fudge to account for the NetBIOS session
+		 * header and whatever else might show up...
+		 */
+		server->packet = malloc (packet_size + packet_fudge_size);
+		if (server->packet == NULL)
+		{
+			LOG (("smb_proc_connect: No memory! Bailing out.\n"));
+			result = -ENOMEM;
+			goto fail;
+		}
 	}
 
-	/* Changed, max_buffer_size hasn't been updated if a tconX message was send instead of tcon. */
-	if (server->max_buffer_size > given_max_xmit)
+	/* Finally, limit the amount of data to send to the server,
+	 * if requested.
+	 */
+	if(8000 <= server->mount_data.given_max_xmit && server->mount_data.given_max_xmit < (int)max_buffer_size)
 	{
-		server->max_buffer_size = given_max_xmit;
-
-		LOG (("server max buffer size set to %ld\n", server->max_buffer_size));
+		max_buffer_size = server->mount_data.given_max_xmit;
+		D(("maximum buffer size limited to %ld bytes\n", max_buffer_size));
 	}
 
-	LOG (("max_buffer_size = %ld, tid = %ld\n", server->max_buffer_size, server->tid));
+	/* Add a bit of fudge to account for the NetBIOS session
+	 * header and whatever else might show up...
+	 */
+	server->packet_size = packet_size + packet_fudge_size;
+	server->max_buffer_size = max_buffer_size;
 
 	LOG (("smb_proc_connect: Normal exit\n"));
 

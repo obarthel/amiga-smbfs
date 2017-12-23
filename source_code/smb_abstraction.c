@@ -61,6 +61,15 @@ struct smba_file
 
 /*****************************************************************************/
 
+/* Some message size calculations include the size of the NetBIOS session
+ * header, which may not be necessary. The "message size" in question is not
+ * the same as the underlying transport layer, which in this case is
+ * NetBIOS over TCP.
+ */
+#define NETBIOS_HEADER_SIZE 4
+
+/*****************************************************************************/
+
 #include "smb_abstraction.h"
 
 /*****************************************************************************/
@@ -164,17 +173,7 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
 	strlcpy (data.username, p->username, sizeof(data.username));
 	strlcpy (data.password, p->password, sizeof(data.password));
 
-	/* Minimum receive buffer size is 8000 bytes, and the
-	 * maximum transmit buffer size should be of the same
-	 * order.
-	 */
-	if (0 < max_transmit && max_transmit < 8000)
-		max_transmit = 8000;
-
-	if (0 < max_transmit && max_transmit < 65535)
-		data.given_max_xmit = max_transmit;
-	else
-		data.given_max_xmit = 65534; /* 2014/10/4 fm: use 65534 since some NASs report -1 but return max of 65534 bytes */
+	data.given_max_xmit = max_transmit;
 
 	strlcpy (data.server_name, p->server_name, sizeof(data.server_name));
 	strlcpy (data.client_name, p->client_name, sizeof(data.client_name));
@@ -447,7 +446,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 
 		do
 		{
-			n = min(len,max_raw_size);
+			n = min(len,(long)max_raw_size);
 
 			/* SMB_COM_READ_RAW can only read up to 65535 bytes. */
 			if(n > 65535)
@@ -501,7 +500,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 		 * This leaves 'max_buffer_size' - 48 for the payload.
 		 */
 		/*maxsize = f->server->server.max_buffer_size - SMB_HEADER_LEN - 5 * 2 - 5;*/
-		maxsize = f->server->server.max_buffer_size - 48 - 4;
+		maxsize = f->server->server.max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
 
 		do
 		{
@@ -555,6 +554,8 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		goto out;
 	}
 
+	SHOWVALUE(f->server->server.max_buffer_size);
+
 	max_buffer_size = f->server->server.max_buffer_size;
 
 	/* Calculate maximum number of bytes that could be transferred with
@@ -579,7 +580,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 	 * This leaves 'max_buffer_size' - 48 for the payload.
 	 */
 	/*maxsize = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
-	maxsize = max_buffer_size - 48 - 4;
+	maxsize = max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
 
 	LOG (("len = %ld, maxsize = %ld\n", len, maxsize));
 
@@ -628,7 +629,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 			 * This leaves 'max_buffer_size' - 59 for the payload.
 			 */
 			/*max_xmit = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
-			max_xmit = max_buffer_size - 59 - 4 + min(max_buffer_size, max_raw_size);
+			max_xmit = max_buffer_size - 59 - NETBIOS_HEADER_SIZE + min(max_buffer_size, max_raw_size);
 
 			LOG (("len = %ld, max_xmit = %ld\n", len, max_xmit));
 
@@ -639,7 +640,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 			 */
 			if (prefer_write_raw || max_xmit < len)
 			{
-				max_xmit = max_buffer_size - 4;
+				max_xmit = max_buffer_size - NETBIOS_HEADER_SIZE;
 
 				LOG (("max_xmit changed to %ld\n", max_xmit));
 			}
@@ -659,7 +660,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 				}
 				else
 				{
-					if(n > max_raw_size)
+					if(n > (int)max_raw_size)
 						n = max_raw_size;
 					
 					/* Maximum SMB_COM_RAW_WRITE length is 65535 bytes. */
@@ -997,7 +998,8 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			f->dircache->base = cache_index;
 
 			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size, f->dircache->cache);
-			if (num_entries < 0)
+			/* We stop on error, or if the directory is empty. */
+			if (num_entries <= 0)
 			{
 				result = num_entries;
 				goto out;

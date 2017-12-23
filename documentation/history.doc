@@ -1088,3 +1088,100 @@ smbfs 1.111 (11.5.2016)
   field. It will read back as 0x534D4200, which is equivalent to the signature
   "SMB\0". This change was suggested by Chris Handley and Chris Young.
   Thank you very much!
+
+
+smbfs 1.112 (26.9.2016)
+
+- The negotiation in smb_proc_reconnect() picked up the server's
+  maximum buffer size and then always added 4 bytes on top of it.
+  From the looks of it, this was intended to account for the
+  4 byte NetBIOS session header to be prepended to each SMB
+  command block. In practice it could push the size of a
+  write operation beyond what the server would accept.
+
+
+smbfs 1.113 (29.9.2016)
+
+- Removed the SMB_HEADER_LEN constant, since it wasn't actually referring to the
+  length of the SMB header, but the NetBIOS session header plus the SMB header.
+  This led to some confusion as to what exactly the packet byte offsets used by
+  "proc.c" would reference.
+
+- "proc.c" now lists the byte offset values into the packet buffer, so as
+  to make it clearer what exactly is being referenced.
+
+- smb_valid_packet() now correctly displays the expected and actual
+  packet size.
+
+- smb_setup_header() no longer includes the NetBIOS session header
+  in the total message length calculation. Which means that smbfs
+  no longer sends packets with a NetBIOS header which claims that
+  the messages should be longer than they actually are.
+
+- smb_proc_write_raw() no longer cares about the number of
+  command words, but only about the number of data bytes and
+  the command, when waiting for a raw write operation to
+  conclude.
+
+
+smbfs 1.114 (1.10.2016)
+
+- The packet buffer size is now increased during the protocol
+  negotiation, if the default buffer size proves to be too
+  small. This avoids trouble with the MAXTRANSMIT option,
+  which used to leave the original packet buffer size
+  unchanged, and too short.
+
+- The raw write operation no longer stumbles into a 0 length
+  write, which the server would not expect and not respond to.
+
+- Moved the test for the "write behind" option in the
+  raw write operation so that it is handled before the
+  server response (which hasn't arrived yet) is checked.
+
+- Verified that the raw write operation can deal properly
+  with the server response (interim update and write
+  completion).
+
+
+smbfs 1.115 (2.10.2016)
+
+- The MAXTRANSMIT option controls how much data smbfs is
+  prepared to receive. That value cannot be smaller than
+  8000 bytes, and it cannot be larger than 65535. The
+  code which sets up this parameter and verifies that it
+  is in range is now implemented only once, and not
+  twice in different places.
+
+- The MAXTRANSMIT option also controls how much data
+  smbfs may send to the server. This limit is no longer
+  capped at 65535 bytes.
+
+- The size of the message reception/transmission buffer
+  can no longer be smaller than 8000 bytes and it cannot
+  be smaller than the number of bytes which may be sent
+  to the server.
+
+
+smbfs 1.116 (3.10.2016)
+
+- smb_receive_trans2() now verifies that the amount of
+  data received is not larger than the maximum acceptable
+  by the client. Previously, it compared the amount of
+  data received against the server's upper limit. Ouch :-(
+
+- smba_readdir() now stops immediately if no directory
+  entries are supplied. Previously, it could deliver
+  a bogus directory entry to the scanning function.
+
+- The number of directory entries accepted by smb_proc_readdir_short()
+  is now calculated according to how much data the client will
+  accept, and not according to the server's limit.
+
+- smb_proc_readdir_long() now reports how much data the
+  client will accept, rather than how much the server will
+  accept. This was problematic because that number is a
+  16 bit value, and the server's maximum transmission
+  value could be larger than 65535 bytes, causing directory
+  scanning to fail because the truncated 16 bit value
+  could be too tiny to report even a single result.

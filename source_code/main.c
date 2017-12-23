@@ -25,6 +25,7 @@
  * cpr smbfs.debug dumpsmb user=guest volume=amiga //windows7-amiga/Users/Public
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
+ * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
  */
 
 #include "smbfs.h"

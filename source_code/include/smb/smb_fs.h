@@ -18,9 +18,6 @@
 
 #include <netinet/in.h>
 
-#define SMB_HEADER_LEN 37	/* includes everything up to, but not
-							   including smb_bcc */
-
 /* This structure is used to pass the arguments to smb_proc_lockingX
  */
 struct smb_lkrng

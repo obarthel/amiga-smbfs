@@ -32,7 +32,9 @@ struct smb_server
 
 	unsigned short rcls;				/* The error codes we received */
 	unsigned short err;
+
 	unsigned char *packet;
+	int packet_size; /* Amount of memory allocated for packet */
 
 	int security_mode;
 	int crypt_key_length;

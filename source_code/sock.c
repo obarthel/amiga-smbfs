@@ -23,6 +23,29 @@
 
 /*****************************************************************************/
 
+/* Byte offsets into the packet buffer reference the following data
+ * (with the first four octets used by the NetBIOS session header):
+ *
+ *  0:	WORD netbios_session[2]	= NetBIOS session header
+ *  4:	BYTE smb_idf[4]			= contains 0xFF, 'SMB'
+ *  8:	BYTE smb_com			= command code
+ *  9:	BYTE smb_rcls			= error code class
+ * 10:	BYTE smb_reh			= reserved (contains AH if DOS INT-24 ERR)
+ * 11:	WORD smb_err			= error code
+ * 13:	BYTE smb_reb			= reserved
+ * 14:	WORD smb_res[7]			= reserved
+ * 28:	WORD smb_tid			= tree id #
+ * 30:	WORD smb_pid			= caller's process id #
+ * 32:	WORD smb_uid			= user id #
+ * 34:	WORD smb_mid			= mutiplex id #
+ * 36:	BYTE smb_wct			= count of parameter words
+ * 37:	WORD smb_vwv[]			= variable # words of params
+ * 39:	WORD smb_bcc			= # bytes of data following
+ * 41:	BYTE smb_data[]			= data bytes
+ */
+
+/*****************************************************************************/
+
 /* smb_receive_raw
    fs points to the correct segment, sock != NULL, target != NULL
    The smb header is only stored if want_header != 0. */
@@ -53,6 +76,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 	}
 
 	netbios_session_payload_size = (int)smb_len (netbios_session_buf);
+	SHOWVALUE(netbios_session_payload_size);
 
 	#if defined(DUMP_SMB)
 	{
@@ -213,7 +237,7 @@ smb_receive_trans2 (struct smb_server *server, int sock_fd, int *data_len, int *
 	total_data = WVAL (inbuf, smb_tdrcnt);
 	total_param = WVAL (inbuf, smb_tprcnt);
 
-	if ((total_data > server->max_buffer_size) || (total_param > server->max_buffer_size))
+	if ((total_data > server->max_recv) || (total_param > server->max_recv))
 	{
 		LOG (("smb_receive_trans2: data/param too long\n"));
 
