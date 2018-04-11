@@ -662,7 +662,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 				{
 					if(n > (int)max_raw_size)
 						n = max_raw_size;
-					
+
 					/* Maximum SMB_COM_RAW_WRITE length is 65535 bytes. */
 					if(n > 65535)
 						n = 65535;

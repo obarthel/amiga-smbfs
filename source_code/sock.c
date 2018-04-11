@@ -617,7 +617,15 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 
 			/* Wait for the server to respond. */
 			if(!server->write_behind)
+			{
+				LOG(("waiting for server to respond... "));
 				result = smb_receive (server, sock_fd);
+				LOG(("response = %ld\n", result));
+			}
+			else
+			{
+				LOG(("not waiting for server to respond\n"));
+			}
 		}
 		else
 		{
