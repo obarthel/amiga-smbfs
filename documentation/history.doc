@@ -1185,3 +1185,10 @@ smbfs 1.116 (3.10.2016)
   value could be larger than 65535 bytes, causing directory
   scanning to fail because the truncated 16 bit value
   could be too tiny to report even a single result.
+
+
+smbfs 1.117 (11.4.2018)
+
+- Looks like the SMB_COM_WRITE_RAW implementation is really as simple
+  as the documentation suggested. Just two packets need to be sent to
+  to the server.
