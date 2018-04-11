@@ -987,7 +987,7 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 	return result;
 }
 
-/* count must be <= 65535. No error number is returned.	 A result of 0
+/* count must be <= 65535. No error number is returned. A result of 0
    indicates an error, which has to be investigated by a normal read
    call. */
 int
@@ -1043,7 +1043,9 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	long max_len;
 	long len;
 	byte *p;
-	
+
+	LOG (("number of bytes to send = %ld\n", count));
+
 	/* Calculate maximum number of bytes that could be transferred with
 	 * a single SMB_COM_WRITE_RAW packet...
 	 *
@@ -1071,14 +1073,24 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	else
 		max_len = server->max_buffer_size - 59 - NETBIOS_HEADER_SIZE;
 
+	LOG(("maximum length for payload = %ld bytes\n", max_len));
+
 	/* Number of bytes to write is smaller than the maximum
 	 * number of bytes which may be sent in a single SMB
 	 * message, including parameter and data fields?
 	 */
 	if (count <= max_len)
+	{
+		LOG(("count (%ld) <= max_len (%ld) -- send no data with the message.\n",count,max_len));
+
 		len = 0; /* Send a zero length SMB_COM_WRITE_RAW message, followed by the raw data. */
+	}
 	else
+	{
 		len = count - max_len;	/* Send some of the data as part of the SMB_COM_WRITE_RAW message, followed by the remaining raw data. */
+
+		LOG(("count (%ld) > max_len (%ld) -- send %ld bytes with the message.\n",count,max_len,len));
+	}
 
 	p = smb_setup_header_exclusive (server, SMBwritebraw, server->protocol > PROTOCOL_COREPLUS ? 12 : 11, len);
 
@@ -1107,6 +1119,8 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	if (len > 0)
 		memcpy (p, data, len);
 
+	LOG(("requesting SMBwritebraw\n"));
+
 	result = smb_request_ok (server, SMBwritebraw, 1, 0);
 
 	LOG (("first request returned %ld\n", result));
@@ -1119,100 +1133,49 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	data += len;
 	count -= len;
 
+	LOG (("bytes sent so far = %ld\n", num_bytes_written));
+
 	if(count > 0)
 	{
+		LOG(("sending %ld bytes of data (raw)\n",count));
+
 		result = smb_request_write_raw (server, data, count);
 
 		LOG(("raw request returned %ld\n", result));
 
-		if (result >= 0)
+		if (result < 0)
+			goto out;
+
+		LOG (("bytes sent so far = %ld\n", num_bytes_written));
+
+		if(server->write_behind)
+		{
+			/* We just assume success; the next file operation to follow
+			 * will set an error status if something went wrong.
+			 */
+			result = num_bytes_written + count;
+		}
+		else
 		{
 			int error;
 
-			if (server->write_behind)
-			{
-				/* We just assume success; the next file operation to follow
-				 * will set an error status if something went wrong.
-				 */
-				result = num_bytes_written + count;
-			}
 			/* We have to do the checks of smb_request_ok here as well */
-			else if ((error = smb_valid_packet (server->packet)) != 0)
+			if((error = smb_valid_packet (server->packet)) != 0)
 			{
 				LOG (("not a valid packet!\n"));
 				result = error;
+				goto out;
 			}
-			else if (server->rcls != 0)
+
+			if(server->rcls != 0)
 			{
 				LOG (("server error %ld/%ld\n", server->rcls, server->err));
 
 				result = -smb_errno (server->rcls, server->err);
+				goto out;
 			}
-			else
-			{
-				int sock_fd = server->mount_data.fd;
 
-				SHOWMSG("checking for interim update");
-
-				/* SMBwritebraw may be followed by the server sending
-				 * several interim update responses of SMBwritebraw,
-				 * which are eventually followed by a final response
-				 * of SMBwritec (complete).
-				 */
-				while(SMB_CMD(server->packet) == SMBwritebraw && SMB_BCC(server->packet) == 0)
-				{
-					LOG (("interim update\n"));
-
-					error = smb_receive (server, sock_fd);
-					if(error < 0)
-					{
-						LOG (("smb_receive() returned %ld\n", error));
-
-						result = error;
-						break;
-					}
-					
-					LOG (("received: SMB_CMD=%ld, SMB_BCC=%ld, SMB_WCT=%ld\n", SMB_CMD(server->packet), SMB_BCC(server->packet), SMB_WCT(server->packet)));
-
-					error = smb_valid_packet (server->packet);
-					if(error != 0)
-					{
-						LOG (("not a valid packet\n"));
-
-						result = error;
-						break;
-					}
-
-					if (server->rcls != 0)
-					{
-						LOG (("server error %ld/%ld\n", server->rcls, server->err));
-
-						result = -smb_errno (server->rcls, server->err);
-						break;
-					}
-				}
-
-				/* If everything went fine so far, this should be the
-				 * final packet which concludes the transfer.
-				 */
-				if(result >= 0)
-				{
-					SHOWMSG("checking for final update");
-
-					error = smb_verify (server->packet, SMBwritec, 0, 0);
-					if (error != 0)
-					{
-						LOG (("smb_verify failed\n"));
-						result = error;
-					}
-					else
-					{
-						SHOWMSG("final update has arrived.");
-
-						result = num_bytes_written + count;
-					}
-				}
-			}
+			result = num_bytes_written + count;
 		}
 	}
 
@@ -1248,7 +1211,7 @@ smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	return error;
 }
 
-/* smb_proc_lockingX: We don't chain any further packets to the initial one	 */
+/* smb_proc_lockingX: We don't chain any further packets to the initial one */
 int
 smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct smb_lkrng *locks, int num_entries, int mode, long timeout)
 {
@@ -1512,8 +1475,8 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 	mask = malloc(dirlen + 4 + 1);
 	if (mask == NULL)
 	{
-		 result = (-ENOMEM);
-		 goto out;
+		result = (-ENOMEM);
+		goto out;
 	}
 
 	strcpy (mask, path);
