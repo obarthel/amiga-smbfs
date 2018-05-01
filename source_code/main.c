@@ -146,7 +146,7 @@ VOID ASM AsmFreePooled(REG(a0,APTR poolHeader),REG(a1,APTR memory),REG(d0,ULONG 
 
 /* Forward declarations for local routines. */
 LONG _start(STRPTR args, LONG args_length, struct ExecBase * exec_base);
-LONG VARARGS68K LocalPrintf(STRPTR format, ...);
+LONG VARARGS68K LocalFPrintf(BPTR output, const UBYTE * format, ...);
 STRPTR amitcp_strerror(int error);
 STRPTR host_strerror(int error);
 LONG CompareNames(STRPTR a, STRPTR b);
@@ -159,7 +159,7 @@ ULONG GetCurrentTime(VOID);
 VOID GMTime(time_t seconds, struct tm *tm);
 time_t MakeTime(const struct tm *const tm);
 VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString, ...);
-int BroadcastNameQuery(char *name, char *scope, UBYTE *address);
+int BroadcastNameQuery(const char *name, const char *scope, UBYTE *address);
 
 /****************************************************************************/
 
@@ -171,9 +171,9 @@ STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 /****************************************************************************/
 
 INLINE STATIC BOOL ReallyRemoveDosEntry(struct DosList *entry);
-INLINE STATIC LONG BuildFullName(STRPTR parent_name, STRPTR name, STRPTR *result_ptr, LONG *result_size_ptr);
-INLINE STATIC VOID TranslateCName(UBYTE *name, UBYTE *map);
-INLINE STATIC VOID ConvertCString(APTR bstring, LONG max_len, STRPTR cstring, LONG len);
+INLINE STATIC LONG BuildFullName(const UBYTE * parent_name, STRPTR name, STRPTR *result_ptr, LONG *result_size_ptr);
+INLINE STATIC VOID TranslateCName(UBYTE *name, const UBYTE *map);
+INLINE STATIC VOID ConvertCString(void * bstring, LONG max_len, const UBYTE * cstring, LONG len);
 STATIC VOID DisplayErrorList(VOID);
 STATIC VOID AddError(STRPTR fmt, APTR args);
 STATIC LONG CVSPrintf(STRPTR format_string, APTR args);
@@ -185,41 +185,41 @@ STATIC LONG CheckAccessModeCollision(STRPTR name, LONG mode);
 STATIC LONG NameAlreadyInUse(STRPTR name);
 STATIC BOOL IsReservedName(STRPTR name);
 STATIC LONG MapErrnoToIoErr(int error);
-STATIC VOID TranslateBName(UBYTE *name, UBYTE *map);
+STATIC VOID TranslateBName(UBYTE *name, const UBYTE *map);
 STATIC VOID Cleanup(VOID);
 STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
-STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, APTR bstring);
+STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, const void * bstring);
 STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
-STATIC LONG Action_DeleteObject(struct FileLock *parent, APTR bcpl_name, LONG *error_ptr);
-STATIC BPTR Action_CreateDir(struct FileLock *parent, APTR bcpl_name, LONG *error_ptr);
-STATIC BPTR Action_LocateObject(struct FileLock *parent, APTR bcpl_name, LONG mode, LONG *error_ptr);
+STATIC LONG Action_DeleteObject(struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
+STATIC BPTR Action_CreateDir(struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
+STATIC BPTR Action_LocateObject(struct FileLock *parent, const void * bcpl_name, LONG mode, LONG *error_ptr);
 STATIC BPTR Action_CopyDir(struct FileLock *lock, LONG *error_ptr);
 STATIC LONG Action_FreeLock(struct FileLock *lock, LONG *error_ptr);
 STATIC LONG Action_SameLock(struct FileLock *lock1, struct FileLock *lock2, LONG *error_ptr);
-STATIC LONG Action_SetProtect(struct FileLock *parent, APTR bcpl_name, LONG mask, LONG *error_ptr);
-STATIC LONG Action_RenameObject(struct FileLock *source_lock, APTR source_bcpl_name, struct FileLock *destination_lock, APTR destination_bcpl_name, LONG *error_ptr);
+STATIC LONG Action_SetProtect(struct FileLock *parent, const void * bcpl_name, LONG mask, LONG *error_ptr);
+STATIC LONG Action_RenameObject(struct FileLock *source_lock, const void * source_bcpl_name, struct FileLock *destination_lock, const void * destination_bcpl_name, LONG *error_ptr);
 STATIC LONG Action_DiskInfo(struct InfoData *id, LONG *error_ptr);
 STATIC LONG Action_Info(struct FileLock *lock, struct InfoData *id, LONG *error_ptr);
 STATIC LONG Action_ExamineObject(struct FileLock *lock, struct FileInfoBlock *fib, LONG *error_ptr);
-STATIC BOOL NameIsAcceptable(STRPTR name, LONG max_len);
+STATIC BOOL NameIsAcceptable(const UBYTE * name, LONG max_len);
 STATIC LONG Action_ExamineNext(struct FileLock *lock, struct FileInfoBlock *fib, LONG *error_ptr);
 STATIC LONG Action_ExamineAll(struct FileLock *lock, struct ExAllData *ed, ULONG size, ULONG type, struct ExAllControl *eac, LONG *error_ptr);
-STATIC LONG Action_Find(LONG action, struct FileHandle *fh, struct FileLock *parent, APTR bcpl_name, LONG *error_ptr);
+STATIC LONG Action_Find(LONG action, struct FileHandle *fh, struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
 STATIC LONG Action_Read(struct FileNode *fn, APTR mem, LONG length, LONG *error_ptr);
 STATIC LONG Action_Write(struct FileNode *fn, APTR mem, LONG length, LONG *error_ptr);
 STATIC LONG Action_End(struct FileNode *fn, LONG *error_ptr);
 STATIC LONG Action_Seek(struct FileNode *fn, LONG position, LONG mode, LONG *error_ptr);
 STATIC LONG Action_SetFileSize(struct FileNode *fn, LONG position, LONG mode, LONG *error_ptr);
-STATIC LONG Action_SetDate(struct FileLock *parent, APTR bcpl_name, struct DateStamp *ds, LONG *error_ptr);
+STATIC LONG Action_SetDate(struct FileLock *parent, const void * bcpl_name, const struct DateStamp *ds, LONG *error_ptr);
 STATIC LONG Action_ExamineFH(struct FileNode *fn, struct FileInfoBlock *fib, LONG *error_ptr);
 STATIC BPTR Action_ParentFH(struct FileNode *fn, LONG *error_ptr);
 STATIC BPTR Action_CopyDirFH(struct FileNode *fn, LONG *error_ptr);
 STATIC LONG Action_FHFromLock(struct FileHandle *fh, struct FileLock *fl, LONG *error_ptr);
-STATIC LONG Action_RenameDisk(APTR bcpl_name, LONG *error_ptr);
+STATIC LONG Action_RenameDisk(const void * bcpl_name, LONG *error_ptr);
 STATIC LONG Action_ChangeMode(LONG type, APTR object, LONG new_mode, LONG *error_ptr);
 STATIC LONG Action_WriteProtect(LONG flag, ULONG key, LONG *error_ptr);
 STATIC LONG Action_MoreCache(LONG buffer_delta, LONG *error_ptr);
-STATIC LONG Action_SetComment(struct FileLock *parent, APTR bcpl_name, APTR bcpl_comment, LONG *error_ptr);
+STATIC LONG Action_SetComment(struct FileLock *parent, const void * bcpl_name, const void * bcpl_comment, LONG *error_ptr);
 STATIC LONG Action_LockRecord(struct FileNode *fn, LONG offset, LONG length, LONG mode, ULONG timeout, LONG *error_ptr);
 STATIC LONG Action_FreeRecord(struct FileNode *fn, LONG offset, LONG length, LONG *error_ptr);
 STATIC VOID HandleFileSystem(STRPTR device_name, STRPTR volume_name, STRPTR service_name);
@@ -298,7 +298,7 @@ STATIC APTR					MemoryPool;
 STATIC struct RDArgs *		Parameters;
 STATIC struct DiskObject *	Icon;
 
-STATIC struct WBStartup * 	WBStartup;
+STATIC struct WBStartup *	WBStartup;
 
 STATIC struct MinList		ErrorList;
 
@@ -1064,9 +1064,20 @@ main(VOID)
 	SETPROGRAMNAME(FilePart(program_name));
 
 	if(args.DebugLevel != NULL)
+	{
+		#if !defined(DEBUG)
+		{
+			if(WBStartup == NULL)
+				ReportError("This version of smbfs cannot create debug output.");
+		}
+		#endif /* !DEBUG */
+
 		SETDEBUGLEVEL(*args.DebugLevel);
+	}
 	else
+	{
 		SETDEBUGLEVEL(0);
+	}
 
 	/* Enable SMB packet decoding, but only if not started from Workbench. */
 	#if defined(DUMP_SMB)
@@ -1078,6 +1089,11 @@ main(VOID)
 
 		if(args.DumpSMB && WBStartup == NULL)
 			control_smb_dump(TRUE, dump_smb_level, (const char *)args.DumpSMBFile);
+	}
+	#else
+	{
+		if(WBStartup == NULL && (args.DumpSMBLevel != NULL || args.DumpSMB))
+			ReportError("This version of smbfs cannot create SMB debug output.");
 	}
 	#endif /* DUMP_SMB */
 
@@ -1137,21 +1153,24 @@ main(VOID)
 /****************************************************************************/
 
 LONG VARARGS68K
-LocalPrintf(STRPTR format, ...)
+LocalFPrintf(BPTR output, const UBYTE * format, ...)
 {
 	va_list args;
 	LONG result;
 
+	if(output == ZERO)
+		output = Output();
+
 	#if defined(__amigaos4__)
 	{
 		va_startlinear(args,format);
-		result = VPrintf(format,va_getlinearva(args,APTR));
+		result = VFPrintf(output, format, va_getlinearva(args,APTR));
 		va_end(args);
 	}
 	#else
 	{
 		va_start(args,format);
-		result = VPrintf(format,args);
+		result = VFPrintf(output, format, args);
 		va_end(args);
 	}
 	#endif /* __amigaos4__ */
@@ -1404,27 +1423,34 @@ ReportError(STRPTR fmt,...)
 		}
 		else
 		{
+			struct Process * this_process = (struct Process *)FindTask(NULL);
 			UBYTE program_name[MAX_FILENAME_LEN];
+			BPTR output;
 
 			GetProgramName(program_name,sizeof(program_name));
 
-			LocalPrintf("%s: ",FilePart(program_name));
+			if(this_process->pr_CES != ZERO)
+				output = this_process->pr_CES;
+			else
+				output = Output();
+
+			LocalFPrintf(output, "%s: ",FilePart(program_name));
 
 			#if defined(__amigaos4__)
 			{
 				va_startlinear(args,fmt);
-				VPrintf(fmt,va_getlinearva(args,APTR));
+				VFPrintf(output, fmt, va_getlinearva(args,APTR));
 				va_end(args);
 			}
 			#else
 			{
 				va_start(args,fmt);
-				VPrintf(fmt,args);
+				VFPrintf(output,fmt,args);
 				va_end(args);
 			}
 			#endif /* __amigaos4__ */
 
-			LocalPrintf("\n");
+			LocalFPrintf(output, "\n");
 		}
 	}
 }
@@ -1738,7 +1764,7 @@ L2_Encode(UBYTE * dst, const UBYTE * name, const UBYTE pad, const UBYTE sfx, con
 }
 
 int
-BroadcastNameQuery(char *name, char *scope, UBYTE *address)
+BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 {
 	static const UBYTE header[12] =
 	{
@@ -2215,7 +2241,7 @@ MapErrnoToIoErr(int error)
  * via a mapping table.
  */
 INLINE STATIC VOID
-TranslateBName(UBYTE * name,UBYTE * map)
+TranslateBName(UBYTE * name,const UBYTE * map)
 {
 	LONG len;
 	UBYTE c;
@@ -2232,7 +2258,7 @@ TranslateBName(UBYTE * name,UBYTE * map)
 
 /* Translate a NUL terminated file name via a mapping table. */
 INLINE STATIC VOID
-TranslateCName(UBYTE * name,UBYTE * map)
+TranslateCName(UBYTE * name,const UBYTE * map)
 {
 	UBYTE c;
 
@@ -2458,7 +2484,7 @@ Setup(
 	STRPTR	program_name,
 	STRPTR	service,
 	STRPTR	workgroup,
-	STRPTR 	username,
+	STRPTR	username,
 	STRPTR	opt_password,
 	BOOL	opt_changecase,
 	STRPTR	opt_clientname,
@@ -2797,7 +2823,7 @@ Setup(
 	 */
 	if(volume_name != NULL && VolumeNode != NULL)
 	{
- 		AddDosEntry(VolumeNode);
+		AddDosEntry(VolumeNode);
 
 		VolumeNodeAdded = TRUE;
 	}
@@ -2823,9 +2849,9 @@ Setup(
 
 /* Convert a BCPL string into a standard NUL terminated 'C' string. */
 INLINE STATIC VOID
-ConvertBString(LONG max_len,STRPTR cstring,APTR bstring)
+ConvertBString(LONG max_len,STRPTR cstring,const void * bstring)
 {
-	STRPTR from = bstring;
+	const UBYTE * from = bstring;
 	LONG len = from[0];
 
 	if(len > max_len-1)
@@ -2839,9 +2865,9 @@ ConvertBString(LONG max_len,STRPTR cstring,APTR bstring)
 
 /* Convert a NUL terminated 'C' string into a BCPL string. */
 INLINE STATIC VOID
-ConvertCString(APTR bstring,LONG max_len,STRPTR cstring,LONG len)
+ConvertCString(void * bstring,LONG max_len,const UBYTE * cstring,LONG len)
 {
-	STRPTR to = bstring;
+	UBYTE * to = bstring;
 
 	if(len > max_len-1)
 		len = max_len-1;
@@ -2859,10 +2885,10 @@ ConvertCString(APTR bstring,LONG max_len,STRPTR cstring,LONG len)
  */
 STATIC LONG
 BuildFullName(
-	STRPTR		parent_name,
-	STRPTR		name,
-	STRPTR *	result_ptr,
-	LONG *		result_size_ptr)
+	const UBYTE *	parent_name,
+	STRPTR			name,
+	STRPTR *		result_ptr,
+	LONG *			result_size_ptr)
 {
 	LONG error = OK;
 	STRPTR buffer;
@@ -3166,7 +3192,7 @@ FindNextLockNode(STRPTR name,struct LockNode * last_ln)
 STATIC LONG
 Action_DeleteObject(
 	struct FileLock *	parent,
-	APTR				bcpl_name,
+	const void *		bcpl_name,
 	LONG *				error_ptr)
 {
 	LONG result = DOSFALSE;
@@ -3216,7 +3242,7 @@ Action_DeleteObject(
 
 		/* Figure out how long the UTF-8 version will become. */
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		
+
 		/* Encoding error occured, or the resulting name is longer than the buffer will hold? */
 		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
 		{
@@ -3281,8 +3307,7 @@ Action_DeleteObject(
 		}
 	}
 
-	/* NOTE: Mark all locks to this object as restart, not just first
-	   one - Piru */
+	/* NOTE: Mark all locks to this object as restart, not just first one - Piru */
 	ln = NULL;
 	while ((ln = FindNextLockNode(full_parent_name, ln)) != NULL)
 		ln->ln_RestartExamine = TRUE;
@@ -3372,7 +3397,7 @@ Action_DeleteObject(
 STATIC BPTR
 Action_CreateDir(
 	struct FileLock *	parent,
-	APTR				bcpl_name,
+	const void * 		bcpl_name,
 	LONG *				error_ptr)
 {
 	BPTR result = ZERO;
@@ -3381,6 +3406,7 @@ Action_CreateDir(
 	struct LockNode * ln = NULL;
 	STRPTR parent_name;
 	STRPTR dir_name = NULL;
+	size_t dir_name_size;
 	smba_file_t * dir = NULL;
 	STRPTR base_name;
 	UBYTE name[MAX_FILENAME_LEN];
@@ -3443,7 +3469,11 @@ Action_CreateDir(
 		goto out;
 	}
 
-	dir_name = AllocateMemory(strlen(full_name)+3);
+	SHOWSTRING(full_name);
+
+	dir_name_size = strlen(full_name)+3;
+
+	dir_name = AllocateMemory(dir_name_size);
 	if(dir_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -3451,11 +3481,16 @@ Action_CreateDir(
 	}
 
 	strcpy(dir_name,full_name);
+
 	base_name = NULL;
+
 	for(i = strlen(dir_name)-1 ; i >= 0 ; i--)
 	{
 		if(dir_name[i] == SMB_PATH_SEPARATOR)
 		{
+			/* Is this a case of '\name'? If so, see to it that
+			 * dir_name becomes '\' and base_name becomes 'foo'.
+			 */
 			if(i == 0)
 			{
 				memmove(&dir_name[1],&dir_name[0],strlen(dir_name)+1);
@@ -3468,6 +3503,8 @@ Action_CreateDir(
 			break;
 		}
 	}
+
+	D(("full path name = '%s', directory name = '%s'\n", dir_name, base_name));
 
 	ln = AllocateMemory(sizeof(*ln));
 	if(ln == NULL)
@@ -3484,7 +3521,7 @@ Action_CreateDir(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	error = smba_open(ServerData,dir_name,strlen(full_name)+3,&dir);
+	error = smba_open(ServerData,dir_name,dir_name_size,&dir);
 	if(error < 0)
 	{
 		error = MapErrnoToIoErr(error);
@@ -3538,7 +3575,7 @@ Action_CreateDir(
 STATIC BPTR
 Action_LocateObject(
 	struct FileLock *	parent,
-	APTR				bcpl_name,
+	const void * 		bcpl_name,
 	LONG				mode,
 	LONG *				error_ptr)
 {
@@ -3836,7 +3873,7 @@ Action_SameLock(
 STATIC LONG
 Action_SetProtect(
 	struct FileLock *	parent,
-	APTR				bcpl_name,
+	const void * 		bcpl_name,
 	LONG				mask,
 	LONG *				error_ptr)
 {
@@ -3970,9 +4007,9 @@ Action_SetProtect(
 STATIC LONG
 Action_RenameObject(
 	struct FileLock *	source_lock,
-	APTR				source_bcpl_name,
+	const void *		source_bcpl_name,
 	struct FileLock *	destination_lock,
-	APTR				destination_bcpl_name,
+	const void *		destination_bcpl_name,
 	LONG *				error_ptr)
 {
 	struct LockNode * ln;
@@ -4253,12 +4290,12 @@ Action_ExamineObject(
 
 	if(lock == NULL)
 	{
-		STRPTR volume_name = BADDR(VolumeNode->dol_Name);
+		const UBYTE * volume_name = BADDR(VolumeNode->dol_Name);
 		LONG len = volume_name[0];
 
 		SHOWMSG("ZERO root lock");
 
-		memcpy(fib->fib_FileName+1,volume_name+1,len);
+		memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 		fib->fib_FileName[0] = len;
 
 		fib->fib_DirEntryType	= ST_ROOT;
@@ -4296,12 +4333,12 @@ Action_ExamineObject(
 
 		if(strcmp(ln->ln_FullName,SMB_ROOT_DIR_NAME) == SAME)
 		{
-			STRPTR volume_name = BADDR(VolumeNode->dol_Name);
+			const UBYTE * volume_name = BADDR(VolumeNode->dol_Name);
 			LONG len = volume_name[0];
 
 			SHOWMSG("root lock");
 
-			memcpy(fib->fib_FileName+1,volume_name+1,len);
+			memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 			fib->fib_FileName[0] = len;
 
 			fib->fib_DirEntryType	= ST_ROOT;
@@ -4312,7 +4349,7 @@ Action_ExamineObject(
 		}
 		else
 		{
-			STRPTR name;
+			const UBYTE * name;
 			LONG name_len;
 			LONG i;
 
@@ -4324,6 +4361,10 @@ Action_ExamineObject(
 				if(name[i] == SMB_PATH_SEPARATOR)
 				{
 					name = &name[i+1];
+
+					/* We just lost a character and need to account for it. */
+					name_len--;
+
 					break;
 				}
 			}
@@ -4345,7 +4386,7 @@ Action_ExamineObject(
 
 				/* Try to decode the file file, translating it into ISO 8859-1 format. */
 				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-				
+
 				/* Decoding error occured, or the decoded name would be longer than
 				 * buffer would allow?
 				 */
@@ -4422,7 +4463,7 @@ Action_ExamineObject(
 /****************************************************************************/
 
 STATIC BOOL
-NameIsAcceptable(STRPTR name,LONG max_len)
+NameIsAcceptable(const UBYTE * name,LONG max_len)
 {
 	BOOL result = FALSE;
 	UBYTE c;
@@ -4455,7 +4496,7 @@ dir_scan_callback_func_exnext(
 	struct FileInfoBlock *	fib,
 	int						unused_fpos,
 	int						nextpos,
-	char *					name,
+	const UBYTE *			name,
 	int						eof,
 	smba_stat_t *			st)
 {
@@ -4473,7 +4514,7 @@ dir_scan_callback_func_exnext(
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if(!NameIsAcceptable((STRPTR)name,sizeof(fib->fib_FileName)) || (st->is_hidden && OmitHidden))
+	if(!NameIsAcceptable(name,sizeof(fib->fib_FileName)) || (st->is_hidden && OmitHidden))
 		goto out;
 
 	name_len = strlen(name);
@@ -4636,7 +4677,7 @@ struct ExAllContext
 	struct ExAllData *		ec_Next;
 	ULONG					ec_BytesLeft;
 	ULONG					ec_MinSize;
-	struct ExAllControl * 	ec_Control;
+	struct ExAllControl *	ec_Control;
 	ULONG					ec_Type;
 	LONG					ec_Error;
 	BOOL					ec_FirstAttempt;
@@ -4647,7 +4688,7 @@ dir_scan_callback_func_exall(
 	struct ExAllContext *	ec,
 	int						unused_fpos,
 	int						nextpos,
-	char *					name,
+	const UBYTE *			name,
 	int						eof,
 	smba_stat_t *			st)
 {
@@ -4684,7 +4725,7 @@ dir_scan_callback_func_exall(
 
 			/* Use the decoded replacement name. */
 			name = decoded_name;
-		}	
+		}
 	}
 
 	/* Skip file and drawer names that we wouldn't be
@@ -4766,7 +4807,7 @@ dir_scan_callback_func_exall(
 				seconds = 0;
 
 			ed->ed_Days		= (seconds / (24 * 60 * 60));
-			ed->ed_Mins 	= (seconds % (24 * 60 * 60)) / 60;
+			ed->ed_Mins		= (seconds % (24 * 60 * 60)) / 60;
 			ed->ed_Ticks	= (seconds % 60) * TICKS_PER_SECOND;
 		}
 
@@ -5049,7 +5090,7 @@ Action_Find(
 	LONG					action,
 	struct FileHandle *		fh,
 	struct FileLock *		parent,
-	APTR					bcpl_name,
+	const void *			bcpl_name,
 	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
@@ -5415,22 +5456,22 @@ Action_Seek(
 		switch(mode)
 		{
 			case OFFSET_BEGINNING:
-	
+
 				mode = 0;
 				break;
-	
+
 			case OFFSET_CURRENT:
-	
+
 				mode = 1;
 				break;
-	
+
 			case OFFSET_END:
-	
+
 				mode = 2;
 				break;
-	
+
 			default:
-	
+
 				error = ERROR_ACTION_NOT_KNOWN;
 				goto out;
 		}
@@ -5647,10 +5688,10 @@ Action_SetFileSize(
 
 STATIC LONG
 Action_SetDate(
-	struct FileLock *	parent,
-	APTR				bcpl_name,
-	struct DateStamp *	ds,
-	LONG *				error_ptr)
+	struct FileLock *			parent,
+	const void *				bcpl_name,
+	const struct DateStamp *	ds,
+	LONG *						error_ptr)
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
@@ -6088,14 +6129,14 @@ Action_FHFromLock(
 
 STATIC LONG
 Action_RenameDisk(
-	APTR	bcpl_name,
-	LONG *	error_ptr)
+	const void *	bcpl_name,
+	LONG *			error_ptr)
 {
 	LONG result = DOSFALSE;
 	LONG error = OK;
 	STRPTR old_name;
 	STRPTR new_name;
-	UBYTE * name;
+	const UBYTE * name;
 	LONG len;
 
 	ENTER();
@@ -6354,8 +6395,8 @@ Action_MoreCache(
 STATIC LONG
 Action_SetComment(
 	struct FileLock *	parent,
-	APTR				bcpl_name,
-	APTR				bcpl_comment,
+	const void *		bcpl_name,
+	const void *		bcpl_comment,
 	LONG *				error_ptr)
 {
 	LONG result = DOSFALSE;
@@ -6611,7 +6652,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					break;
 			}
 
-			LocalPrintf("Connected '%s' to '%s:'; \"Break %ld\" or [Ctrl-C] to stop... ",
+			LocalFPrintf(ZERO, "Connected '%s' to '%s:'; \"Break %ld\" or [Ctrl-C] to stop... ",
 			service_name,name,which);
 
 			Flush(Output());
@@ -6632,7 +6673,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 	old_priority = this_process->pr_Task.tc_Node.ln_Pri;
 	if(old_priority < 10)
 		SetTaskPri((struct Task *)this_process, 10);
-	
+
 	Permit();
 
 	do
@@ -6988,14 +7029,14 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 	 * has already been changed.
 	 */
 	Forbid();
-	
+
 	if(old_priority < 10 && this_process->pr_Task.tc_Node.ln_Pri == 10)
 		SetTaskPri((struct Task *)this_process, old_priority);
-	
+
 	Permit();
 
 	if(sign_off)
-		LocalPrintf("stopped.\n");
+		LocalFPrintf(ZERO, "stopped.\n");
 
 	LEAVE();
 }
@@ -7083,7 +7124,7 @@ strlcat(char *dst, const char *src, size_t siz)
 
 		(*d) = '\0';
 
-		result = dlen + (s - src);	 /* count does not include NUL */
+		result = dlen + (s - src);	/* count does not include NUL */
 	}
 
 	return(result);

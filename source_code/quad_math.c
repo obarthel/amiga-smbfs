@@ -29,7 +29,7 @@
 /* Divide a 64 bit integer by a 32 bit integer, filling in a 64 bit quotient
    and returning a 32 bit remainder. */
 ULONG
-divide_64_by_32(QUAD * dividend,ULONG divisor,QUAD * quotient)
+divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient)
 {
 	QUAD dividend_cdef = (*dividend);
 	ULONG dividend_ab = 0;

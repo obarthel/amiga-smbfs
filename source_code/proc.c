@@ -72,8 +72,8 @@ static INLINE word smb_bcc(const byte *packet);
 static INLINE int smb_verify(const byte *packet, int command, int wct, int bcc);
 static byte *smb_encode_dialect(byte *p, const byte *name, int len);
 static byte *smb_encode_ascii(byte *p, const byte *name, int len);
-static void smb_encode_vblock(byte *p, const byte *data, word len, int unused_fs);
-static byte *smb_decode_data(const byte *p, byte *data, word *data_len, int fs);
+static void smb_encode_vblock(byte *p, const byte *data, word len);
+static byte *smb_decode_data(const byte *p, byte *data, word *data_len);
 static byte *smb_name_mangle(byte *p, const byte *name);
 static int date_dos2unix(unsigned short time_value, unsigned short date);
 static void date_unix2dos(int unix_date, unsigned short *time_value, unsigned short *date);
@@ -305,7 +305,7 @@ smb_encode_ascii (byte * p, const byte * name, int len)
 }
 
 static void
-smb_encode_vblock (byte * p, const byte * data, word len, int unused_fs)
+smb_encode_vblock (byte * p, const byte * data, word len)
 {
 	(*p++) = 5;
 	p = smb_encode_word (p, len);
@@ -313,7 +313,7 @@ smb_encode_vblock (byte * p, const byte * data, word len, int unused_fs)
 }
 
 static byte *
-smb_decode_data (const byte * p, byte * data, word * data_len, int unused_fs)
+smb_decode_data (const byte * p, byte * data, word * data_len)
 {
 	word len;
 
@@ -478,9 +478,11 @@ smb_valid_packet (const byte * packet)
 static INLINE int
 smb_verify (const byte * packet, int command, int wct, int bcc)
 {
-	return (SMB_CMD (packet) == command &&
+	return (
+		SMB_CMD (packet) == command &&
 		SMB_WCT (packet) >= wct &&
-		(bcc == -1 || SMB_BCC (packet) >= bcc)) ? 0 : -EIO;
+		(bcc == -1 || SMB_BCC (packet) >= bcc)
+	) ? 0 : -EIO;
 }
 
 static int
@@ -655,7 +657,13 @@ smb_dump_packet (const byte * packet)
    returns 0, you can be quite sure that everything went well. When
    the answer is <=0, the returned number is a valid unix errno. */
 static int
-smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
+smb_request_ok_with_payload (
+	struct smb_server *s,
+	int command,
+	int wct,
+	int bcc,
+	const void * payload,
+	int payload_size)
 {
 	int result;
 	int error;
@@ -663,7 +671,7 @@ smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
 	s->rcls = 0;
 	s->err = 0;
 
-	result = smb_request (s);
+	result = smb_request (s, payload, payload_size);
 	if (result < 0)
 	{
 		LOG (("smb_request failed\n"));
@@ -728,6 +736,15 @@ smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
 	}
 
 	return(result);
+}
+
+/* Same thing as smb_request_ok(), but without this payload
+ * business...
+ */
+static int
+smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
+{
+	return(smb_request_ok_with_payload (s, command, wct, bcc, NULL, 0));
 }
 
 /* smb_retry: This function should be called when smb_request_ok has
@@ -953,6 +970,8 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 	int result;
 	int error;
 
+	ASSERT( count <= 65535 );
+
 	smb_setup_header_exclusive (server, SMBread, 5, 0);
 
 	WSET (buf, smb_vwv0, finfo->fileid);
@@ -968,7 +987,11 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 
 	returned_count = WVAL (buf, smb_vwv0);
 
-	smb_decode_data (SMB_BUF (server->packet), data, &data_len, fs);
+	/* ZZZ olsen 2018-05-01: this should not be necessary; we should be
+	 *                       able to break this down into two subsequent
+	 *                       recv() calls.
+	 */
+	smb_decode_data (SMB_BUF (server->packet), data, &data_len);
 
 	if (returned_count != data_len)
 	{
@@ -996,6 +1019,8 @@ smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t of
 	char *buf = server->packet;
 	int result;
 
+	ASSERT( count <= 65535 );
+
 	smb_setup_header_exclusive (server, SMBreadbraw, 8, 0);
 
 	WSET (buf, smb_vwv0, finfo->fileid);
@@ -1017,6 +1042,8 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	char *buf = server->packet;
 	byte *p;
 
+	ASSERT( count < 65535 );
+
 	p = smb_setup_header_exclusive (server, SMBwrite, 5, count + 3);
 	WSET (buf, smb_vwv0, finfo->fileid);
 	WSET (buf, smb_vwv1, count);
@@ -1025,15 +1052,13 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 
 	(*p++) = 1;
 	WSET (p, 0, count);
-	memcpy (p + 2, data, count);
 
-	if ((res = smb_request_ok (server, SMBwrite, 1, 0)) >= 0)
+	if ((res = smb_request_ok_with_payload (server, SMBwrite, 1, 0, data, count)) >= 0)
 		res = WVAL (buf, smb_vwv0);
 
 	return res;
 }
 
-/* count must be <= 65535 */
 int
 smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data)
 {
@@ -1043,6 +1068,8 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	long max_len;
 	long len;
 	byte *p;
+
+	ASSERT( count <= 65535 );
 
 	LOG (("number of bytes to send = %ld\n", count));
 
@@ -1068,10 +1095,11 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	 *
 	 * This leaves 'max_buffer_size' - 59 for the payload.
 	 */
-	if(server->max_raw_size < server->max_buffer_size)
-		max_len = server->max_raw_size - 59 - NETBIOS_HEADER_SIZE;
-	else
-		max_len = server->max_buffer_size - 59 - NETBIOS_HEADER_SIZE;
+	max_len = server->max_buffer_size;
+	if(max_len > 65535)
+		max_len = 65535;
+
+	max_len -= 59 - NETBIOS_HEADER_SIZE;
 
 	LOG(("maximum length for payload = %ld bytes\n", max_len));
 
@@ -1116,12 +1144,9 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 		WSET (buf, smb_vwv10, 0);
 	}
 
-	if (len > 0)
-		memcpy (p, data, len);
-
 	LOG(("requesting SMBwritebraw\n"));
 
-	result = smb_request_ok (server, SMBwritebraw, 1, 0);
+	result = smb_request_ok_with_payload (server, SMBwritebraw, 1, 0, data, len);
 
 	LOG (("first request returned %ld\n", result));
 
@@ -1138,6 +1163,8 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	if(count > 0)
 	{
 		LOG(("sending %ld bytes of data (raw)\n",count));
+
+		ASSERT( count <= 65535 );
 
 		result = smb_request_write_raw (server, data, count);
 
@@ -1192,7 +1219,7 @@ smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 
  retry:
 
-	smb_setup_header (server, SMBlseek, 4,0);
+	smb_setup_header (server, SMBlseek, 4, 0);
 
 	WSET (buf, smb_vwv0, finfo->fileid);
 	WSET (buf, smb_vwv1, mode);
@@ -1253,7 +1280,7 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct s
 		if (smb_retry (server))
 			goto retry;
 	}
-	
+
 	return result;
 }
 
@@ -1510,7 +1537,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 			WSET (buf, smb_vwv0, entries_asked);
 			WSET (buf, smb_vwv1, aDIR);
 			p = smb_encode_ascii (p, "", 0);
-			(void) smb_encode_vblock (p, status, SMB_STATUS_SIZE, 0);
+			(void) smb_encode_vblock (p, status, SMB_STATUS_SIZE);
 		}
 
 		if ((error = smb_request_ok (server, SMBsearch, 1, -1)) < 0)
@@ -1709,13 +1736,14 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 			if (finfo != NULL)
 			{
 				strlcpy (finfo->complete_path, p + 27, finfo->complete_path_size);
-				finfo->len = strlen (finfo->complete_path);
-				finfo->size = DVAL (p, 16);
-				finfo->attr = BVAL (p, 24);
-				finfo->ctime = date_dos2unix (WVAL (p, 6), WVAL (p, 4));
-				finfo->atime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
-				finfo->mtime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
-				finfo->wtime = finfo->mtime;
+
+				finfo->len		= strlen (finfo->complete_path);
+				finfo->size		= DVAL (p, 16);
+				finfo->attr		= BVAL (p, 24);
+				finfo->ctime	= date_dos2unix (WVAL (p, 6), WVAL (p, 4));
+				finfo->atime	= date_dos2unix (WVAL (p, 10), WVAL (p, 8));
+				finfo->mtime	= date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+				finfo->wtime	= finfo->mtime;
 
 				#if DEBUG
 				{
@@ -1756,13 +1784,14 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 			if (finfo != NULL)
 			{
 				strlcpy (finfo->complete_path, p + 31, finfo->complete_path_size);
-				finfo->len = strlen (finfo->complete_path);
-				finfo->size = DVAL (p, 16);
-				finfo->attr = BVAL (p, 24);
-				finfo->ctime = date_dos2unix (WVAL (p, 6), WVAL (p, 4));
-				finfo->atime = date_dos2unix (WVAL (p, 10), WVAL (p, 8));
-				finfo->mtime = date_dos2unix (WVAL (p, 14), WVAL (p, 12));
-				finfo->wtime = finfo->mtime;
+
+				finfo->len		= strlen (finfo->complete_path);
+				finfo->size		= DVAL (p, 16);
+				finfo->attr		= BVAL (p, 24);
+				finfo->ctime	= date_dos2unix (WVAL (p, 6), WVAL (p, 4));
+				finfo->atime	= date_dos2unix (WVAL (p, 10), WVAL (p, 8));
+				finfo->mtime	= date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+				finfo->wtime	= finfo->mtime;
 
 				#if DEBUG
 				{
@@ -1992,7 +2021,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 
 		p = SMB_BUF (outbuf);
 		(*p++) = 0; /* put in a null smb_name */
-		
+
 		/* ZZZ the following may be unnecessary, because they
 		 * likely represent random data used for alignment
 		 * padding purposes.
@@ -2297,12 +2326,12 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
 	if ((result = smb_request_ok (server, SMBgetattrE, 11, 0)) < 0)
 		goto out;
 
-	entry->ctime = date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
-	entry->atime = date_dos2unix (WVAL (buf, smb_vwv3), WVAL (buf, smb_vwv2));
-	entry->mtime = date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
-	entry->wtime = entry->mtime;
-	entry->size = DVAL (buf, smb_vwv6);
-	entry->attr = WVAL (buf, smb_vwv10);
+	entry->ctime	= date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
+	entry->atime	= date_dos2unix (WVAL (buf, smb_vwv3), WVAL (buf, smb_vwv2));
+	entry->mtime	= date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
+	entry->wtime	= entry->mtime;
+	entry->size		= DVAL (buf, smb_vwv6);
+	entry->attr		= WVAL (buf, smb_vwv10);
 
 	#if DEBUG
 	{
@@ -2425,8 +2454,8 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr)
  ****************************************************************************/
 struct smb_prots
 {
-	enum smb_protocol prot;
-	const char *name;
+	enum smb_protocol	prot;
+	const char *		name;
 };
 
 /* smb_proc_reconnect: We expect the server to be locked, so that you
@@ -2512,12 +2541,12 @@ smb_proc_reconnect (struct smb_server *server)
 	if (server->packet != NULL)
 		free (server->packet);
 
-	server->packet_size = packet_size + packet_fudge_size;
+	server->packet_size = packet_size;
 
 	/* Add a bit of fudge to account for the NetBIOS session
 	 * header and whatever else might show up...
 	 */
-	server->packet = malloc (packet_size + packet_fudge_size);
+	server->packet = malloc (server->packet_size + packet_fudge_size);
 	if (server->packet == NULL)
 	{
 		LOG (("smb_proc_connect: No memory! Bailing out.\n"));
@@ -2531,7 +2560,7 @@ smb_proc_reconnect (struct smb_server *server)
 	if(!server->raw_smb)
 	{
 		/* Start with an RFC1002 session request packet. */
-		p = packet + 4;
+		p = packet + NETBIOS_HEADER_SIZE;
 
 		p = smb_name_mangle (p, server->mount_data.server_name);
 		p = smb_name_mangle (p, server->mount_data.client_name);
@@ -2540,7 +2569,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 		packet[0] = 0x81; /* SESSION REQUEST */
 
-		if ((result = smb_request (server)) < 0)
+		if ((result = smb_request (server, NULL, 0)) < 0)
 		{
 			LOG (("smb_proc_connect: Failed to send SESSION REQUEST.\n"));
 			goto fail;
@@ -2608,7 +2637,9 @@ smb_proc_reconnect (struct smb_server *server)
 		int user_len = strlen (server->mount_data.username)+1;
 		dword server_sesskey;
 
-		LOG (("smb_proc_connect: password = %s\n",server->mount_data.password));
+		/*
+		LOG (("smb_proc_connect: password = %s\n",server->mount_data.password*));
+		*/
 		LOG (("smb_proc_connect: usernam = %s\n",server->mount_data.username));
 		LOG (("smb_proc_connect: blkmode = %ld\n",WVAL (packet, smb_vwv5)));
 
@@ -2619,7 +2650,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 			/* Skip "max mpx count" (1 word) and "max number vcs" (1 word). */
 			p += 2 * sizeof(word);
-			
+
 			p = smb_decode_dword(p, &max_buffer_size);
 			SHOWVALUE (max_buffer_size);
 			p = smb_decode_dword(p, &server->max_raw_size);
@@ -2903,18 +2934,20 @@ smb_proc_reconnect (struct smb_server *server)
 	if(packet_size < (int)max_buffer_size)
 	{
 		SHOWVALUE(packet_size);
-		
+
 		/* We need to allocate a larger packet buffer. */
 		packet_size = max_buffer_size;
-		
+
 		D(("packet size updated to %ld bytes\n", packet_size));
-		
+
 		free (server->packet);
 
 		/* Add a bit of fudge to account for the NetBIOS session
 		 * header and whatever else might show up...
 		 */
-		server->packet = malloc (packet_size + packet_fudge_size);
+		server->packet_size = packet_size;
+
+		server->packet = malloc (server->packet_size + packet_fudge_size);
 		if (server->packet == NULL)
 		{
 			LOG (("smb_proc_connect: No memory! Bailing out.\n"));
@@ -2932,10 +2965,6 @@ smb_proc_reconnect (struct smb_server *server)
 		D(("maximum buffer size limited to %ld bytes\n", max_buffer_size));
 	}
 
-	/* Add a bit of fudge to account for the NetBIOS session
-	 * header and whatever else might show up...
-	 */
-	server->packet_size = packet_size + packet_fudge_size;
 	server->max_buffer_size = max_buffer_size;
 
 	LOG (("smb_proc_connect: Normal exit\n"));

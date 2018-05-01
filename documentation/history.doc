@@ -1192,3 +1192,73 @@ smbfs 1.117 (11.4.2018)
 - Looks like the SMB_COM_WRITE_RAW implementation is really as simple
   as the documentation suggested. Just two packets need to be sent to
   to the server.
+
+
+smbfs 1.118 (29.4.2018)
+
+- Added const qualifier to pointers to immutable data, to identify
+  further trouble spots.
+
+- Replaced some instances of memcpy() with memmove(). For all others
+  a debug version of memcpy() is being used which should log an error
+  if the source/destination should overlap.
+
+- When started as a shell command, error messages now go to
+  stderr, if possible.
+
+- Action_ExamineObject() could remove the leading '\' path separator
+  from the internal representation of the object's path name, but
+  fail to remember that it had truncated the name. This would result
+  in Examine() returning a file/directory name with a trailing NUL
+  character.
+
+  The file system cannot access an object by that name, which means
+  that it would report an error for an object which clearly exists.
+  Fixing this bug might just resolve a number of inexplicable file
+  access errors.
+
+
+smbfs 1.119 (1.5.2018)
+
+- Replaced the constant 4 with what it actually stands for,
+  this being the size of the NetBIOS frame header (NETBIOS_HEADER_SIZE).
+
+- The debug output no longer includes any plain text passwords.
+  Note that weakly-encrypted password data may still show up,
+  though.
+
+- The size of the packet buffer used for transmission and
+  reception of NetBIOS frames is now stored properly and does
+  not include the extra 512 byte safety margin added to the
+  end.
+
+- How much data the SMB_COM_READ/SMB_COM_WRITE and SMB_COM_WRITE_RAW
+  may receive and transmit is now decoded much more accurately, with
+  the respective limitations (local transmit buffer size, server's
+  reported size limits) taken into account.
+
+- Renamed the various "maximum whatever size" variables used by the
+  SMB_COM_READ/SMB_COM_READ_RAW and SMB_COM_WRITE/SMB_COM_WRITE_RAW
+  commands to make it slightly clearer which respective command the
+  limitations apply to.
+
+
+smbfs 1.120 (1.5.2018)
+
+- Both SMB_COM_WRITE and SMB_COM_WRITE_RAW commands would copy the
+  data to be transmitted into the transmit buffer and then send
+  the transmit buffer contents.
+
+  It is not actually necessary to make this redundant copy because
+  the contents of the NetBIOS frame header and the SMB commands do
+  not depend upon knowledge of what's in the data to be sent. So
+  we just send the header with send() and the data with another
+  send() call. This might improve write performance somewhat.
+
+  Note that the payload of the write operations will no longer
+  show up as part of the SMB dump, as it is transmitted later.
+
+  Similar code exists for SMB_COM_READ, but smbfs will always try
+  to use SMB_COM_READ_RAW first, which does not return its data
+  in a separate NetBIOS frame whose contents first have to be
+  picked apart. No change should be necessary here.

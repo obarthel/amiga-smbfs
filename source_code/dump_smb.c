@@ -161,13 +161,13 @@ fill_header(const unsigned char * packet,int length,struct smb_header * header)
 	header->raw_packet_size = length;
 	header->raw_packet = (char *)packet;
 
-	memcpy(header->signature,next_data_bytes(packet,4,&offset),4);
+	memmove(header->signature,next_data_bytes(packet,4,&offset),4);
 	header->command = next_data_byte(packet,&offset);
 	header->status = next_data_dword(packet,&offset);
 	header->flags = next_data_byte(packet,&offset);
 	header->flags2 = next_data_word(packet,&offset);
 	header->extra.pid_high = next_data_word(packet,&offset);
-	memcpy(header->extra.signature,next_data_words(packet,4,&offset),sizeof(unsigned short) * 4);
+	memmove(header->extra.signature,next_data_words(packet,4,&offset),sizeof(unsigned short) * 4);
 	skip_data_words(packet,1,&offset);
 	header->tid = next_data_word(packet,&offset);
 	header->pid = next_data_word(packet,&offset);
@@ -420,7 +420,7 @@ add_lb_flag(struct line_buffer *lb,const char * str)
 	{
 		if(lb->length + len < sizeof(lb->line)-1)
 		{
-			memcpy(&lb->line[lb->length],str,len);
+			memmove(&lb->line[lb->length],str,len);
 			lb->length += len;
 
 			lb->line[lb->length] = '\0';
@@ -430,10 +430,10 @@ add_lb_flag(struct line_buffer *lb,const char * str)
 	{
 		if(lb->length + 2 + len < sizeof(lb->line)-1)
 		{
-			memcpy(&lb->line[lb->length],", ",2);
+			memmove(&lb->line[lb->length],", ",2);
 			lb->length += 2;
 
-			memcpy(&lb->line[lb->length],str,len);
+			memmove(&lb->line[lb->length],str,len);
 			lb->length += len;
 
 			lb->line[lb->length] = '\0';

@@ -39,7 +39,7 @@ typedef struct
 
 /****************************************************************************/
 
-ULONG divide_64_by_32(QUAD * dividend,ULONG divisor,QUAD * quotient);
+ULONG divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient);
 ULONG subtract_64_from_64_to_64(const QUAD * const minuend,const QUAD * const subtrahend,QUAD * difference);
 
 /****************************************************************************/

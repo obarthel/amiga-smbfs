@@ -126,7 +126,7 @@ extern int h_errno;
 
 /****************************************************************************/
 
-extern int BroadcastNameQuery(char *name, char *scope, UBYTE *address);
+extern int BroadcastNameQuery(const char *name, const char *scope, UBYTE *address);
 extern LONG CompareNames(STRPTR a,STRPTR b);
 extern LONG GetTimeZoneDelta(VOID);
 extern STRPTR amitcp_strerror(int error);
@@ -159,7 +159,18 @@ extern APTR AllocateMemory(ULONG size);
 /****************************************************************************/
 
 #undef memcpy
+
+#if defined (DEBUG)
+	#define memcpy(to,from,size) \
+		do \
+		{ \
+			ASSERT(((const char *)(to)) >= ((const char *)(from))+(size) || ((const char *)(from)) >= ((const char*)(to))+(size)); \
+			CopyMem((APTR)(from),(APTR)(to),(ULONG)(size)); \
+		} \
+		while(0)
+#else
 #define memcpy(to,from,size) ((void)CopyMem((APTR)(from),(APTR)(to),(ULONG)(size)))
+#endif /* DEBUG */
 
 /****************************************************************************/
 

@@ -29,34 +29,34 @@
 
 typedef struct dircache
 {
-	int base;
-	int len;
-	int eof;						/* cache end is eof */
-	long created_at;				/* for invalidation */
-	struct smba_file *cache_for;	/* owner of this cache */
-	int cache_size;
-	struct smb_dirent cache[1];
+	int					base;
+	int					len;
+	int					eof;		/* cache end is eof */
+	long				created_at;	/* for invalidation */
+	struct smba_file *	cache_for;	/* owner of this cache */
+	int					cache_size;
+	struct smb_dirent	cache[1];
 } dircache_t;
 
 /* opaque structures for server and files: */
 struct smba_server
 {
-	struct smb_server server;
-	struct MinList open_files;
-	dircache_t * dircache;
-	unsigned supports_E:1;
-	unsigned supports_E_known:1;
+	struct smb_server	server;
+	struct MinList		open_files;
+	dircache_t *		dircache;
+	unsigned			supports_E:1;
+	unsigned			supports_E_known:1;
 };
 
 struct smba_file
 {
-	struct MinNode node;
-	struct smba_server *server;
-	struct smb_dirent dirent;
-	long attr_time;					/* time when dirent was read */
-	dircache_t *dircache;			/* content cache for directories */
-	unsigned attr_dirty:1;			/* attribute cache is dirty */
-	unsigned is_valid:1;			/* server was down, entry removed, ... */
+	struct MinNode			node;
+	struct smba_server *	server;
+	struct smb_dirent		dirent;
+	long					attr_time;		/* time when dirent was read */
+	dircache_t *			dircache;		/* content cache for directories */
+	unsigned				attr_dirty:1;	/* attribute cache is dirty */
+	unsigned				is_valid:1;		/* server was down, entry removed, ... */
 };
 
 /*****************************************************************************/
@@ -67,6 +67,11 @@ struct smba_file
  * NetBIOS over TCP.
  */
 #define NETBIOS_HEADER_SIZE 4
+
+/* The NetBIOS frame payload cannot be larger than 131071 bytes,
+ * which is (2^71)-1.
+ */
+#define MAX_NETBIOS_FRAME_SIZE 131071
 
 /*****************************************************************************/
 
@@ -280,14 +285,14 @@ make_open (smba_file_t * f, int need_fid)
 					{
 						if (!s->supports_E_known)
 						{
-							s->supports_E_known = 1;
-							s->supports_E = 0;
+							s->supports_E_known	= 1;
+							s->supports_E		= 0;
 						} /* ignore errors here */
 					}
 					else
 					{
-						s->supports_E_known = 1;
-						s->supports_E = 1;
+						s->supports_E_known	= 1;
+						s->supports_E		= 1;
 					}
 				}
 			}
@@ -297,14 +302,14 @@ make_open (smba_file_t * f, int need_fid)
 			/* don't open directory, initialize directory cache */
 			if (f->dircache != NULL)
 			{
-				f->dircache->cache_for = NULL;
-				f->dircache->len = 0;
-				f->dircache = NULL;
+				f->dircache->cache_for	= NULL;
+				f->dircache->len		= 0;
+				f->dircache				= NULL;
 			}
 		}
 
-		f->attr_time = GetCurrentTime();
-		f->is_valid = 1;
+		f->attr_time	= GetCurrentTime();
+		f->is_valid		= 1;
 	}
 
 	errnum = 0;
@@ -425,8 +430,9 @@ smba_close (smba_file_t * f)
 int
 smba_read (smba_file_t * f, char *data, long len, long offset)
 {
+	int max_receive = f->server->server.max_recv;
 	int num_bytes_read = 0;
-	int maxsize, count, result = 0;
+	int count, result = 0;
 	int errnum;
 
 	errnum = make_open (f, 1);
@@ -441,16 +447,23 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	/* SMB_COM_READ_RAW and SMB_COM_WRITE_RAW supported? */
 	if (f->server->server.capabilities & CAP_RAW_MODE)
 	{
-		dword max_raw_size = f->server->server.max_raw_size;
+		int max_raw_size = f->server->server.max_raw_size;
 		int n;
 
 		do
 		{
-			n = min(len,(long)max_raw_size);
-
 			/* SMB_COM_READ_RAW can only read up to 65535 bytes. */
-			if(n > 65535)
-				n = 65535;
+			n = min(len, 65535);
+
+			/* The maximum number of bytes to be read in raw
+			 * mode may be limited, too.
+			 */
+			if(n > max_raw_size)
+				n = max_raw_size;
+
+			/* Limit how much data we are prepared to receive? */
+			if(n > max_receive)
+				n = max_receive;
 
 			result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, n, data);
 			if(result <= 0)
@@ -478,6 +491,8 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 	 */
 	if (result <= 0 && num_bytes_read == 0)
 	{
+		int max_size_smb_com_read;
+
 		/* Calculate maximum number of bytes that could be transferred with
 		 * a single SMBread packet...
 		 *
@@ -499,14 +514,29 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 		 *
 		 * This leaves 'max_buffer_size' - 48 for the payload.
 		 */
-		/*maxsize = f->server->server.max_buffer_size - SMB_HEADER_LEN - 5 * 2 - 5;*/
-		maxsize = f->server->server.max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
+		/*max_size_smb_com_read = f->server->server.max_buffer_size - SMB_HEADER_LEN - 5 * 2 - 5;*/
+		max_size_smb_com_read = f->server->server.max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
+
+		/* ZZZ SMB_COM_READ uses the packet buffer to receive
+		 * the data, which is why there is another limit to how
+		 * much data can be received.
+		 */
+		if(max_size_smb_com_read > f->server->server.packet_size - 48 - NETBIOS_HEADER_SIZE)
+			max_size_smb_com_read = f->server->server.packet_size - 48 - NETBIOS_HEADER_SIZE;
 
 		do
 		{
-			count = min(len,maxsize);
+			/* SMB_COM_READ can read only up to 65535 bytes anyway. */
+			count = min(len, 65535);
 			if(count == 0)
 				break;
+
+			if(count > max_size_smb_com_read)
+				count = max_size_smb_com_read;
+
+			/* Limit how much data we are prepared to receive? */
+			if(count > max_receive)
+				count = max_receive;
 
 			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, data, 0);
 			if (result < 0)
@@ -543,7 +573,7 @@ int
 smba_write (smba_file_t * f, char *data, long len, long offset)
 {
 	dword max_buffer_size;
-	int maxsize, count, result;
+	int max_size_smb_com_write, count, result;
 	int num_bytes_written = 0;
 	int errnum;
 
@@ -579,14 +609,21 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 	 *
 	 * This leaves 'max_buffer_size' - 48 for the payload.
 	 */
-	/*maxsize = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
-	maxsize = max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
+	/*max_size_smb_com_write = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
+	max_size_smb_com_write = max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
 
-	LOG (("len = %ld, maxsize = %ld\n", len, maxsize));
+	/* SMB_COM_WRITE cannot transmit more than 65535 bytes. */
+	if(max_size_smb_com_write > 65535)
+		max_size_smb_com_write = 65535;
 
-	if (len <= maxsize)
+	LOG (("len = %ld, max_size_smb_com_write = %ld\n", len, max_size_smb_com_write));
+
+	/* Can we transmit this data with a single SMBwrite command? */
+	if (len <= max_size_smb_com_write)
 	{
 		LOG (("use single write\n"));
+
+		ASSERT( len <= 65535 );
 
 		/* Use a single SMBwrite packet whenever possible instead of a SMBwritebraw
 		 * because that requires two packets to be sent.
@@ -605,9 +642,9 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 
 		if (f->server->server.capabilities & CAP_RAW_MODE)
 		{
-			dword max_raw_size = f->server->server.max_raw_size;
+			int max_raw_size = f->server->server.max_raw_size;
 			int prefer_write_raw = f->server->server.prefer_write_raw;
-			int max_xmit;
+			int max_size_smb_com_write_raw;
 			int n;
 
 			/* Try to send the maximum number of bytes with the two SMBwritebraw packets.
@@ -623,51 +660,45 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 			 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+
 			 * 2(dataoffset) = 25 bytes
 			 *
-			 * The data poart of a SMB_COM_WRITE_RAW command accounts for
+			 * The data part of a SMB_COM_WRITE_RAW command accounts for
 			 * 2(bytecount) = 2 bytes
 			 *
 			 * This leaves 'max_buffer_size' - 59 for the payload.
 			 */
-			/*max_xmit = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
-			max_xmit = max_buffer_size - 59 - NETBIOS_HEADER_SIZE + min(max_buffer_size, max_raw_size);
+			/*max_size_smb_com_write_raw = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
+			max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 59 - NETBIOS_HEADER_SIZE;
 
-			LOG (("len = %ld, max_xmit = %ld\n", len, max_xmit));
+			/* SMB_COM_WRITE_RAW cannot transmit more than 65535 bytes. */
+			if(max_size_smb_com_write_raw > 65535)
+				max_size_smb_com_write_raw = 65535;
 
-			/* If the number of bytes that should be transferred exceed the number of
-			 * bytes that could be transferred by a single call to smb_proc_write_raw(),
-			 * the data is transfered as before: Only by the second packet. This
-			 * prevents the CPU from copying the data into the transferbuffer.
-			 */
-			if (prefer_write_raw || max_xmit < len)
-			{
-				max_xmit = max_buffer_size - NETBIOS_HEADER_SIZE;
-
-				LOG (("max_xmit changed to %ld\n", max_xmit));
-			}
+			LOG (("len = %ld, max_size_smb_com_write_raw = %ld\n", len, max_size_smb_com_write_raw));
 
 			do
 			{
-				n = min(len,max_xmit);
+				n = min(len, max_size_smb_com_write_raw);
 
-				if (!prefer_write_raw && n <= maxsize)
+				ASSERT( n > 0 );
+
+				/* Should we try and send this data with a single SMB_COM_WRITE? */
+				if (!prefer_write_raw && n <= max_size_smb_com_write)
 				{
-					LOG (("n (%ld) <= maxsize (%ld)\n", n, maxsize));
+					LOG (("n (%ld) <= max_size_smb_com_write (%ld)\n", n, max_size_smb_com_write));
+
+					ASSERT( n <= 65535 );
 
 					/* Use a single SMBwrite packet whenever possible instead of a
 					 * SMBwritebraw because that requires two packets to be sent.
 					 */
 					result = smb_proc_write (&f->server->server, &f->dirent, offset, n, data);
 				}
+				/* Use SMB_COM_WRITE_RAW instead. */
 				else
 				{
-					if(n > (int)max_raw_size)
+					if(n > max_raw_size)
 						n = max_raw_size;
 
-					/* Maximum SMB_COM_RAW_WRITE length is 65535 bytes. */
-					if(n > 65535)
-						n = 65535;
-
-					LOG (("n (%ld) > maxsize (%ld)\n", n, maxsize));
+					ASSERT( n <= 65535 );
 
 					result = smb_proc_write_raw (&f->server->server, &f->dirent, offset, n, data);
 				}
@@ -695,13 +726,15 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		 */
 		if (result <= 0 && num_bytes_written == 0)
 		{
-			LOG (("resume with single writes len = %ld, maxsize = %ld\n", len, maxsize));
+			LOG (("resume with single writes len = %ld, max_size_smb_com_write = %ld\n", len, max_size_smb_com_write));
 
 			do
 			{
-				count = min(len,maxsize);
+				count = min(len, max_size_smb_com_write);
 				if(count == 0)
 					break;
+
+				ASSERT( count <= 65535 );
 
 				result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data);
 				if (result < 0)
@@ -732,7 +765,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
 		f->attr_time = -1;
 	else if (result > 0)
 		f->dirent.mtime = GetCurrentTime();
-	
+
 	/* Even if one write access failed, we may have succeeded
 	 * at writing some data. Hence we update the cached file
 	 * size here.
@@ -1028,15 +1061,15 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 
 		LOG (("delivering '%s', cache_index=%ld, eof=%ld\n", f->dircache->cache[o].complete_path, cache_index, eof));
 
-		data.is_dir = (f->dircache->cache[o].attr & aDIR) != 0;
-		data.is_wp = (f->dircache->cache[o].attr & aRONLY) != 0;
-		data.is_hidden = (f->dircache->cache[o].attr & aHIDDEN) != 0;
-		data.is_system = (f->dircache->cache[o].attr & aSYSTEM) != 0;
-		data.is_archive = (f->dircache->cache[o].attr & aARCH) != 0;
-		data.size = f->dircache->cache[o].size;
-		data.atime = f->dircache->cache[o].atime;
-		data.ctime = f->dircache->cache[o].ctime;
-		data.mtime = f->dircache->cache[o].mtime;
+		data.is_dir		= (f->dircache->cache[o].attr & aDIR) != 0;
+		data.is_wp		= (f->dircache->cache[o].attr & aRONLY) != 0;
+		data.is_hidden	= (f->dircache->cache[o].attr & aHIDDEN) != 0;
+		data.is_system	= (f->dircache->cache[o].attr & aSYSTEM) != 0;
+		data.is_archive	= (f->dircache->cache[o].attr & aARCH) != 0;
+		data.size		= f->dircache->cache[o].size;
+		data.atime		= f->dircache->cache[o].atime;
+		data.ctime		= f->dircache->cache[o].ctime;
+		data.mtime		= f->dircache->cache[o].mtime;
 
 		if ((*callback) (d, cache_index, cache_index + 1, f->dircache->cache[o].complete_path, eof, &data))
 			break;
@@ -1736,7 +1769,7 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 	}
 
 	invalidate_dircache(server, NULL);
-	
+
 	free_dircache(old_dircache);
 
 	server->dircache = new_cache;

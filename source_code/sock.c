@@ -18,6 +18,15 @@
 
 /*****************************************************************************/
 
+/* Some message size calculations include the size of the NetBIOS session
+ * header, which may not be necessary. The "message size" in question is not
+ * the same as the underlying transport layer, which in this case is
+ * NetBIOS over TCP.
+ */
+#define NETBIOS_HEADER_SIZE 4
+
+/*****************************************************************************/
+
 #include "smb_abstraction.h"
 #include "dump_smb.h"
 
@@ -60,7 +69,7 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
  re_recv:
 
 	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
-	result = recvfrom (sock_fd, netbios_session_buf, 4, 0, NULL, NULL);
+	result = recvfrom (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE, 0, NULL, NULL);
 	if (result < 0)
 	{
 		LOG (("smb_receive_raw: recv error = %ld\n", errno));
@@ -68,24 +77,24 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 		goto out;
 	}
 
-	if (result < 4)
+	if (result < NETBIOS_HEADER_SIZE)
 	{
-		LOG (("smb_receive_raw: got less than 4 bytes\n"));
+		LOG (("smb_receive_raw: got less than %ld bytes\n", NETBIOS_HEADER_SIZE));
 		result = -EIO;
 		goto out;
 	}
 
-	netbios_session_payload_size = (int)smb_len (netbios_session_buf);
+	netbios_session_payload_size = (int)smb_len(netbios_session_buf);
 	SHOWVALUE(netbios_session_payload_size);
 
 	#if defined(DUMP_SMB)
 	{
 		if(netbios_session_buf[0] != 0x00 && netbios_session_payload_size > 0)
 		{
-			if(netbios_session_payload_size > 256 - 4)
-				netbios_session_payload_size = 256 - 4;
+			if(netbios_session_payload_size > 256 - NETBIOS_HEADER_SIZE)
+				netbios_session_payload_size = 256 - NETBIOS_HEADER_SIZE;
 
-			result = recvfrom (sock_fd, &netbios_session_buf[4], netbios_session_payload_size - 4, 0, NULL, NULL);
+			result = recvfrom (sock_fd, &netbios_session_buf[NETBIOS_HEADER_SIZE], netbios_session_payload_size - NETBIOS_HEADER_SIZE, 0, NULL, NULL);
 			if (result < 0)
 			{
 				LOG (("smb_receive_raw: recv error = %ld\n", errno));
@@ -93,13 +102,13 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 				goto out;
 			}
 
-			if(result < netbios_session_payload_size - 4)
+			if(result < netbios_session_payload_size - NETBIOS_HEADER_SIZE)
 			{
 				result = -EIO;
 				goto out;
 			}
 
-			dump_netbios_header(__FILE__,__LINE__,netbios_session_buf,&netbios_session_buf[4],netbios_session_payload_size);
+			dump_netbios_header(__FILE__,__LINE__,netbios_session_buf,&netbios_session_buf[NETBIOS_HEADER_SIZE],netbios_session_payload_size);
 		}
 		else
 		{
@@ -146,15 +155,15 @@ smb_receive_raw (const struct smb_server *server, int sock_fd, unsigned char *ta
 	if (want_header)
 	{
 		/* Check for buffer overflow. */
-		if(len + 4 > max_raw_length)
+		if(len + NETBIOS_HEADER_SIZE > max_raw_length)
 		{
 			LOG (("smb_receive_raw: Received length (%ld) > max_xmit (%ld)!\n", len, max_raw_length));
 			result = -EIO;
 			goto out;
 		}
 	
-		memcpy (target, netbios_session_buf, 4);
-		target += 4;
+		memcpy (target, netbios_session_buf, NETBIOS_HEADER_SIZE);
+		target += NETBIOS_HEADER_SIZE;
 	}
 
 	for(already_read = 0 ; already_read < len ; already_read += result)
@@ -192,8 +201,10 @@ smb_receive (struct smb_server *server, int sock_fd)
 	byte * packet = server->packet;
 	int result;
 
+	ASSERT( server->max_recv <= server->packet_size );
+
 	result = smb_receive_raw (server, sock_fd, packet,
-	                          server->max_recv - 4, /* max_xmit in server includes NB header */
+	                          server->max_recv - NETBIOS_HEADER_SIZE, /* max_xmit in server includes NB header */
 	                          1); /* We want the header */
 	if (result < 0)
 	{
@@ -412,7 +423,7 @@ smb_connect (struct smb_server *server)
  * case of error.
  */
 int
-smb_request (struct smb_server *server)
+smb_request (struct smb_server *server, const void * payload, int payload_size)
 {
 	int len, result;
 	int sock_fd = server->mount_data.fd;
@@ -434,13 +445,24 @@ smb_request (struct smb_server *server)
 	/* Length includes the NetBIOS session header (4 bytes), which
 	 * is prepended to the packet to be sent.
 	 */
-	len = smb_len (buffer) + 4;
+	len = smb_len (buffer) + NETBIOS_HEADER_SIZE;
 
-	LOG (("smb_request: len = %ld cmd = 0x%lx\n", len, buffer[8]));
+	/* If there is a separate payload, only send the header
+	 * here and take of the payload later.
+	 */
+	if(payload != NULL && payload_size > 0)
+	{
+		ASSERT( payload_size < smb_len(buffer) );
+		ASSERT( len > payload_size );
+
+		len -= payload_size;
+	}
+
+	LOG (("smb_request: len = %ld, cmd = 0x%lx, payload=%lx, payload_size=%ld\n", len, buffer[8], payload, payload_size));
 
 	#if defined(DUMP_SMB)
-	dump_netbios_header(__FILE__,__LINE__,buffer,&buffer[4],len);
-	dump_smb(__FILE__,__LINE__,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_netbios_header(__FILE__,__LINE__,buffer,&buffer[NETBIOS_HEADER_SIZE],len);
+	dump_smb(__FILE__,__LINE__,0,buffer+NETBIOS_HEADER_SIZE,len-NETBIOS_HEADER_SIZE,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	result = send (sock_fd, (void *) buffer, len, 0);
@@ -449,11 +471,22 @@ smb_request (struct smb_server *server)
 		LOG (("smb_request: send error = %ld\n", errno));
 
 		result = (-errno);
+		goto out;
 	}
-	else
+
+	if(payload != NULL && payload_size > 0)
 	{
-		result = smb_receive (server, sock_fd);
+		result = send (sock_fd, (void *)payload, payload_size, 0);
+		if (result < 0)
+		{
+			LOG (("smb_request: payload send error = %ld\n", errno));
+
+			result = (-errno);
+			goto out;
+		}
 	}
+
+	result = smb_receive (server, sock_fd);
 
  out:
 
@@ -486,13 +519,13 @@ smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, ch
 	/* Length includes the NetBIOS session header (4 bytes), which
 	 * is prepended to the packet to be sent.
 	 */
-	len = smb_len (buffer) + 4;
+	len = smb_len (buffer) + NETBIOS_HEADER_SIZE;
 
 	LOG (("smb_request: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
 
 	#if defined(DUMP_SMB)
 	dump_netbios_header(__FILE__,__LINE__,buffer,NULL,0);
-	dump_smb(__FILE__,__LINE__,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_smb(__FILE__,__LINE__,0,buffer+NETBIOS_HEADER_SIZE,len-NETBIOS_HEADER_SIZE,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	result = send (sock_fd, (void *) buffer, len, 0);
@@ -537,7 +570,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	/* Length includes the NetBIOS session header (4 bytes), which
 	 * is prepended to the packet to be sent.
 	 */
-	len = smb_len (buffer) + 4;
+	len = smb_len (buffer) + NETBIOS_HEADER_SIZE;
 
 	LOG (("smb_request_read_raw: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
 	LOG (("smb_request_read_raw: target=%lx, max_len=%ld\n", (unsigned int) target, max_len));
@@ -545,7 +578,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 
 	#if defined(DUMP_SMB)
 	dump_netbios_header(__FILE__,__LINE__,buffer,NULL,0);
-	dump_smb(__FILE__,__LINE__,0,buffer+4,len-4,smb_packet_from_consumer,server->max_recv);
+	dump_smb(__FILE__,__LINE__,0,buffer+NETBIOS_HEADER_SIZE,len-NETBIOS_HEADER_SIZE,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
 	/* Request that data should be read in raw mode. */
@@ -585,7 +618,7 @@ int
 smb_request_write_raw (struct smb_server *server, unsigned const char *source, int length)
 {
 	int result;
-	byte nb_header[4];
+	byte nb_header[NETBIOS_HEADER_SIZE];
 	int sock_fd = server->mount_data.fd;
 	int num_bytes_written = 0;
 
@@ -595,6 +628,9 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 		goto out;
 	}
 
+	if(length > 65535)
+		length = 65535;
+
 	/* Send the NetBIOS header. */
 	smb_encode_smb_length (nb_header, length);
 
@@ -602,8 +638,8 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 	dump_netbios_header(__FILE__,__LINE__,nb_header,NULL,0);
 	#endif /* defined(DUMP_SMB) */
 
-	result = send (sock_fd, nb_header, 4, 0);
-	if (result == 4)
+	result = send (sock_fd, nb_header, NETBIOS_HEADER_SIZE, 0);
+	if (result == NETBIOS_HEADER_SIZE)
 	{
 		#if defined(DUMP_SMB)
 		dump_smb(__FILE__,__LINE__,0,source,length,smb_packet_from_consumer,server->max_recv);
@@ -618,7 +654,7 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 			/* Wait for the server to respond. */
 			if(!server->write_behind)
 			{
-				LOG(("waiting for server to respond... "));
+				LOG(("waiting for server to respond...\n"));
 				result = smb_receive (server, sock_fd);
 				LOG(("response = %ld\n", result));
 			}
@@ -629,6 +665,7 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 		}
 		else
 		{
+			LOG(("send() for %ld bytes failed\n", length));
 			result = (-errno);
 		}
 	}

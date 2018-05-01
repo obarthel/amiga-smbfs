@@ -68,11 +68,12 @@ int smb_proc_connect(struct smb_server *server);
 
 /* sock.c */
 int smb_receive (struct smb_server *server, int sock_fd);
+int smb_receive_with_payload (struct smb_server *server, int sock_fd, void * payload, int payload_size, int * payload_size_received);
 int smb_catch_keepalive(struct smb_server *server);
 int smb_dont_catch_keepalive(struct smb_server *server);
 int smb_release(struct smb_server *server);
 int smb_connect(struct smb_server *server);
-int smb_request(struct smb_server *server);
+int smb_request(struct smb_server *server,const void * payload,int payload_size);
 int smb_trans2_request(struct smb_server *server, int *data_len, int *param_len, char **data, char **param);
 int smb_request_read_raw(struct smb_server *server, unsigned char *target, int max_len);
 int smb_request_write_raw(struct smb_server *server, unsigned const char *source, int length);
