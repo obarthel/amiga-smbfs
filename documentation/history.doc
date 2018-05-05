@@ -1262,3 +1262,56 @@ smbfs 1.120 (1.5.2018)
   to use SMB_COM_READ_RAW first, which does not return its data
   in a separate NetBIOS frame whose contents first have to be
   picked apart. No change should be necessary here.
+
+
+smbfs 1.121 (4.5.2018)
+
+- Replaced sendto() with send(), and recvfrom() with recv() where
+  possible.
+
+- When reading directory entries with ExNext(), entries with
+  names longer than 107 characters will now be skipped. It worked
+  like that for Examine() already, which flagged overly long
+  names with the error code ERROR_INVALID_COMPONENT_NAME.
+
+- Dropped the stub functions smb_request_ok_unlock() and
+  smb_setu_header_exclusive() which were remnants of the
+  original smbfs kernel code but served no practical
+  purpose.
+
+- Added additional buffer overflow checks.
+
+- When reading and decoding directory entries, the buffer to
+  hold the individual names is no longer grown by single
+  bytes, but in steps of 16 characters, if needed.
+
+- Simplified smb_request_write_raw().
+
+- Removed unused local variables and function parameters.
+
+
+smbfs 1.122 (5.5.2018)
+
+- Rewrote smb_receive_trans2() for better readability, replacing
+  the multiple pointer dereferentiations. Any error code returned
+  is now converted from whatever seems most appropriate instead
+  of passing EIO to the caller, expecting the caller to perform
+  the conversion (which it doesn't).
+
+- smb_release() now just closes the socket and does not
+  allocate it again. smb_connect() reallocates the socket
+  if necessary.
+
+- smb_connect() now shows which server IPv4 address is being used.
+
+- Added more debug output to sock.c, especially for all those
+  cases which just returned error code EIO without stating what
+  led to this point.
+
+- proc.c no longer uses type 'word' function parameters and local
+  variables unless these absolutely have to be unsigned 16 bit
+  integers. This is what finally (!) made the SMB_COM_WRITE command
+  work properly with 65535 bytes to be written. Because the final
+  NetBIOS frame size came out as 65583 bytes (which the NetBIOS
+  frame handles fine), and the size parameter being a 16 bit integer,
+  the truncated size (47 bytes) wreaked havoc all over the place.

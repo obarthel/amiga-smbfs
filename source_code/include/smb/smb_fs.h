@@ -42,11 +42,13 @@ struct smb_lkrng
 /*****************************************************************************/
 
 /* proc.c */
-byte *smb_encode_smb_length(byte *p, dword len);
-dword smb_len(const byte *packet);
+byte *smb_encode_smb_length(byte *p, int len);
+int smb_len(const byte *packet);
+int smb_errno(int errcls, int error);
+int smb_payload_size(const struct smb_server *server, int wct, int bcc);
 int smb_proc_open(struct smb_server *server, const char *pathname, int len, struct smb_dirent *entry);
 int smb_proc_close(struct smb_server *server, word fileid, dword mtime);
-int smb_proc_read(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int fs);
+int smb_proc_read(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data);
 int smb_proc_read_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data);
 int smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data);
 int smb_proc_write_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data);
@@ -71,7 +73,7 @@ int smb_receive (struct smb_server *server, int sock_fd);
 int smb_receive_with_payload (struct smb_server *server, int sock_fd, void * payload, int payload_size, int * payload_size_received);
 int smb_catch_keepalive(struct smb_server *server);
 int smb_dont_catch_keepalive(struct smb_server *server);
-int smb_release(struct smb_server *server);
+void smb_release(struct smb_server *server);
 int smb_connect(struct smb_server *server);
 int smb_request(struct smb_server *server,const void * payload,int payload_size);
 int smb_trans2_request(struct smb_server *server, int *data_len, int *param_len, char **data, char **param);

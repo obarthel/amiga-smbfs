@@ -27,6 +27,7 @@
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
  * smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //192.168.1.33/test
+ * smbfs debuglevel=2 dumpsmb dumpsmblevel=2 user=olsen password=... volume=olsen //192.168.1.118/olsen
  */
 
 #include "smbfs.h"
@@ -1858,7 +1859,7 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 
 		if(WaitSelect(sock_fd+1, &read_fds, NULL, NULL, &tv, NULL) > 0)
 		{
-			n = recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL);
+			n = recv(sock_fd, buffer, sizeof(buffer), 0);
 			if(n < 0)
 			{
 				SHOWMSG("could not pick up the response packet");
@@ -4525,7 +4526,9 @@ dir_scan_callback_func_exnext(
 		int decoded_name_len;
 
 		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-		if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+
+		/* Skip file names which we could not represent. */
+		if(decoded_name_len < 0 || decoded_name_len >= (int)sizeof(fib->fib_FileName))
 			goto out;
 
 		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
@@ -4535,6 +4538,10 @@ dir_scan_callback_func_exnext(
 	}
 	else
 	{
+		/* Skip file names which we could not represent. */
+		if(name_len >= (int)sizeof(fib->fib_FileName))
+			goto out;
+
 		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 		if(TranslateNames)

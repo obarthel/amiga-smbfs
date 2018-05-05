@@ -33,8 +33,9 @@ struct smb_server
 	unsigned short rcls;				/* The error codes we received */
 	unsigned short err;
 
-	unsigned char *packet;
-	int packet_size; /* Amount of memory allocated for packet */
+	unsigned char *transmit_buffer;
+	int transmit_buffer_size; /* Maximum size of the SMB message */
+	int transmit_buffer_allocation_size; /* Amount of memory allocated for the transmit buffer */
 
 	int security_mode;
 	int crypt_key_length;

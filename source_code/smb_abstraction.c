@@ -79,9 +79,6 @@ struct smba_file
 
 /*****************************************************************************/
 
-static int smba_connect(smba_connect_parameters_t *p, unsigned int ip_addr, int use_E, char *workgroup_name,
-	int cache_size, int max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw,
-	smba_server_t **result);
 static INLINE int make_open(smba_file_t *f, int need_fid);
 static int write_attr(smba_file_t *f);
 static void invalidate_dircache(struct smba_server *server, char *path);
@@ -93,7 +90,7 @@ static int extract_service (char *service, char *server, size_t server_size, cha
 /*****************************************************************************/
 
 static int
-smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, char * workgroup_name,
+smba_connect (smba_connect_parameters_t * p, in_addr_t ip_addr, int use_E, char * workgroup_name,
 	int cache_size, int max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw,
 	smba_server_t ** result)
 {
@@ -147,6 +144,12 @@ smba_connect (smba_connect_parameters_t * p, unsigned int ip_addr, int use_E, ch
 
 	data.addr.sin_family = AF_INET;
 	data.addr.sin_addr.s_addr = ip_addr;
+
+	#if DEBUG
+	{
+		
+	}
+	#endif /* DEBUG */
 
 	if(res->server.raw_smb)
 	{
@@ -521,8 +524,8 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 		 * the data, which is why there is another limit to how
 		 * much data can be received.
 		 */
-		if(max_size_smb_com_read > f->server->server.packet_size - 48 - NETBIOS_HEADER_SIZE)
-			max_size_smb_com_read = f->server->server.packet_size - 48 - NETBIOS_HEADER_SIZE;
+		if(max_size_smb_com_read > f->server->server.transmit_buffer_size - 48 - NETBIOS_HEADER_SIZE)
+			max_size_smb_com_read = f->server->server.transmit_buffer_size - 48 - NETBIOS_HEADER_SIZE;
 
 		do
 		{
@@ -538,7 +541,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 			if(count > max_receive)
 				count = max_receive;
 
-			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, data, 0);
+			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, data);
 			if (result < 0)
 				goto out;
 
@@ -572,7 +575,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 int
 smba_write (smba_file_t * f, char *data, long len, long offset)
 {
-	dword max_buffer_size;
+	int max_buffer_size;
 	int max_size_smb_com_write, count, result;
 	int num_bytes_written = 0;
 	int errnum;
@@ -1039,8 +1042,9 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			}
 
 			/* Avoid some hits if restart/retry occured. Should fix the real root
-			   of this problem really, but I am not bored enough atm. -Piru
-			   ZZZ this needs further investigation. */
+			 * of this problem really, but I am not bored enough atm. -Piru
+			 * ZZZ this needs further investigation.
+			 */
 			if (f->dircache == NULL)
 			{
 				LOG (("lost dircache due to an error, bailing out!\n"));
@@ -1534,7 +1538,7 @@ smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_passw
 	char username[64], password[64];
 	char workgroup[20];
 	char server[64], share[64];
-	unsigned int ipAddr;
+	in_addr_t ipAddr;
 	int error;
 
 	(*result) = NULL;
