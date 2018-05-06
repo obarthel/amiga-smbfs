@@ -20,8 +20,8 @@
 
 /*****************************************************************************/
 
-#define ATTR_CACHE_TIME		5	/* cache attributes for this time */
-#define DIR_CACHE_TIME		5	/* cache directories for this time */
+#define ATTR_CACHE_TIME		5	/* cache attributes for this time (seconds) */
+#define DIR_CACHE_TIME		5	/* cache directories for this time (seconds) */
 #define DIRCACHE_SIZE		170
 #define DOS_PATHSEP			'\\'
 
@@ -32,7 +32,7 @@ typedef struct dircache
 	int					base;
 	int					len;
 	int					eof;		/* cache end is eof */
-	long				created_at;	/* for invalidation */
+	ULONG				created_at;	/* for invalidation */
 	struct smba_file *	cache_for;	/* owner of this cache */
 	int					cache_size;
 	struct smb_dirent	cache[1];
@@ -53,7 +53,7 @@ struct smba_file
 	struct MinNode			node;
 	struct smba_server *	server;
 	struct smb_dirent		dirent;
-	long					attr_time;		/* time when dirent was read */
+	ULONG					attr_time;		/* time when dirent was read */
 	dircache_t *			dircache;		/* content cache for directories */
 	unsigned				attr_dirty:1;	/* attribute cache is dirty */
 	unsigned				is_valid:1;		/* server was down, entry removed, ... */
@@ -79,7 +79,7 @@ struct smba_file
 
 /*****************************************************************************/
 
-static INLINE int make_open(smba_file_t *f, int need_fid);
+static int make_open(smba_file_t *f, int need_fid);
 static int write_attr(smba_file_t *f);
 static void invalidate_dircache(struct smba_server *server, char *path);
 static void close_path(smba_server_t *s, char *path);
@@ -256,7 +256,7 @@ smba_disconnect (smba_server_t * server)
 
 /*****************************************************************************/
 
-static INLINE int
+static int
 make_open (smba_file_t * f, int need_fid)
 {
 	smba_server_t *s;
@@ -264,9 +264,11 @@ make_open (smba_file_t * f, int need_fid)
 
 	if (!f->is_valid || (need_fid && !f->dirent.opened))
 	{
+		ULONG now = GetCurrentTime();
+
 		s = f->server;
 
-		if (!f->is_valid || f->attr_time == -1 || GetCurrentTime() - f->attr_time > ATTR_CACHE_TIME)
+		if (!f->is_valid || f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 		{
 			errnum = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
 			if (errnum < 0)
@@ -385,7 +387,7 @@ write_attr (smba_file_t * f)
 
 	if (errnum < 0)
 	{
-		f->attr_time = -1;
+		f->attr_time = 0;
 		goto out;
 	}
 
@@ -765,7 +767,7 @@ smba_write (smba_file_t * f, char *data, long len, long offset)
  out:
 
 	if (result < 0)
-		f->attr_time = -1;
+		f->attr_time = 0;
 	else if (result > 0)
 		f->dirent.mtime = GetCurrentTime();
 
@@ -862,9 +864,9 @@ smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, lo
 int
 smba_getattr (smba_file_t * f, smba_stat_t * data)
 {
-	long now = GetCurrentTime();
 	int errnum;
 	int result;
+	ULONG now;
 
 	errnum = make_open (f, 0);
 	if (errnum < 0)
@@ -873,7 +875,9 @@ smba_getattr (smba_file_t * f, smba_stat_t * data)
 		goto out;
 	}
 
-	if (f->attr_time == -1 || (now - f->attr_time) > ATTR_CACHE_TIME)
+	now = GetCurrentTime();
+
+	if (f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 	{
 		LOG (("file %s\n", f->dirent.complete_path));
 
@@ -982,11 +986,11 @@ int
 smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 {
 	int cache_index, o, eof, count = 0;
-	long now = GetCurrentTime();
 	int num_entries;
 	smba_stat_t data;
 	int result;
 	int errnum;
+	ULONG now;
 
 	errnum = make_open (f, 0);
 	if (errnum < 0)
@@ -994,6 +998,8 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 		result = errnum;
 		goto out;
 	}
+
+	now = GetCurrentTime();
 
 	if (f->dircache == NULL) /* get a cache */
 	{
@@ -1011,7 +1017,7 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 	}
 	else
 	{
-		if ((now - f->dircache->created_at) >= DIR_CACHE_TIME)
+		if (now > f->dircache->created_at && now - f->dircache->created_at >= DIR_CACHE_TIME)
 		{
 			f->dircache->eof = f->dircache->len = f->dircache->base = 0;
 
@@ -1034,6 +1040,7 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			f->dircache->base = cache_index;
 
 			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size, f->dircache->cache);
+
 			/* We stop on error, or if the directory is empty. */
 			if (num_entries <= 0)
 			{
@@ -1043,12 +1050,11 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 
 			/* Avoid some hits if restart/retry occured. Should fix the real root
 			 * of this problem really, but I am not bored enough atm. -Piru
-			 * ZZZ this needs further investigation.
 			 */
 			if (f->dircache == NULL)
 			{
 				LOG (("lost dircache due to an error, bailing out!\n"));
-				result = -ENOSPC;
+				result = -ENOMEM;
 				goto out;
 			}
 

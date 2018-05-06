@@ -1315,3 +1315,32 @@ smbfs 1.122 (5.5.2018)
   NetBIOS frame size came out as 65583 bytes (which the NetBIOS
   frame handles fine), and the size parameter being a 16 bit integer,
   the truncated size (47 bytes) wreaked havoc all over the place.
+
+
+smbfs 1.123 (6.5.2018)
+
+- smb_proc_readdir_long() could return an error code which would be
+  mistaken as the number of directory entries available. The error
+  code should have been negative. Fixed.
+
+- Action_ExamineObject() failed to compare the correct file name
+  length against the maximum permitted file name length. It retained
+  the full path name length, which could lead to the operation being
+  aborted. The same problem also existed in Action_ExamineFH().
+
+- The buffer size check in the UTF-8 conversion code used by
+  Action_ExamineObject() should have verified that the name in
+  ISO 8859-1 form fits into the name buffer. Fixed.
+
+- Time stamps used for cache validation are now unsigned integers
+  rather than signed integers.
+
+
+smbfs 1.124 (6.5.2018)
+
+- recv() returning 0 is now consistently treated as it should
+  be: end of stream.
+
+- SMB_COM_READ now receives the inbound data straight into the
+  file read buffer instead of into the packet buffer, from which
+  it would then be copied into the file read buffer.

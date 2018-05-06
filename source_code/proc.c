@@ -702,7 +702,8 @@ smb_request_ok_with_payload (
 	int					command,
 	int					wct,
 	int					bcc,
-	const void *		payload,
+	void *				input_payload,
+	const void *		output_payload,
 	int					payload_size)
 {
 	int result;
@@ -712,7 +713,7 @@ smb_request_ok_with_payload (
 	s->err = 0;
 
 	/* Send the message and wait for the response to arrive. */
-	result = smb_request (s, payload, payload_size);
+	result = smb_request (s, input_payload, output_payload, payload_size);
 
 	/* smb_request() failed? */
 	if (result < 0)
@@ -751,7 +752,7 @@ smb_request_ok_with_payload (
 static int
 smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
 {
-	return(smb_request_ok_with_payload (s, command, wct, bcc, NULL, 0));
+	return(smb_request_ok_with_payload (s, command, wct, bcc, NULL, NULL, 0));
 }
 
 /* smb_retry: This function should be called when smb_request_ok has
@@ -977,7 +978,6 @@ smb_proc_close (struct smb_server *server, word fileid, dword mtime)
 int
 smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data)
 {
-	word returned_count, data_len;
 	char *buf = server->transmit_buffer;
 	int result;
 	int error;
@@ -991,31 +991,69 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 	DSET (buf, smb_vwv2, offset);
 	WSET (buf, smb_vwv4, 0);
 
-	if ((error = smb_request_ok (server, SMBread, 5, -1)) < 0)
+	#if 1
 	{
-		result = error;
-		goto out;
+		int buffer_format;
+
+		LOG(("smb_proc_read: requesting %ld bytes\n", count));
+
+		if ((error = smb_request_ok_with_payload (server, SMBread, 5, -1, data, NULL, count)) < 0)
+		{
+			LOG(("smb_proc_read: error=%ld\n", error));
+
+			result = error;
+			goto out;
+		}
+
+		buffer_format = BVAL(buf, NETBIOS_HEADER_SIZE+45);
+		LOG(("smb_proc_read: buffer_format=%ld, should be %ld\n", buffer_format, 1));
+
+		/* The buffer format must be 1. */
+		if(buffer_format == 1)
+		{
+			result = WVAL (buf, NETBIOS_HEADER_SIZE+46); /* count of bytes to read */
+
+			ASSERT( result <= count );
+
+			LOG(("smb_proc_read: read %ld bytes (should be < %ld)\n", result, count));
+		}
+		else
+		{
+			LOG(("smb_proc_read: returning EOF\n"));
+			result = 0;
+		}
 	}
-
-	returned_count = WVAL (buf, smb_vwv0);
-
-	/* ZZZ olsen 2018-05-01: this should not be necessary; we should be
-	 *                       able to break this down into two subsequent
-	 *                       recv() calls.
-	 */
-	smb_decode_data (SMB_BUF (server->transmit_buffer), data, &data_len);
-
-	if (returned_count != data_len)
+	#else
 	{
-		LOG (("Warning, returned_count != data_len\n"));
-		LOG (("ret_c=%ld, data_len=%ld\n", returned_count, data_len));
-	}
-	else
-	{
-		LOG (("ret_c=%ld, data_len=%ld\n", returned_count, data_len));
-	}
+		word returned_count, data_len;
 
-	result = data_len;
+		if ((error = smb_request_ok_with_payload (server, SMBread, 5, -1, data, NULL, count)) < 0)
+		{
+			result = error;
+			goto out;
+		}
+
+		returned_count = WVAL (buf, smb_vwv0);
+
+		/* ZZZ olsen 2018-05-01: this should not be necessary; we should be
+		 *                       able to break this down into two subsequent
+		 *                       recv() calls.
+		 */
+		smb_decode_data (SMB_BUF (server->transmit_buffer), data, &data_len);
+
+		if (returned_count != data_len)
+		{
+			LOG (("Warning, returned_count != data_len\n"));
+			LOG (("ret_c=%ld, data_len=%ld\n", returned_count, data_len));
+		}
+		else
+		{
+			LOG (("ret_c=%ld, data_len=%ld\n", returned_count, data_len));
+		}
+
+		result = data_len;
+	}
+	#endif
 
  out:
 
@@ -1065,7 +1103,7 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	(*p++) = 1; /* Buffer format - this field must be 1 */
 	WSET (p, 0, count); /* Data length - this field must match what the count field in the SMB header says */
 
-	if ((res = smb_request_ok_with_payload (server, SMBwrite, 1, 0, data, count)) >= 0)
+	if ((res = smb_request_ok_with_payload (server, SMBwrite, 1, 0, NULL, data, count)) >= 0)
 		res = WVAL (buf, smb_vwv0);
 
 	return res;
@@ -1158,7 +1196,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 
 	LOG(("requesting SMBwritebraw\n"));
 
-	result = smb_request_ok_with_payload (server, SMBwritebraw, 1, 0, data, len);
+	result = smb_request_ok_with_payload (server, SMBwritebraw, 1, 0, NULL, data, len);
 	if (result < 0)
 		goto out;
 
@@ -2122,7 +2160,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 
 			smb_printerr (server->rcls, server->err);
 
-			error = smb_errno (server->rcls, server->err);
+			error = -smb_errno (server->rcls, server->err);
 			SHOWVALUE(error);
 			break;
 		}
@@ -2631,7 +2669,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 		packet[0] = 0x81; /* SESSION REQUEST */
 
-		if ((result = smb_request (server, NULL, 0)) < 0)
+		if ((result = smb_request (server, NULL, NULL, 0)) < 0)
 		{
 			LOG (("smb_proc_connect: Failed to send SESSION REQUEST.\n"));
 			goto fail;

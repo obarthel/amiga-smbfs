@@ -26,8 +26,8 @@
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
- * smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //192.168.1.33/test
- * smbfs debuglevel=2 dumpsmb dumpsmblevel=2 user=olsen password=... volume=olsen //192.168.1.118/olsen
+ * Samba 4.6.7: smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //192.168.1.33/test
+ * Samba 3.0.25: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 user=olsen password=... volume=olsen //192.168.1.118/olsen
  */
 
 #include "smbfs.h"
@@ -4296,6 +4296,8 @@ Action_ExamineObject(
 
 		SHOWMSG("ZERO root lock");
 
+		ASSERT( len < sizeof(fib->fib_FileName) );
+
 		memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 		fib->fib_FileName[0] = len;
 
@@ -4339,6 +4341,8 @@ Action_ExamineObject(
 
 			SHOWMSG("root lock");
 
+			ASSERT( len < sizeof(fib->fib_FileName) );
+
 			memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 			fib->fib_FileName[0] = len;
 
@@ -4351,30 +4355,23 @@ Action_ExamineObject(
 		else
 		{
 			const UBYTE * name;
-			LONG name_len;
-			LONG i;
+			int name_len;
+			int i;
 
 			name = ln->ln_FullName;
 			name_len = strlen(name);
 
+			/* We just want the base name, not the path
+			 * leading up to it.
+			 */
 			for(i = name_len-1 ; i >= 0 ; i--)
 			{
 				if(name[i] == SMB_PATH_SEPARATOR)
 				{
 					name = &name[i+1];
-
-					/* We just lost a character and need to account for it. */
-					name_len--;
-
+					name_len -= i+1;
 					break;
 				}
-			}
-
-			/* Just checking: will the name fit? */
-			if(name_len >= sizeof(fib->fib_FileName))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
 			}
 
 			/* Translate the name of the file/directory from UTF-8
@@ -4385,13 +4382,13 @@ Action_ExamineObject(
 				UBYTE decoded_name[MAX_FILENAME_LEN];
 				int decoded_name_len;
 
-				/* Try to decode the file file, translating it into ISO 8859-1 format. */
+				/* Try to decode the file name, translating it into ISO 8859-1 format. */
 				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
 
 				/* Decoding error occured, or the decoded name would be longer than
 				 * buffer would allow?
 				 */
-				if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+				if(decoded_name_len < 0 || decoded_name_len >= sizeof(fib->fib_FileName))
 				{
 					error = ERROR_INVALID_COMPONENT_NAME;
 					goto out;
@@ -4408,6 +4405,13 @@ Action_ExamineObject(
 			}
 			else
 			{
+				/* Will the name fit? */
+				if(name_len >= sizeof(fib->fib_FileName))
+				{
+					error = ERROR_INVALID_COMPONENT_NAME;
+					goto out;
+				}
+
 				/* Store the file/directory name in the form expected
 				 * by dos.library.
 				 */
@@ -5844,15 +5848,9 @@ Action_ExamineFH(
 		if(name[i] == SMB_PATH_SEPARATOR)
 		{
 			name = &name[i+1];
+			name_len -= i+1;
 			break;
 		}
-	}
-
-	/* Just checking: will the name fit? */
-	if(name_len >= sizeof(fib->fib_FileName))
-	{
-		error = ERROR_INVALID_COMPONENT_NAME;
-		goto out;
 	}
 
 	memset(fib,0,sizeof(*fib));
@@ -5863,7 +5861,7 @@ Action_ExamineFH(
 		int decoded_name_len;
 
 		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-		if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+		if(decoded_name_len < 0 || decoded_name_len >= sizeof(fib->fib_FileName))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -5876,6 +5874,13 @@ Action_ExamineFH(
 	}
 	else
 	{
+		/* Will the name fit? */
+		if(name_len >= sizeof(fib->fib_FileName))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
 		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 		if(TranslateNames)
