@@ -188,7 +188,7 @@ STATIC BOOL IsReservedName(STRPTR name);
 STATIC LONG MapErrnoToIoErr(int error);
 STATIC VOID TranslateBName(UBYTE *name, const UBYTE *map);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, BOOL opt_disable_write_raw, BOOL opt_disable_read_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, const void * bstring);
 STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
 STATIC LONG Action_DeleteObject(struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
@@ -628,6 +628,8 @@ main(VOID)
 		SWITCH	NetBIOSTransport;
 		SWITCH	WriteBehind;
 		SWITCH	PreferWriteRaw;
+		SWITCH	DisableWriteRaw;
+		SWITCH	DisableReadRaw;
 		SWITCH	DumpSMB;
 		NUMBER	DumpSMBLevel;
 		KEY		DumpSMBFile;
@@ -657,6 +659,8 @@ main(VOID)
 		"NETBIOS/S,"
 		"WRITEBEHIND/S,"
 		"PREFERWRITERAW/S,"
+		"DISABLEWRITERAW/S,"
+		"DISABLEREADRAW/S,"
 		"DUMPSMB/S,"
 		"DUMPSMBLEVEL/N/K,"
 		"DUMPSMBFILE/K,"
@@ -892,6 +896,12 @@ main(VOID)
 		if(FindToolType(Icon->do_ToolTypes,"PREFERWRITERAW") != NULL)
 			args.PreferWriteRaw = TRUE;
 
+		if(FindToolType(Icon->do_ToolTypes,"DISABLEWRITERAW") != NULL)
+			args.DisableWriteRaw = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"DISABLEREADRAW") != NULL)
+			args.DisableReadRaw = TRUE;
+
 		if(FindToolType(Icon->do_ToolTypes,"UTF8") != NULL)
 			args.UTF8 = TRUE;
 
@@ -1116,6 +1126,8 @@ main(VOID)
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
 		args.WriteBehind,
 		args.PreferWriteRaw,
+		args.DisableWriteRaw,
+		args.DisableReadRaw,
 		args.DeviceName,
 		args.VolumeName,
 		args.TranslationFile))
@@ -2497,6 +2509,8 @@ Setup(
 	BOOL	opt_raw_smb,
 	BOOL	opt_write_behind,
 	BOOL	opt_prefer_write_raw,
+	BOOL	opt_disable_write_raw,
+	BOOL	opt_disable_read_raw,
 	STRPTR	device_name,
 	STRPTR	volume_name,
 	STRPTR	translation_file)
@@ -2662,7 +2676,21 @@ Setup(
 		}
 	}
 
-	error = smba_start(service,workgroup,username,opt_password,opt_clientname,opt_servername,opt_cachesize,opt_max_transmit,opt_raw_smb,opt_write_behind,opt_prefer_write_raw,&ServerData);
+	error = smba_start(
+		service,
+		workgroup,
+		username,
+		opt_password,
+		opt_clientname,
+		opt_servername,
+		opt_cachesize,
+		opt_max_transmit,
+		opt_raw_smb,
+		opt_write_behind,
+		opt_prefer_write_raw,
+		opt_disable_write_raw,
+		opt_disable_read_raw,
+		&ServerData);
 	if(error < 0)
 		goto out;
 

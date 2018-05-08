@@ -60,7 +60,7 @@ typedef int (*smba_callback_t) (void *d, int fpos, int nextpos, char *name, int 
 int smba_open(smba_server_t *s, char *name, size_t name_size, smba_file_t **file);
 void smba_close(smba_file_t *f);
 int smba_read(smba_file_t *f, char *data, long len, long offset);
-int smba_write(smba_file_t *f, char *data, long len, long offset);
+int smba_write(smba_file_t *f, const char *data, long len, long offset);
 long smba_seek (smba_file_t *f, long offset, long mode, off_t * new_position_ptr);
 int smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, long timeout);
 int smba_getattr(smba_file_t *f, smba_stat_t *data);
@@ -73,7 +73,7 @@ int smba_rmdir(smba_server_t *s, char *path);
 int smba_rename(smba_server_t *s, char *from, char *to);
 int smba_statfs(smba_server_t *s, long *bsize, long *blocks, long *bfree);
 void smb_invalidate_all_inodes(struct smb_server *server);
-int smba_start(char *service, char *opt_workgroup, char *opt_username, char *opt_password, char *opt_clientname, char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw, smba_server_t **result);
+int smba_start(char *service, char *opt_workgroup, char *opt_username, char *opt_password, char *opt_clientname, char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw, int opt_disable_write_raw, int opt_disable_read_raw, smba_server_t **result);
 void smba_disconnect(smba_server_t *server);
 int smba_get_dircache_size(struct smba_server * server);
 int smba_change_dircache_size(struct smba_server * server,int cache_size);

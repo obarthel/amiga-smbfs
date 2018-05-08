@@ -1344,3 +1344,20 @@ smbfs 1.124 (6.5.2018)
 - SMB_COM_READ now receives the inbound data straight into the
   file read buffer instead of into the packet buffer, from which
   it would then be copied into the file read buffer.
+
+
+smbfs 1.125 (8.5.2018)
+
+- smba_write() no longer decides on the fly whether or not it should
+  use SMB_COM_WRITE or SMB_COM_WRITE_RAW. It's either one or the
+  other now, and the same command is used throughout the entire write
+  operation until it has failed or is finished.
+
+- The write operation no longer stops if fewer data could be written
+  than expected. This is documented and not an error.
+
+- smba_read() now also sticks to either SMB_COM_READ or SMB_COM_READ_RAW.
+
+- You can disable the use of SMB_COM_WRITE_RAW and SMB_COM_READ_RAW,
+  respectively through the new DISABLEWRITERAW and DISABLEREADRAW
+  options. These are intended for testing purposes only.

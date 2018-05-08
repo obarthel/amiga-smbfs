@@ -90,9 +90,19 @@ static int extract_service (char *service, char *server, size_t server_size, cha
 /*****************************************************************************/
 
 static int
-smba_connect (smba_connect_parameters_t * p, in_addr_t ip_addr, int use_E, char * workgroup_name,
-	int cache_size, int max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw,
-	smba_server_t ** result)
+smba_connect (
+	smba_connect_parameters_t *	p,
+	in_addr_t					ip_addr,
+	int							use_E,
+	char *						workgroup_name,
+	int							cache_size,
+	int							max_transmit,
+	int							opt_raw_smb,
+	int							opt_write_behind,
+	int							opt_prefer_write_raw,
+	int							opt_disable_write_raw,
+	int							opt_disable_read_raw,
+	smba_server_t **			result)
 {
 	smba_server_t *res;
 	struct smb_mount_data data;
@@ -122,9 +132,21 @@ smba_connect (smba_connect_parameters_t * p, in_addr_t ip_addr, int use_E, char 
 	if(opt_write_behind)
 		res->server.write_behind = 1;
 
-	/* olsen (2016-04-20): Prefer the use of SMB_COM_WRITE_RAW over SMB_COM_WRITE. */
-	if(opt_prefer_write_raw)
-		res->server.prefer_write_raw = 1;
+	/* olsen (2018-05-08): Always use SMB_COM_WRITE, even if SMB_COM_WRITE_RAW were possible. */
+	if(opt_disable_write_raw)
+	{
+		res->server.disable_write_raw = 1;
+	}
+	else
+	{
+		/* olsen (2016-04-20): Prefer the use of SMB_COM_WRITE_RAW over SMB_COM_WRITE. */
+		if(opt_prefer_write_raw)
+			res->server.prefer_write_raw = 1;
+	}
+
+	/* olsen (2018-05-08): Always use SMB_COM_READ, even if SMB_COM_READ_RAW were possible. */
+	if(opt_disable_read_raw)
+		res->server.disable_read_raw = 1;
 
 	errnum = smba_setup_dircache (res,cache_size);
 	if(errnum < 0)
@@ -437,20 +459,16 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 {
 	int max_receive = f->server->server.max_recv;
 	int num_bytes_read = 0;
-	int count, result = 0;
-	int errnum;
+	int result;
 
-	errnum = make_open (f, 1);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = make_open (f, 1);
+	if (result < 0)
 		goto out;
-	}
 
 	D(("read %ld bytes from offset %ld",len,offset));
 
 	/* SMB_COM_READ_RAW and SMB_COM_WRITE_RAW supported? */
-	if (f->server->server.capabilities & CAP_RAW_MODE)
+	if ((f->server->server.capabilities & CAP_RAW_MODE) != 0 && !f->server->server.disable_read_raw)
 	{
 		int max_raw_size = f->server->server.max_raw_size;
 		int n;
@@ -490,13 +508,10 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 		}
 		while(len > 0);
 	}
-
-	/* Raw read not supported and no data read yet?
-	 * Fall back onto SMB_COM_READ.
-	 */
-	if (result <= 0 && num_bytes_read == 0)
+	else
 	{
 		int max_size_smb_com_read;
+		int count;
 
 		/* Calculate maximum number of bytes that could be transferred with
 		 * a single SMBread packet...
@@ -561,10 +576,6 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 		while (len > 0);
 	}
 
-	/* Still no luck? */
-	if(result < 0)
-		goto out;
-
 	result = num_bytes_read;
 
  out:
@@ -575,191 +586,127 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 /*****************************************************************************/
 
 int
-smba_write (smba_file_t * f, char *data, long len, long offset)
+smba_write (smba_file_t * f, const char *data, long len, long offset)
 {
-	int max_buffer_size;
-	int max_size_smb_com_write, count, result;
 	int num_bytes_written = 0;
-	int errnum;
+	int max_buffer_size;
+	int result;
 
-	errnum = make_open (f, 1);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = make_open (f, 1);
+	if (result < 0)
 		goto out;
-	}
 
 	SHOWVALUE(f->server->server.max_buffer_size);
 
 	max_buffer_size = f->server->server.max_buffer_size;
 
-	/* Calculate maximum number of bytes that could be transferred with
-	 * a single SMBwrite packet...
-	 *
-	 * 'max_buffer_size' is the maximum size of a complete SMB message
-	 * including the message header, the parameter and data blocks.
-	 *
-	 * The message header accounts for
-	 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
-	 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
-	 * = 32 bytes
-	 *
-	 * The parameters of a SMB_COM_WRITE command account for
-	 * 1(wordcount)+2(fid)+2(countofbytestowrite)+4(writeoffsetinbytes)+
-	 * 2(estimateofremainingbytestobewritten) = 11 bytes
-	 *
-	 * The data part of a SMB_COM_WRITE command account for
-	 * 2(bytecount)+1(bufferformat)+2(datalength) = 5 bytes, not including
-	 * the actual payload
-	 *
-	 * This leaves 'max_buffer_size' - 48 for the payload.
-	 */
-	/*max_size_smb_com_write = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
-	max_size_smb_com_write = max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
-
-	/* SMB_COM_WRITE cannot transmit more than 65535 bytes. */
-	if(max_size_smb_com_write > 65535)
-		max_size_smb_com_write = 65535;
-
-	LOG (("len = %ld, max_size_smb_com_write = %ld\n", len, max_size_smb_com_write));
-
-	/* Can we transmit this data with a single SMBwrite command? */
-	if (len <= max_size_smb_com_write)
+	if ((f->server->server.capabilities & CAP_RAW_MODE) != 0 && !f->server->server.disable_write_raw)
 	{
-		LOG (("use single write\n"));
+		int max_raw_size = f->server->server.max_raw_size;
+		int max_size_smb_com_write_raw;
+		int n;
 
-		ASSERT( len <= 65535 );
-
-		/* Use a single SMBwrite packet whenever possible instead of a SMBwritebraw
-		 * because that requires two packets to be sent.
+		/* Try to send the maximum number of bytes with the two SMBwritebraw packets.
+		 * This is how it breaks down:
+		 *
+		 * The message header accounts for
+		 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+		 * = 32 bytes
+		 *
+		 * The parameters of a SMB_COM_WRITE_RAW command account for
+		 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
+		 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+
+		 * 2(dataoffset) = 25 bytes
+		 *
+		 * The data part of a SMB_COM_WRITE_RAW command accounts for
+		 * 2(bytecount) = 2 bytes
+		 *
+		 * This leaves 'max_buffer_size' - 59 for the payload.
 		 */
-		result = smb_proc_write (&f->server->server, &f->dirent, offset, len, data);
-		if(result < 0)
-			goto out;
+		/*max_size_smb_com_write_raw = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
+		max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 59 - NETBIOS_HEADER_SIZE;
 
-		num_bytes_written += result;
-		offset += result;
+		/* SMB_COM_WRITE_RAW cannot transmit more than 65535 bytes. */
+		if(max_size_smb_com_write_raw > 65535)
+			max_size_smb_com_write_raw = 65535;
+
+		LOG (("len = %ld, max_size_smb_com_write_raw = %ld\n", len, max_size_smb_com_write_raw));
+
+		do
+		{
+			n = min(len, max_size_smb_com_write_raw);
+
+			ASSERT( n > 0 );
+
+			if(n > max_raw_size)
+				n = max_raw_size;
+
+			ASSERT( n <= 65535 );
+
+			result = smb_proc_write_raw (&f->server->server, &f->dirent, offset, n, data);
+			if(result < 0)
+				goto out;
+
+			data += result;
+			offset += result;
+			len -= result;
+			num_bytes_written += result;
+		}
+		while(len > 0);
 	}
 	else
 	{
-		/* Nothing was written yet. */
-		result = 0;
+		int max_size_smb_com_write, count;
 
-		if (f->server->server.capabilities & CAP_RAW_MODE)
-		{
-			int max_raw_size = f->server->server.max_raw_size;
-			int prefer_write_raw = f->server->server.prefer_write_raw;
-			int max_size_smb_com_write_raw;
-			int n;
-
-			/* Try to send the maximum number of bytes with the two SMBwritebraw packets.
-			 * This is how it breaks down:
-			 *
-			 * The message header accounts for
-			 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
-			 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
-			 * = 32 bytes
-			 *
-			 * The parameters of a SMB_COM_WRITE_RAW command account for
-			 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
-			 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+
-			 * 2(dataoffset) = 25 bytes
-			 *
-			 * The data part of a SMB_COM_WRITE_RAW command accounts for
-			 * 2(bytecount) = 2 bytes
-			 *
-			 * This leaves 'max_buffer_size' - 59 for the payload.
-			 */
-			/*max_size_smb_com_write_raw = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
-			max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 59 - NETBIOS_HEADER_SIZE;
-
-			/* SMB_COM_WRITE_RAW cannot transmit more than 65535 bytes. */
-			if(max_size_smb_com_write_raw > 65535)
-				max_size_smb_com_write_raw = 65535;
-
-			LOG (("len = %ld, max_size_smb_com_write_raw = %ld\n", len, max_size_smb_com_write_raw));
-
-			do
-			{
-				n = min(len, max_size_smb_com_write_raw);
-
-				ASSERT( n > 0 );
-
-				/* Should we try and send this data with a single SMB_COM_WRITE? */
-				if (!prefer_write_raw && n <= max_size_smb_com_write)
-				{
-					LOG (("n (%ld) <= max_size_smb_com_write (%ld)\n", n, max_size_smb_com_write));
-
-					ASSERT( n <= 65535 );
-
-					/* Use a single SMBwrite packet whenever possible instead of a
-					 * SMBwritebraw because that requires two packets to be sent.
-					 */
-					result = smb_proc_write (&f->server->server, &f->dirent, offset, n, data);
-				}
-				/* Use SMB_COM_WRITE_RAW instead. */
-				else
-				{
-					if(n > max_raw_size)
-						n = max_raw_size;
-
-					ASSERT( n <= 65535 );
-
-					result = smb_proc_write_raw (&f->server->server, &f->dirent, offset, n, data);
-				}
-
-				/* Stop if the write operation failed. We'll try again with
-				 * SMB_COM_WRITE if possible.
-				 */
-				if(result <= 0)
-					break;
-
-				data += result;
-				offset += result;
-				len -= result;
-				num_bytes_written += result;
-
-				/* Fewer data written than intended? Could be out of disk space. */
-				if(result < n)
-					break;
-			}
-			while(len > 0);
-		}
-
-		/* Raw write failed and no data has been written yet?
-		 * Fall back onto SMB_COM_WRITE.
+		/* Calculate maximum number of bytes that could be transferred with
+		 * a single SMBwrite packet...
+		 *
+		 * 'max_buffer_size' is the maximum size of a complete SMB message
+		 * including the message header, the parameter and data blocks.
+		 *
+		 * The message header accounts for
+		 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+		 * = 32 bytes
+		 *
+		 * The parameters of a SMB_COM_WRITE command account for
+		 * 1(wordcount)+2(fid)+2(countofbytestowrite)+4(writeoffsetinbytes)+
+		 * 2(estimateofremainingbytestobewritten) = 11 bytes
+		 *
+		 * The data part of a SMB_COM_WRITE command account for
+		 * 2(bytecount)+1(bufferformat)+2(datalength) = 5 bytes, not including
+		 * the actual payload
+		 *
+		 * This leaves 'max_buffer_size' - 48 for the payload.
 		 */
-		if (result <= 0 && num_bytes_written == 0)
+		/*max_size_smb_com_write = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
+		max_size_smb_com_write = max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
+
+		/* SMB_COM_WRITE cannot transmit more than 65535 bytes. */
+		if(max_size_smb_com_write > 65535)
+			max_size_smb_com_write = 65535;
+
+		LOG (("len = %ld, max_size_smb_com_write = %ld\n", len, max_size_smb_com_write));
+
+		do
 		{
-			LOG (("resume with single writes len = %ld, max_size_smb_com_write = %ld\n", len, max_size_smb_com_write));
+			count = min(len, max_size_smb_com_write);
+			if(count == 0)
+				break;
 
-			do
-			{
-				count = min(len, max_size_smb_com_write);
-				if(count == 0)
-					break;
+			ASSERT( count <= 65535 );
 
-				ASSERT( count <= 65535 );
+			result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data);
+			if (result < 0)
+				goto out;
 
-				result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data);
-				if (result < 0)
-					goto out;
-
-				len -= result;
-				offset += result;
-				data += result;
-				num_bytes_written += result;
-
-				/* Fewer data written than intended? Could be out of disk space. */
-				if(result < count)
-					break;
-			}
-			while (len > 0);
+			len -= result;
+			offset += result;
+			data += result;
+			num_bytes_written += result;
 		}
-
-		/* Still no luck? */
-		if(result < 0)
-			goto out;
+		while (len > 0);
 	}
 
 	result = num_bytes_written;
@@ -1531,9 +1478,21 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 }
 
 int
-smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_password,char *opt_clientname,
-	char *opt_servername,int opt_cachesize,int opt_max_transmit,int opt_raw_smb,int opt_write_behind,
-	int opt_prefer_write_raw,smba_server_t ** result)
+smba_start(
+	char *				service,
+	char *				opt_workgroup,
+	char *				opt_username,
+	char *				opt_password,
+	char *				opt_clientname,
+	char *				opt_servername,
+	int					opt_cachesize,
+	int					opt_max_transmit,
+	int					opt_raw_smb,
+	int					opt_write_behind,
+	int					opt_prefer_write_raw,
+	int					opt_disable_write_raw,
+	int					opt_disable_read_raw,
+	smba_server_t **	result)
 {
 	smba_connect_parameters_t par;
 	smba_server_t *the_server = NULL;
@@ -1677,7 +1636,19 @@ smba_start(char * service,char *opt_workgroup,char *opt_username,char *opt_passw
 	par.username = username;
 	par.password = password;
 
-	error = smba_connect (&par, ipAddr, use_extended, workgroup, opt_cachesize, opt_max_transmit, opt_raw_smb, opt_write_behind, opt_prefer_write_raw, &the_server);
+	error = smba_connect (
+		&par,
+		ipAddr,
+		use_extended,
+		workgroup,
+		opt_cachesize,
+		opt_max_transmit,
+		opt_raw_smb,
+		opt_write_behind,
+		opt_prefer_write_raw,
+		opt_disable_write_raw,
+		opt_disable_read_raw,
+		&the_server);
 	if(error < 0)
 	{
 		ReportError("Could not connect to server (%ld, %s).",-error,amitcp_strerror(-error));
