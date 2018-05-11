@@ -20,6 +20,16 @@
 
 /*****************************************************************************/
 
+#ifndef min
+#define min(a,b) ((a) < (b) ? (a) : (b))
+#endif /* min */
+
+#ifndef max
+#define max(a,b) ((a) > (b) ? (a) : (b))
+#endif /* max */
+
+/*****************************************************************************/
+
 #define ATTR_CACHE_TIME		5	/* cache attributes for this time (seconds) */
 #define DIR_CACHE_TIME		5	/* cache directories for this time (seconds) */
 #define DIRCACHE_SIZE		170
