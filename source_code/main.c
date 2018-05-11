@@ -36,6 +36,8 @@
 
 #include "smb_abstraction.h"
 #include "utf-8-iso-8859-1-conversion.h"
+#include "cp437.h"
+#include "cp850.h"
 #include "dump_smb.h"
 
 /****************************************************************************/
@@ -171,10 +173,10 @@ STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 
 /****************************************************************************/
 
-INLINE STATIC BOOL ReallyRemoveDosEntry(struct DosList *entry);
-INLINE STATIC LONG BuildFullName(const UBYTE * parent_name, STRPTR name, STRPTR *result_ptr, LONG *result_size_ptr);
-INLINE STATIC VOID TranslateCName(UBYTE *name, const UBYTE *map);
-INLINE STATIC VOID ConvertCString(void * bstring, LONG max_len, const UBYTE * cstring, LONG len);
+STATIC BOOL ReallyRemoveDosEntry(struct DosList *entry);
+STATIC LONG BuildFullName(const UBYTE * parent_name, STRPTR name, STRPTR *result_ptr, LONG *result_size_ptr);
+STATIC BOOL TranslateCName(UBYTE *name, const UBYTE *map);
+STATIC VOID ConvertCString(void * bstring, LONG max_len, const UBYTE * cstring, LONG len);
 STATIC VOID DisplayErrorList(VOID);
 STATIC VOID AddError(STRPTR fmt, APTR args);
 STATIC LONG CVSPrintf(STRPTR format_string, APTR args);
@@ -186,9 +188,9 @@ STATIC LONG CheckAccessModeCollision(STRPTR name, LONG mode);
 STATIC LONG NameAlreadyInUse(STRPTR name);
 STATIC BOOL IsReservedName(STRPTR name);
 STATIC LONG MapErrnoToIoErr(int error);
-STATIC VOID TranslateBName(UBYTE *name, const UBYTE *map);
+STATIC BOOL TranslateBName(UBYTE *name, const UBYTE *map);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, BOOL opt_disable_write_raw, BOOL opt_disable_read_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, BOOL opt_disable_write_raw, BOOL opt_disable_read_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, const void * bstring);
 STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
 STATIC LONG Action_DeleteObject(struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
@@ -621,6 +623,7 @@ main(VOID)
 		KEY		VolumeName;
 		NUMBER	CacheSize;
 		NUMBER	MaxTransmit;
+		NUMBER	Timeout;
 		NUMBER	DebugLevel;
 		KEY		DebugFile;
 		NUMBER	TimeZoneOffset;
@@ -634,6 +637,8 @@ main(VOID)
 		NUMBER	DumpSMBLevel;
 		KEY		DumpSMBFile;
 		SWITCH	UTF8;
+		SWITCH	CP437;
+		SWITCH	CP850;
 		KEY		TranslationFile;
 		KEY		Service;
 	} args;
@@ -652,6 +657,7 @@ main(VOID)
 		"VOLUME=VOLUMENAME/K,"
 		"CACHE=CACHESIZE/N/K,"
 		"MAXTRANSMIT/N/K,"
+		"TIMEOUT/N/K,"
 		"DEBUGLEVEL=DEBUG/N/K,"
 		"DEBUGFILE/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
@@ -665,6 +671,8 @@ main(VOID)
 		"DUMPSMBLEVEL/N/K,"
 		"DUMPSMBFILE/K,"
 		"UTF8/S,"
+		"CP437/S,"
+		"CP850/S,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
 		"SERVICE/A";
 
@@ -676,6 +684,7 @@ main(VOID)
 	LONG other_number;
 	LONG cache_size = 0;
 	LONG max_transmit = -1;
+	LONG timeout = 0;
 	char env_workgroup_name[17];
 	char env_user_name[64];
 	char env_password[64];
@@ -834,12 +843,6 @@ main(VOID)
 
 		args.VolumeName = str;
 
-		str = FindToolType(Icon->do_ToolTypes,"TRANSLATE");
-		if(str == NULL)
-			str = FindToolType(Icon->do_ToolTypes,"TRANSLATIONFILE");
-
-		args.TranslationFile = str;
-
 		str = FindToolType(Icon->do_ToolTypes,"SERVICE");
 		args.Service = str;
 
@@ -902,8 +905,23 @@ main(VOID)
 		if(FindToolType(Icon->do_ToolTypes,"DISABLEREADRAW") != NULL)
 			args.DisableReadRaw = TRUE;
 
-		if(FindToolType(Icon->do_ToolTypes,"UTF8") != NULL)
-			args.UTF8 = TRUE;
+		str = FindToolType(Icon->do_ToolTypes,"TRANSLATE");
+		if(str == NULL)
+			str = FindToolType(Icon->do_ToolTypes,"TRANSLATIONFILE");
+
+		if(str != NULL)
+		{
+			args.TranslationFile = str;
+		}
+		else
+		{
+			if (FindToolType(Icon->do_ToolTypes,"UTF8") != NULL)
+				args.UTF8 = TRUE;
+			else if (FindToolType(Icon->do_ToolTypes,"CP437") != NULL)
+				args.CP437 = TRUE;
+			else if (FindToolType(Icon->do_ToolTypes,"CP850") != NULL)
+				args.CP850 = TRUE;
+		}
 
 		str = FindToolType(Icon->do_ToolTypes,"DST");
 		if(str == NULL)
@@ -945,6 +963,18 @@ main(VOID)
 			}
 
 			max_transmit = number;
+		}
+
+		str = FindToolType(Icon->do_ToolTypes,"TIMEOUT");
+		if(str != NULL)
+		{
+			if(StrToLong(str,&number) == -1 || number < 0)
+			{
+				ReportError("Invalid number '%s' for 'TIMEOUT' parameter.",str);
+				goto out;
+			}
+
+			timeout = number;
 		}
 
 		if(args.Workgroup == NULL)
@@ -1019,6 +1049,9 @@ main(VOID)
 
 		if(args.MaxTransmit != NULL)
 			max_transmit = (*args.MaxTransmit);
+
+		if(args.Timeout != NULL && (*args.Timeout) >= 0)
+			timeout = (*args.Timeout);
 	}
 
 	/* Use the default if no user name is given. */
@@ -1029,9 +1062,36 @@ main(VOID)
 	if(args.DeviceName == NULL && args.VolumeName == NULL)
 		args.DeviceName = "SMBFS";
 
-	/* UTF8 file name translation disables code-page based translation. */
-	if(args.UTF8)
-		args.TranslationFile = NULL;
+	/* Code page based translation using a file disables
+	 * UTF-8 and built-in CP437 and CP850 translation.
+	 */
+	if(args.TranslationFile != NULL)
+	{
+		args.UTF8 = args.CP437 = args.CP850 = FALSE;
+	}
+	else
+	{
+		if (args.UTF8)
+			args.CP437 = args.CP850 = FALSE;
+		else if (args.CP437)
+			args.CP850 = FALSE;
+	}
+
+	/* Use one of the built-in code page translation tables? */
+	if (args.CP437)
+	{
+		memmove(A2M,unicode_to_cp437,sizeof(unicode_to_cp437));
+		memmove(M2A,cp437_to_unicode,sizeof(cp437_to_unicode));
+
+		TranslateNames = TRUE;
+	}
+	else if (args.CP850)
+	{
+		memmove(A2M,unicode_to_cp850,sizeof(unicode_to_cp850));
+		memmove(M2A,cp850_to_unicode,sizeof(cp850_to_unicode));
+
+		TranslateNames = TRUE;
+	}
 
 	CaseSensitive = (BOOL)args.CaseSensitive;
 	OmitHidden = (BOOL)args.OmitHidden;
@@ -1121,6 +1181,7 @@ main(VOID)
 		args.ServerName,
 		cache_size,
 		max_transmit,
+		timeout,
 		args.TimeZoneOffset,
 		args.DSTOffset,
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
@@ -2251,32 +2312,69 @@ MapErrnoToIoErr(int error)
 /****************************************************************************/
 
 /* Translate a BCPL style file name (i.e. length is in the first byte)
- * via a mapping table.
+ * via a mapping table. Returns TRUE if the translation could be performed
+ * and FALSE if at least one character cannot be translated.
  */
-INLINE STATIC VOID
+STATIC BOOL
 TranslateBName(UBYTE * name,const UBYTE * map)
 {
-	LONG len;
-	UBYTE c;
+	BOOL success = TRUE;
+	UBYTE c, d;
+	int len;
 
 	len = (*name++);
 
 	while(len-- > 0)
 	{
 		c = (*name);
+		d = map[c];
 
-		(*name++) = map[c];
+		/* Only the NUL character maps to itself, any
+		 * other mapping which produces a NUL means that
+		 * the respective mapping cannot represent the
+		 * desired character.
+		 */
+		if(d == '\0' && c != d)
+		{
+			success = FALSE;
+			break;
+		}
+
+		(*name++) = d;
 	}
+
+	return(success);
 }
 
-/* Translate a NUL terminated file name via a mapping table. */
-INLINE STATIC VOID
+/* Translate a NUL terminated file name via a mapping table. Returns TRUE if
+ * the translation could be performed and FALSE if at least one character
+ * cannot be translated.
+ */
+STATIC BOOL
 TranslateCName(UBYTE * name,const UBYTE * map)
 {
+	BOOL success = TRUE;
 	UBYTE c;
 
 	while((c = (*name)) != '\0')
-		(*name++) = map[c];
+	{
+		c = map[c];
+
+		/* Only the NUL character maps to itself, any
+		 * other mapping which produces a NUL means that
+		 * the respective mapping cannot represent the
+		 * desired character.
+		 */
+		if(c == '\0')
+		{
+			success = FALSE;
+			break;
+		}
+
+		(*name++) = c;
+	}
+
+	return(success);
 }
 
 /****************************************************************************/
@@ -2504,6 +2602,7 @@ Setup(
 	STRPTR	opt_servername,
 	int		opt_cachesize,
 	int		opt_max_transmit,
+	int		opt_timeout,
 	LONG *	opt_time_zone_offset,
 	LONG *	opt_dst_offset,
 	BOOL	opt_raw_smb,
@@ -2628,8 +2727,6 @@ Setup(
 			opt_password[i] = ToUpper(opt_password[i]);
 	}
 
-	TranslateNames = FALSE;
-
 	/* Read the translation file, if possible. */
 	if(translation_file != NULL)
 	{
@@ -2685,6 +2782,7 @@ Setup(
 		opt_servername,
 		opt_cachesize,
 		opt_max_transmit,
+		opt_timeout,
 		opt_raw_smb,
 		opt_write_behind,
 		opt_prefer_write_raw,
@@ -2877,7 +2975,7 @@ Setup(
 /****************************************************************************/
 
 /* Convert a BCPL string into a standard NUL terminated 'C' string. */
-INLINE STATIC VOID
+STATIC VOID
 ConvertBString(LONG max_len,STRPTR cstring,const void * bstring)
 {
 	const UBYTE * from = bstring;
@@ -2893,7 +2991,7 @@ ConvertBString(LONG max_len,STRPTR cstring,const void * bstring)
 }
 
 /* Convert a NUL terminated 'C' string into a BCPL string. */
-INLINE STATIC VOID
+STATIC VOID
 ConvertCString(void * bstring,LONG max_len,const UBYTE * cstring,LONG len)
 {
 	UBYTE * to = bstring;
@@ -3290,7 +3388,11 @@ Action_DeleteObject(
 	/* Translate the Amiga file name using a translation table? */
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
@@ -3484,7 +3586,11 @@ Action_CreateDir(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
@@ -3652,7 +3758,11 @@ Action_LocateObject(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	if(IsReservedName(FilePart(name)))
@@ -3957,7 +4067,11 @@ Action_SetProtect(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
@@ -4094,7 +4208,11 @@ Action_RenameObject(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	error = BuildFullName(parent_name,name,&full_source_name,&full_source_name_size);
@@ -4140,7 +4258,11 @@ Action_RenameObject(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	error = BuildFullName(parent_name,name,&full_destination_name,&full_destination_name_size);
@@ -4447,7 +4569,13 @@ Action_ExamineObject(
 
 				/* If necessary, translate the name to Amiga format using a mapping table. */
 				if(TranslateNames)
-					TranslateBName(fib->fib_FileName,M2A);
+				{
+					if(!TranslateBName(fib->fib_FileName,M2A))
+					{
+						error = ERROR_INVALID_COMPONENT_NAME;
+						goto out;
+					}
+				}
 			}
 
 			fib->fib_DirEntryType	= st.is_dir ? ST_USERDIR : ST_FILE;
@@ -4577,7 +4705,10 @@ dir_scan_callback_func_exnext(
 		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 		if(TranslateNames)
-			TranslateBName(fib->fib_FileName,M2A);
+		{
+			if(!TranslateBName(fib->fib_FileName,M2A))
+				goto out;
+		}
 	}
 
 	fib->fib_DirEntryType	= st->is_dir ? ST_USERDIR : ST_FILE;
@@ -4772,10 +4903,10 @@ dir_scan_callback_func_exall(
 	 */
 	if(!ignore_this_entry && NameIsAcceptable((STRPTR)name,MAX_FILENAME_LEN) && NOT (st->is_hidden && OmitHidden))
 	{
-		struct ExAllData * ed;
-		ULONG size;
 		ULONG type = ec->ec_Type;
-		BOOL take_it;
+		struct ExAllData * ed;
+		BOOL take_it = TRUE;
+		ULONG size;
 
 		size = (ec->ec_MinSize + strlen(name)+1 + 3) & ~3UL;
 		SHOWVALUE(size);
@@ -4810,7 +4941,10 @@ dir_scan_callback_func_exall(
 		strcpy(ed->ed_Name,name);
 
 		if(!TranslateUTF8 && TranslateNames)
-			TranslateCName(ed->ed_Name,M2A);
+		{
+			if(!TranslateCName(ed->ed_Name,M2A))
+				take_it = FALSE;
+		}
 
 		if(type >= ED_TYPE)
 			ed->ed_Type = st->is_dir ? ST_USERDIR : ST_FILE;
@@ -4855,8 +4989,6 @@ dir_scan_callback_func_exall(
 
 		if(type >= ED_OWNER)
 			ed->ed_OwnerUID = ed->ed_OwnerGID = 0;
-
-		take_it = TRUE;
 
 		if(ec->ec_Control->eac_MatchString != NULL)
 		{
@@ -5193,7 +5325,11 @@ Action_Find(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	if(IsReservedName(FilePart(name)))
@@ -5784,7 +5920,11 @@ Action_SetDate(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
@@ -5912,7 +6052,13 @@ Action_ExamineFH(
 		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 		if(TranslateNames)
-			TranslateBName(fib->fib_FileName,M2A);
+		{
+			if(!TranslateBName(fib->fib_FileName,M2A))
+			{
+				error = ERROR_INVALID_COMPONENT_NAME;
+				goto out;
+			}
+		}
 	}
 
 	fib->fib_DirEntryType	= ST_FILE;
@@ -6490,7 +6636,11 @@ Action_SetComment(
 	}
 	else if (TranslateNames)
 	{
-		TranslateCName(name,A2M);
+		if(!TranslateCName(name,A2M))
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 	}
 
 	error = BuildFullName(parent_name,name,&full_name,&full_name_size);

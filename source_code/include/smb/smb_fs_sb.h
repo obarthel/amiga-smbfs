@@ -62,6 +62,9 @@ struct smb_server
 
 	/* olsen (2018-05-08): Always use SMB_COM_READ, even if SMB_COM_READ_RAW were possible. */
 	int disable_read_raw;
+
+	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
+	int timeout;
 };
 
 #define NEGOTIATE_USER_SECURITY 0x01	/* If set, the server supports

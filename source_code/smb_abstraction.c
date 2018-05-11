@@ -97,6 +97,7 @@ smba_connect (
 	char *						workgroup_name,
 	int							cache_size,
 	int							max_transmit,
+	int							timeout,
 	int							opt_raw_smb,
 	int							opt_write_behind,
 	int							opt_prefer_write_raw,
@@ -148,6 +149,9 @@ smba_connect (
 	if(opt_disable_read_raw)
 		res->server.disable_read_raw = 1;
 
+	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
+	res->server.timeout = timeout;
+
 	errnum = smba_setup_dircache (res,cache_size);
 	if(errnum < 0)
 	{
@@ -164,8 +168,8 @@ smba_connect (
 	if ((s = strchr (hostname, '.')) != NULL)
 		(*s) = '\0';
 
-	data.addr.sin_family = AF_INET;
-	data.addr.sin_addr.s_addr = ip_addr;
+	data.addr.sin_family		= AF_INET;
+	data.addr.sin_addr.s_addr	= ip_addr;
 
 	#if DEBUG
 	{
@@ -1487,6 +1491,7 @@ smba_start(
 	char *				opt_servername,
 	int					opt_cachesize,
 	int					opt_max_transmit,
+	int					opt_timeout,
 	int					opt_raw_smb,
 	int					opt_write_behind,
 	int					opt_prefer_write_raw,
@@ -1643,6 +1648,7 @@ smba_start(
 		workgroup,
 		opt_cachesize,
 		opt_max_transmit,
+		opt_timeout,
 		opt_raw_smb,
 		opt_write_behind,
 		opt_prefer_write_raw,

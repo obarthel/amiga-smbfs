@@ -1361,3 +1361,40 @@ smbfs 1.125 (8.5.2018)
 - You can disable the use of SMB_COM_WRITE_RAW and SMB_COM_READ_RAW,
   respectively through the new DISABLEWRITERAW and DISABLEREADRAW
   options. These are intended for testing purposes only.
+
+
+smbfs 1.126 (9.5.2018)
+
+- Added the TIMEOUT option which can be used to set a send/receive
+  timeout. The timeout is given as the number of seconds to wait for
+  the reception/transmission to pick up again. If it fails to pick up
+  an error condition will be flagged.
+
+- Not all the calls to the recv() function took into account that
+  the request to read the incoming data could be fulfilled only
+  partly. The recv() calls have been replaced by a single function
+  which makes sure that either all the requested data has been
+  received, the connection has been closed or an error has
+  occured. This bug is at least 20 years old, since it is present
+  in the original "Sharity-Light" code which I ported in the
+  year 2000.
+
+
+smbfs 1.127 (10.5.2018)
+
+- If the smb_receive_raw() function receives fewer data than
+  expected it will always lead to the connection getting closed.
+  Previously, missing data could lead to the session getting
+  out of sync with what the server expected the client to
+  process.
+
+
+smbfs 1.128 (10.5.2018)
+
+- Added support for built-in CP437 and CP850 "OEM character set"
+  translation. CP850 appears to be the default character set
+  encoding for file and directory names which Samba uses.
+
+- The code page based translation now checks if the respective
+  file or directory name can be translated and will ignore or
+  reject it if necessary.

@@ -55,6 +55,40 @@
 
 /*****************************************************************************/
 
+/* Attempt to receive all the incoming data, even if recv() returns only
+ * parts of the total number of bytes requested. Returns the number of bytes
+ * read or, in case of error a negative number. A negative result is the
+ * value of -errno.
+ */
+static int
+receive_all(int fd, void * _data, int len)
+{
+	int num_bytes_received;
+	char * data = _data;
+	int result;
+
+	for(num_bytes_received = 0 ; num_bytes_received < len ; num_bytes_received += result)
+	{
+		result = recv(fd, &data[num_bytes_received], len - num_bytes_received, 0);
+		if(result == 0)
+			break;
+
+		if(result < 0)
+		{
+			result = -errno;
+			goto out;
+		}
+	}
+
+	result = num_bytes_received;
+
+ out:
+
+	return(result);
+}
+
+/*****************************************************************************/
+
 /* smb_receive_raw: The NetBIOS header is only stored if want_header != 0. */
 static int
 smb_receive_raw (
@@ -66,33 +100,24 @@ smb_receive_raw (
 	int							input_payload_size,
 	int							want_header)
 {
-	int len, result;
-	int num_bytes_received;
 	unsigned char netbios_session_buf[256];
 	int netbios_session_payload_size;
+	int len, result;
 
  re_recv:
 
 	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
-	result = recv (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE, 0);
-	if(result == 0)
-	{
-		LOG (("smb_receive_raw: EOF\n"));
-
-		/* End of file */
-		goto out;
-	}
-
+	result = receive_all (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE);
 	if (result < 0)
 	{
-		LOG (("smb_receive_raw: recv error = %ld\n", errno));
-		result = (-errno);
+		LOG (("smb_receive_raw: recv error = %ld\n", -result));
 		goto out;
 	}
 
 	if (result < NETBIOS_HEADER_SIZE)
 	{
 		LOG (("smb_receive_raw: got less than %ld bytes\n", NETBIOS_HEADER_SIZE));
+
 		result = -EIO;
 		goto out;
 	}
@@ -104,15 +129,20 @@ smb_receive_raw (
 	{
 		if(netbios_session_buf[0] != 0x00 && netbios_session_payload_size > 0)
 		{
+			/* We only want to show what's in the first few
+			 * bytes of a session packet. Since we only support
+			 * two session packet types (session message and
+			 * session keep alive) we will abort processing
+			 * anyway so it doesn't matter if we ignore any
+			 * data beyond the first 256 bytes.
+			 */
 			if(netbios_session_payload_size > 256 - NETBIOS_HEADER_SIZE)
 				netbios_session_payload_size = 256 - NETBIOS_HEADER_SIZE;
 
-			result = recv (sock_fd, &netbios_session_buf[NETBIOS_HEADER_SIZE], netbios_session_payload_size - NETBIOS_HEADER_SIZE, 0);
+			result = receive_all (sock_fd, &netbios_session_buf[NETBIOS_HEADER_SIZE], netbios_session_payload_size - NETBIOS_HEADER_SIZE);
 			if (result < 0)
 			{
-				LOG (("smb_receive_raw: recv error = %ld\n", errno));
-
-				result = (-errno);
+				LOG (("smb_receive_raw: recv error = %ld\n", -result));
 				goto out;
 			}
 
@@ -195,6 +225,9 @@ smb_receive_raw (
 	 */
 	if(input_payload != NULL)
 	{
+		int count_of_bytes_returned;
+		int count_of_bytes_to_read;
+		int num_bytes_received = 0;
 		int buffer_format;
 
 		LOG(("input_payload=0x%08lx, payload_size=%ld\n", input_payload, input_payload_size));
@@ -214,32 +247,24 @@ smb_receive_raw (
 
 		LOG(("reading the first %ld bytes\n", 48));
 
-		for(num_bytes_received = 0 ; num_bytes_received < 48 && num_bytes_received < len ; num_bytes_received += result)
+		result = receive_all (sock_fd, target, 48);
+		if (result < 0)
 		{
-			result = recv (sock_fd, (void *)&target[num_bytes_received], 48 - num_bytes_received, 0);
-			if(result == 0)
-			{
-				/* End of file */
-				LOG (("smb_receive_raw: EOF\n"));
-				break;
-			}
-
-			if (result < 0)
-			{
-				LOG (("smb_receive_raw: recvfrom error = %ld\n", errno));
-
-				result = (-errno);
-
-				goto out;
-			}
+			LOG (("smb_receive_raw: recv error = %ld\n", -result));
+			goto out;
 		}
+
+		num_bytes_received += result;
 
 		ASSERT( num_bytes_received == 48 );
 
 		/* End of file reached? */
 		if(num_bytes_received < 48)
 		{
-			result = 0;
+			/* End of file */
+			LOG (("smb_receive_raw: EOF\n"));
+
+			result = -EIO;
 			goto out;
 		}
 
@@ -253,52 +278,48 @@ smb_receive_raw (
 
 		LOG(("buffer format = %ld, should be %ld\n", buffer_format, 1));
 
-		if(buffer_format == 1)
+		if(buffer_format != 1)
 		{
-			int count_of_bytes_returned;
-			int count_of_bytes_to_read;
-			int num_data_bytes_received;
+			LOG(("buffer format %ld not supported\n", buffer_format));
+			result = -EIO;
+			goto out;
+		}
 
-			count_of_bytes_returned = WVAL(target, 33);
-			count_of_bytes_to_read = WVAL(target, 46);
+		count_of_bytes_returned = WVAL(target, 33);
+		count_of_bytes_to_read = WVAL(target, 46);
 
-			/* That should never be more data than the read buffer may hold. */
-			ASSERT( count_of_bytes_to_read <= input_payload_size );
-			ASSERT( count_of_bytes_to_read <= count_of_bytes_returned );
-			ASSERT( count_of_bytes_returned <= input_payload_size );
+		/* That should never be more data than the read buffer may hold. */
+		ASSERT( count_of_bytes_to_read <= input_payload_size );
+		ASSERT( count_of_bytes_to_read <= count_of_bytes_returned );
+		ASSERT( count_of_bytes_returned <= input_payload_size );
 
-			LOG(("count of bytes to read = %ld, should be <= %ld\n", count_of_bytes_to_read, input_payload_size));
+		LOG(("count of bytes to read = %ld, should be <= %ld\n", count_of_bytes_to_read, input_payload_size));
 
-			for(num_data_bytes_received = 0 ;
-			    num_data_bytes_received < count_of_bytes_to_read && num_bytes_received < len ;
-			    num_data_bytes_received += result, num_bytes_received += result)
-			{
-				result = recv (sock_fd, (void *)&input_payload[num_data_bytes_received], count_of_bytes_to_read - num_data_bytes_received, 0);
-				if(result == 0)
-				{
-					/* End of file */
-					LOG (("smb_receive_raw: EOF\n"));
-					break;
-				}
+		result = receive_all (sock_fd, input_payload, count_of_bytes_to_read);
+		if (result < 0)
+		{
+			LOG (("smb_receive_raw: recv error = %ld\n", -result));
+			goto out;
+		}
 
-				if (result < 0)
-				{
-					LOG (("smb_receive_raw: recvfrom error = %ld\n", errno));
+		if(result < count_of_bytes_to_read)
+		{
+			/* End of file */
+			LOG (("smb_receive_raw: EOF\n"));
 
-					result = (-errno);
+			result = -EIO;
+			goto out;
+		}
 
-					goto out;
-				}
-			}
+		num_bytes_received += result;
 
-			ASSERT( count_of_bytes_to_read == count_of_bytes_returned );
+		ASSERT( count_of_bytes_to_read == count_of_bytes_returned );
 
-			if(count_of_bytes_to_read < count_of_bytes_returned)
-			{
-				LOG(("fewer data available than should be delivered; setting the remainder (%ld bytes) to 0.\n", count_of_bytes_returned - count_of_bytes_to_read)); 
+		if(count_of_bytes_to_read < count_of_bytes_returned)
+		{
+			LOG(("fewer data available than should be delivered; setting the remainder (%ld bytes) to 0.\n", count_of_bytes_returned - count_of_bytes_to_read)); 
 
-				memset(&input_payload[count_of_bytes_to_read],0,count_of_bytes_returned - count_of_bytes_to_read);
-			}
+			memset(&input_payload[count_of_bytes_to_read],0,count_of_bytes_returned - count_of_bytes_to_read);
 		}
 
 		/* This should never happen, but then we better make sure to
@@ -308,59 +329,63 @@ smb_receive_raw (
 		{
 			LOG(("reading the remaining %ld bytes; this should never happen\n", len - num_bytes_received ));
 
-			for( ; num_bytes_received < len ; num_bytes_received += result)
+			result = receive_all (sock_fd, &target[num_bytes_received], len - num_bytes_received);
+			if (result < 0)
 			{
-				result = recv (sock_fd, (void *)&target[num_bytes_received], len - num_bytes_received, 0);
-				if(result == 0)
-				{
-					LOG (("smb_receive_raw: EOF\n"));
-
-					/* End of file */
-					break;
-				}
-
-				if (result < 0)
-				{
-					LOG (("smb_receive_raw: recvfrom error = %ld\n", errno));
-
-					result = (-errno);
-
-					goto out;
-				}
+				LOG (("smb_receive_raw: recv error = %ld\n", -result));
+				goto out;
 			}
-		}
-	}
-	else
-	{
-		for(num_bytes_received = 0 ; num_bytes_received < len ; num_bytes_received += result)
-		{
-			result = recv (sock_fd, (void *)&target[num_bytes_received], len - num_bytes_received, 0);
-			if(result == 0)
+
+			if(result < len - num_bytes_received)
 			{
 				/* End of file */
 				LOG (("smb_receive_raw: EOF\n"));
-				break;
-			}
 
-			if (result < 0)
-			{
-				LOG (("smb_receive_raw: recvfrom error = %ld\n", errno));
-
-				result = (-errno);
-
+				result = -EIO;
 				goto out;
 			}
 		}
-	}
 
-	#if defined(DUMP_SMB)
+		#if defined(DUMP_SMB)
+		{
+			/* If want_header==0 then this is the data returned by SMB_COM_READ_RAW. */
+			dump_smb(__FILE__,__LINE__,!want_header,target,48,smb_packet_to_consumer,server->max_recv);
+
+			if(buffer_format == 1)
+				dump_smb(__FILE__,__LINE__,!want_header,input_payload,num_bytes_received - 48,smb_packet_to_consumer,server->max_recv);
+
+			if(num_bytes_received < len && result > 0)
+				dump_smb(__FILE__,__LINE__,!want_header,&target[num_bytes_received],result,smb_packet_to_consumer,server->max_recv);
+		}
+		#endif /* defined(DUMP_SMB) */
+
+		result = num_bytes_received;
+	}
+	else
 	{
-		/* If want_header==0 then this is the data returned by SMB_COM_READ_RAW. */
-		dump_smb(__FILE__,__LINE__,!want_header,target,num_bytes_received,smb_packet_to_consumer,server->max_recv);
-	}
-	#endif /* defined(DUMP_SMB) */
+		result = receive_all (sock_fd, target, len);
+		if (result < 0)
+		{
+			LOG (("smb_receive_raw: recv error = %ld\n", -result));
+			goto out;
+		}
 
-	result = num_bytes_received;
+		if(result < len)
+		{
+			/* End of file */
+			LOG (("smb_receive_raw: EOF\n"));
+
+			result = -EIO;
+			goto out;
+		}
+
+		#if defined(DUMP_SMB)
+		{
+			/* If want_header==0 then this is the data returned by SMB_COM_READ_RAW. */
+			dump_smb(__FILE__,__LINE__,!want_header,target,result,smb_packet_to_consumer,server->max_recv);
+		}
+		#endif /* defined(DUMP_SMB) */
+	}
 
  out:
 
@@ -378,16 +403,19 @@ smb_receive (struct smb_server *server, int sock_fd, void * input_payload, int p
 	result = smb_receive_raw (server, sock_fd, packet,
 	                          server->max_recv,
 	                          input_payload, payload_size,
-	                          TRUE); /* We want the NetBIOS frame header */
+	                          TRUE); /* We want the NetBIOS session service header */
 	if (result < 0)
 	{
 		LOG (("smb_receive: receive error: %ld\n", result));
 		goto out;
 	}
 
-	server->rcls = BVAL (packet, 9);
-	server->err = WVAL (packet, 11);
+	server->rcls	= BVAL (packet, 9);
+	server->err		= WVAL (packet, 11);
 
+	/* The caller is responsible for dealing with the error
+	 * information.
+	 */
 	if (server->rcls != 0)
 		LOG (("smb_receive: error class=%ld, error=%ld\n", server->rcls, server->err));
 
@@ -438,7 +466,9 @@ smb_receive_trans2 (
 	if (result < 0)
 		goto fail;
 
-	/* Is an error condition set? */
+	/* Is an error condition set? The caller is responsible
+	 * for dealing with the error.
+	 */
 	if (server->rcls != 0)
 		goto fail;
 
@@ -489,7 +519,7 @@ smb_receive_trans2 (
 	param_len = 0;
 	data_len = 0;
 
-	while (1)
+	while (TRUE)
 	{
 		parameter_displacement = WVAL (inbuf, smb_prdisp);
 		parameter_count = WVAL (inbuf, smb_prcnt);
@@ -607,7 +637,23 @@ smb_connect (struct smb_server *server)
 
 	result = connect (server->mount_data.fd, (struct sockaddr *)&server->mount_data.addr, sizeof(struct sockaddr_in));
 	if(result < 0)
+	{
 		result = (-errno);
+		goto out;
+	}
+
+	/* Configure the send/receive timeout (in seconds)? */
+	if(server->timeout > 0)
+	{
+		struct timeval tv;
+
+		memset(&tv,0,sizeof(tv));
+
+		tv.tv_secs = server->timeout;
+
+		setsockopt(server->mount_data.fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
+		setsockopt(server->mount_data.fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+	}
 
  out:
 

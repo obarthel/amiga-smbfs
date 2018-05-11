@@ -73,7 +73,7 @@ int smba_rmdir(smba_server_t *s, char *path);
 int smba_rename(smba_server_t *s, char *from, char *to);
 int smba_statfs(smba_server_t *s, long *bsize, long *blocks, long *bfree);
 void smb_invalidate_all_inodes(struct smb_server *server);
-int smba_start(char *service, char *opt_workgroup, char *opt_username, char *opt_password, char *opt_clientname, char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw, int opt_disable_write_raw, int opt_disable_read_raw, smba_server_t **result);
+int smba_start(char *service, char *opt_workgroup, char *opt_username, char *opt_password, char *opt_clientname, char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, int opt_raw_smb, int opt_write_behind, int opt_prefer_write_raw, int opt_disable_write_raw, int opt_disable_read_raw, smba_server_t **result);
 void smba_disconnect(smba_server_t *server);
 int smba_get_dircache_size(struct smba_server * server);
 int smba_change_dircache_size(struct smba_server * server,int cache_size);
