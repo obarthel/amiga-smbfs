@@ -621,12 +621,12 @@ smb_errno (int errcls, int error)
 		if(err_class != NULL && err_code != NULL)
 		{
 			LOG(("translated error code %ld/%ld (%s/%s) to %ld (%s)\n",
-				errcls,error,err_class->class,err_code->message,(-result),strerror(-result)));
+				errcls,error,err_class->class,err_code->message,result,strerror(result)));
 		}
 		else
 		{
 			LOG(("no proper translation for error code %ld/%ld to %ld (%s)\n",
-				errcls,error,(-result),strerror(-result)));
+				errcls,error,result,strerror(result)));
 		}
 	}
 	#endif /* DEBUG */

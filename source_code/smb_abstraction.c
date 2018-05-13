@@ -11,6 +11,7 @@
  */
 
 #include "smbfs.h"
+#include "errors.h"
 
 /*****************************************************************************/
 
@@ -239,10 +240,7 @@ smba_connect (
 	NewList((struct List *)&res->open_files);
 
 	if (smb_proc_connect (&res->server, error_ptr) < 0)
-	{
-		ReportError("Cannot connect to server (%ld, %s).", (*error_ptr),posix_strerror(*error_ptr));
 		goto error_occured;
-	}
 
 	if (!use_E)
 		res->supports_E_known = 1;
@@ -1609,7 +1607,20 @@ smba_start(
 		smb_error_ptr,
 		&the_server) < 0)
 	{
-		ReportError("Could not connect to server (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
+		if((*error_ptr) == error_check_smb_error)
+		{
+			char * smb_class_name;
+			char * smb_code_text;
+
+			smb_translate_error_class_and_code((*smb_error_class_ptr),(*smb_error_ptr),&smb_class_name,&smb_code_text);
+
+			ReportError("Could not connect to server (%ld/%ld, %s/%s).",(*smb_error_class_ptr),(*smb_error_ptr),smb_class_name,smb_code_text);
+		}
+		else
+		{
+			ReportError("Could not connect to server (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
+		}
+
 		goto out;
 	}
 

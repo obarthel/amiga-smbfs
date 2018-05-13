@@ -1419,3 +1419,21 @@ smbfs 1.129 (13.5.2018)
   instead of using EIO. The errors which the directory entry
   decoding has to put up with are now specific to this function's
   purpose.
+
+
+smbfs 1.130 (13.5.2018)
+
+- Failure to set up an SMB session with the server is no
+  longer reported twice.
+
+- Failure to set up an SMB session with the server is no
+  longer reported twice.
+
+- SMB session setup error messages now display the SMB error
+  information, if available.
+
+- The debug output now prints the SMB error information along
+  with the POSIX version and the AmigaDOS version. This might
+  finally produce the kind of insights which so far have been
+  denied to us during long data copying sessions which either
+  stalled or stopped for no apparent reason.

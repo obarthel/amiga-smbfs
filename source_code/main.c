@@ -2256,6 +2256,7 @@ MapErrnoToIoErr(int error)
 		{ -1,				-1 }
 	};
 
+	int original_error = error;
 	LONG result = ERROR_ACTION_NOT_KNOWN;
 	int i;
 
@@ -2272,9 +2273,6 @@ MapErrnoToIoErr(int error)
 		error = smb_errno(error_class, error_code);
 	}
 
-	if(error < 0)
-		error = (-error);
-
 	for(i = 0 ; map_posix_to_amigados[i][0] != -1 ; i++)
 	{
 		if(map_posix_to_amigados[i][0] == error)
@@ -2290,7 +2288,7 @@ MapErrnoToIoErr(int error)
 
 		Fault(result,NULL,amigados_error_text,sizeof(amigados_error_text));
 
-		if(error == error_check_smb_error)
+		if(original_error == error_check_smb_error)
 		{
 			int error_class	= ((struct smb_server *)ServerData)->rcls;
 			int error_code	= ((struct smb_server *)ServerData)->err;
@@ -2299,11 +2297,11 @@ MapErrnoToIoErr(int error)
 
 			smb_translate_error_class_and_code(error_class,error_code,&smb_class_name,&smb_code_text);
 
-			LOG(("Translated SMB error %ld/%ld (%s/%s) -> POSIX error code %ld (%s) -> AmigaDOS error code %ld (%s)\n", error_class, error_code, smb_class_name, smb_code_text, error, posix_strerror(error), result, amigados_error_text));
+			LOG(("Translated SMB %ld/%ld (%s/%s) -> POSIX %ld (%s) -> AmigaDOS error %ld (%s)\n", error_class, error_code, smb_class_name, smb_code_text, error, posix_strerror(error), result, amigados_error_text));
 		}
 		else
 		{
-			LOG(("Translated POSIX error code %ld (%s) -> AmigaDOS error code %ld (%s)\n", error, posix_strerror(error), result, amigados_error_text));
+			LOG(("Translated POSIX %ld (%s) -> AmigaDOS error %ld (%s)\n", error, posix_strerror(error), result, amigados_error_text));
 		}
 	}
 	#endif /* DEBUG */
