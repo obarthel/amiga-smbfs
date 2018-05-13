@@ -66,15 +66,15 @@ $(PROJECT): $(OBJS)
 ###############################################################################
 
 assert.o : assert.c
-cp437.o : cp437.c cp437.h
-cp850.o : cp850.c cp850.h
+cp437.o : cp437.c
+cp850.o : cp850.c
 crypt.o : crypt.c system_headers.h assert.h smbfs.h
-main.o : main.c system_headers.h assert.h smbfs.h smb_abstraction.h smbfs_rev.h dump_smb.h utf-8-iso-8859-1-conversion.h cp437.h cp850.h
-proc.o : proc.c system_headers.h assert.h smbfs.h quad_math.h
+dump_smb.o : dump_smb.c system_headers.h assert.h smbfs.h dump_smb.h quad_math.h
+main.o : main.c system_headers.h assert.h smbfs.h smb_abstraction.h utf-8-iso-8859-1-conversion.h cp437.h cp850.h errors.h dump_smb.h smbfs_rev.h
+proc.o : proc.c system_headers.h assert.h smbfs.h quad_math.h errors.h
 quad_math.o : quad_math.c quad_math.h
 smb_abstraction.o : smb_abstraction.c system_headers.h assert.h smbfs.h smb_abstraction.h
-sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h dump_smb.h
-dump_smb.o : dump_smb.c system_headers.h assert.h smbfs.h dump_smb.h quad_math.h
+sock.o : sock.c system_headers.h assert.h smbfs.h smb_abstraction.h dump_smb.h errors.h
 utf-8-iso-8859-1-conversion.o : utf-8-iso-8859-1-conversion.c utf-8-iso-8859-1-conversion.h
 
 ###############################################################################

@@ -45,6 +45,7 @@
 
 #include "smb_abstraction.h"
 #include "dump_smb.h"
+#include "errors.h"
 
 /*****************************************************************************/
 
@@ -77,11 +78,14 @@
  * value of -errno.
  */
 static int
-receive_all(int fd, void * _data, int len)
+receive_all(int fd, void * _data, int len, int * error_ptr)
 {
 	int num_bytes_received;
 	char * data = _data;
 	int result;
+
+	ASSERT( data != NULL || len == 0 );
+	ASSERT( error_ptr != NULL );
 
 	for(num_bytes_received = 0 ; num_bytes_received < len ; num_bytes_received += result)
 	{
@@ -91,7 +95,7 @@ receive_all(int fd, void * _data, int len)
 
 		if(result < 0)
 		{
-			result = -errno;
+			(*error_ptr) = errno;
 			goto out;
 		}
 	}
@@ -108,33 +112,41 @@ receive_all(int fd, void * _data, int len)
 /* smb_receive_raw: The NetBIOS header is only stored if want_header != 0. */
 static int
 smb_receive_raw (
-	const struct smb_server *	server,
-	int							sock_fd,
-	unsigned char *				target,
-	int							max_raw_length,
-	char *						input_payload,
-	int							input_payload_size,
-	int							want_header)
+	struct smb_server *	server,
+	int					sock_fd,
+	unsigned char *		target,
+	int					max_raw_length,
+	char *				input_payload,
+	int					input_payload_size,
+	int					want_header,
+	int *				error_ptr)
 {
 	unsigned char netbios_session_buf[256];
 	int netbios_session_payload_size;
 	int len, result;
 
+	ASSERT( error_ptr != NULL );
+
+	server->rcls	= 0;
+	server->err		= 0;
+
  re_recv:
 
 	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
-	result = receive_all (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE);
+	result = receive_all (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE, error_ptr);
 	if (result < 0)
 	{
-		LOG (("smb_receive_raw: recv error = %ld\n", -result));
+		LOG (("recv error = %ld\n", (*error_ptr)));
 		goto out;
 	}
 
 	if (result < NETBIOS_HEADER_SIZE)
 	{
-		LOG (("smb_receive_raw: got less than %ld bytes\n", NETBIOS_HEADER_SIZE));
+		LOG (("got less than %ld bytes\n", NETBIOS_HEADER_SIZE));
 
-		result = -EIO;
+		(*error_ptr) = error_end_of_file;
+
+		result = -1;
 		goto out;
 	}
 
@@ -155,18 +167,20 @@ smb_receive_raw (
 			if(netbios_session_payload_size > 256 - NETBIOS_HEADER_SIZE)
 				netbios_session_payload_size = 256 - NETBIOS_HEADER_SIZE;
 
-			result = receive_all (sock_fd, &netbios_session_buf[NETBIOS_HEADER_SIZE], netbios_session_payload_size - NETBIOS_HEADER_SIZE);
+			result = receive_all (sock_fd, &netbios_session_buf[NETBIOS_HEADER_SIZE], netbios_session_payload_size - NETBIOS_HEADER_SIZE, error_ptr);
 			if (result < 0)
 			{
-				LOG (("smb_receive_raw: recv error = %ld\n", -result));
+				LOG (("recv error = %ld\n", (*error_ptr)));
 				goto out;
 			}
 
 			if(result < netbios_session_payload_size - NETBIOS_HEADER_SIZE)
 			{
-				LOG (("smb_receive_raw: result (%ld) < %ld\n", result, netbios_session_payload_size - NETBIOS_HEADER_SIZE));
+				LOG (("result (%ld) < %ld\n", result, netbios_session_payload_size - NETBIOS_HEADER_SIZE));
 
-				result = -EIO;
+				(*error_ptr) = error_end_of_file;
+
+				result = -1;
 				goto out;
 			}
 
@@ -190,7 +204,7 @@ smb_receive_raw (
 		/* 0x85 == session keepalive */
 		case 0x85:
 
-			LOG (("smb_receive_raw: Got SESSION KEEP ALIVE\n"));
+			LOG (("Got SESSION KEEP ALIVE\n"));
 			goto re_recv;
 
 		/* 0x81 == session request */
@@ -199,9 +213,11 @@ smb_receive_raw (
 		/* 0x84 == retarget session response */
 		default:
 
-			LOG (("smb_receive_raw: Invalid session header type 0x%02lx\n", netbios_session_buf[0]));
+			LOG (("Invalid session header type 0x%02lx\n", netbios_session_buf[0]));
 
-			result = -EIO;
+			(*error_ptr) = error_invalid_netbios_session;
+
+			result = -1;
 			goto out;
 	}
 
@@ -209,9 +225,11 @@ smb_receive_raw (
 	len = netbios_session_payload_size;
 	if (len > max_raw_length)
 	{
-		LOG (("smb_receive_raw: Received length (%ld) > max_xmit (%ld)!\n", len, max_raw_length));
+		LOG (("Received length (%ld) > max_xmit (%ld)!\n", len, max_raw_length));
 
-		result = -EIO;
+		(*error_ptr) = error_message_exceeds_buffer_size;
+
+		result = -1;
 		goto out;
 	}
 
@@ -221,9 +239,11 @@ smb_receive_raw (
 		/* Check for buffer overflow. */
 		if(NETBIOS_HEADER_SIZE + len > max_raw_length)
 		{
-			LOG (("smb_receive_raw: Received length (%ld) > max_xmit (%ld)!\n", len, max_raw_length));
+			LOG (("Received length (%ld) > max_xmit (%ld)!\n", len, max_raw_length));
 
-			result = -EIO;
+			(*error_ptr) = error_message_exceeds_buffer_size;
+
+			result = -1;
 			goto out;
 		}
 	
@@ -263,10 +283,10 @@ smb_receive_raw (
 
 		LOG(("reading the first %ld bytes\n", 48));
 
-		result = receive_all (sock_fd, target, 48);
+		result = receive_all (sock_fd, target, 48, error_ptr);
 		if (result < 0)
 		{
-			LOG (("smb_receive_raw: recv error = %ld\n", -result));
+			LOG (("recv error = %ld\n", (*error_ptr)));
 			goto out;
 		}
 
@@ -278,9 +298,11 @@ smb_receive_raw (
 		if(num_bytes_received < 48)
 		{
 			/* End of file */
-			LOG (("smb_receive_raw: EOF\n"));
+			LOG (("EOF\n"));
 
-			result = -EIO;
+			(*error_ptr) = error_end_of_file;
+	
+			result = -1;
 			goto out;
 		}
 
@@ -297,7 +319,10 @@ smb_receive_raw (
 		if(buffer_format != 1)
 		{
 			LOG(("buffer format %ld not supported\n", buffer_format));
-			result = -EIO;
+
+			(*error_ptr) = error_invalid_buffer_format;
+
+			result = -1;
 			goto out;
 		}
 
@@ -311,19 +336,29 @@ smb_receive_raw (
 
 		LOG(("count of bytes to read = %ld, should be <= %ld\n", count_of_bytes_to_read, input_payload_size));
 
-		result = receive_all (sock_fd, input_payload, count_of_bytes_to_read);
+		if(count_of_bytes_returned > input_payload_size)
+		{
+			(*error_ptr) = error_message_exceeds_buffer_size;
+
+			result = -1;
+			goto out;
+		}
+
+		result = receive_all (sock_fd, input_payload, count_of_bytes_to_read, error_ptr);
 		if (result < 0)
 		{
-			LOG (("smb_receive_raw: recv error = %ld\n", -result));
+			LOG (("recv error = %ld\n", (*error_ptr)));
 			goto out;
 		}
 
 		if(result < count_of_bytes_to_read)
 		{
 			/* End of file */
-			LOG (("smb_receive_raw: EOF\n"));
+			LOG (("EOF\n"));
 
-			result = -EIO;
+			(*error_ptr) = error_end_of_file;
+
+			result = -1;
 			goto out;
 		}
 
@@ -345,19 +380,21 @@ smb_receive_raw (
 		{
 			LOG(("reading the remaining %ld bytes; this should never happen\n", len - num_bytes_received ));
 
-			result = receive_all (sock_fd, &target[num_bytes_received], len - num_bytes_received);
+			result = receive_all (sock_fd, &target[num_bytes_received], len - num_bytes_received, error_ptr);
 			if (result < 0)
 			{
-				LOG (("smb_receive_raw: recv error = %ld\n", -result));
+				LOG (("recv error = %ld\n", (*error_ptr)));
 				goto out;
 			}
 
 			if(result < len - num_bytes_received)
 			{
 				/* End of file */
-				LOG (("smb_receive_raw: EOF\n"));
+				LOG (("EOF\n"));
 
-				result = -EIO;
+				(*error_ptr) = error_end_of_file;
+
+				result = -1;
 				goto out;
 			}
 		}
@@ -379,19 +416,21 @@ smb_receive_raw (
 	}
 	else
 	{
-		result = receive_all (sock_fd, target, len);
+		result = receive_all (sock_fd, target, len, error_ptr);
 		if (result < 0)
 		{
-			LOG (("smb_receive_raw: recv error = %ld\n", -result));
+			LOG (("recv error = %ld\n", (*error_ptr)));
 			goto out;
 		}
 
 		if(result < len)
 		{
 			/* End of file */
-			LOG (("smb_receive_raw: EOF\n"));
+			LOG (("EOF\n"));
 
-			result = -EIO;
+			(*error_ptr) = error_end_of_file;
+
+			result = -1;
 			goto out;
 		}
 
@@ -409,31 +448,30 @@ smb_receive_raw (
 }
 
 static int
-smb_receive (struct smb_server *server, int sock_fd, void * input_payload, int payload_size)
+smb_receive (struct smb_server *server, int sock_fd, void * input_payload, int payload_size, int * error_ptr)
 {
 	byte * packet = server->transmit_buffer;
 	int result;
 
+	ASSERT( error_ptr != NULL );
 	ASSERT( server->max_recv <= server->transmit_buffer_size );
 
 	result = smb_receive_raw (server, sock_fd, packet,
 	                          server->max_recv,
 	                          input_payload, payload_size,
-	                          TRUE); /* We want the NetBIOS session service header */
+	                          TRUE, /* We want the NetBIOS session service header */
+	                          error_ptr);
 	if (result < 0)
 	{
-		LOG (("smb_receive: receive error: %ld\n", result));
+		LOG (("receive error: %ld\n", (*error_ptr)));
 		goto out;
 	}
-
-	server->rcls	= BVAL (packet, 9);
-	server->err		= WVAL (packet, 11);
 
 	/* The caller is responsible for dealing with the error
 	 * information.
 	 */
-	if (server->rcls != 0)
-		LOG (("smb_receive: error class=%ld, error=%ld\n", server->rcls, server->err));
+	server->rcls	= BVAL (packet, 9);
+	server->err		= WVAL (packet, 11);
 
  out:
 
@@ -448,7 +486,8 @@ smb_receive_trans2 (
 	int *				data_len_ptr,
 	int *				param_len_ptr,
 	char **				data_ptr,
-	char **				param_ptr)
+	char **				param_ptr,
+	int *				error_ptr)
 {
 	unsigned char *inbuf = server->transmit_buffer;
 	int parameter_displacement;
@@ -472,21 +511,20 @@ smb_receive_trans2 (
 	ASSERT( param_len_ptr != NULL );
 	ASSERT( data_ptr != NULL );
 	ASSERT( param_ptr != NULL );
-
-	LOG (("smb_receive_trans2: enter\n"));
+	ASSERT( error_ptr != NULL );
 
 	(*data_len_ptr) = (*param_len_ptr) = 0;
 	(*param_ptr) = (*data_ptr) = NULL;
 
-	result = smb_receive (server, sock_fd, NULL, 0);
+	result = smb_receive (server, sock_fd, NULL, 0, error_ptr);
 	if (result < 0)
-		goto fail;
+		goto out;
 
 	/* Is an error condition set? The caller is responsible
 	 * for dealing with the error.
 	 */
 	if (server->rcls != 0)
-		goto fail;
+		goto out;
 
 	/* parse out the lengths */
 	total_data = WVAL (inbuf, smb_tdrcnt);
@@ -494,10 +532,12 @@ smb_receive_trans2 (
 
 	if ((total_data > server->max_recv) || (total_param > server->max_recv))
 	{
-		LOG (("smb_receive_trans2: data/param too long\n"));
+		LOG (("data/param too long\n"));
 
-		result = -EIO;
-		goto fail;
+		(*error_ptr) = error_data_exceeds_buffer_size;
+
+		result = -1;
+		goto out;
 	}
 
 	/* Allocate it, but only if there is something to allocate
@@ -508,10 +548,12 @@ smb_receive_trans2 (
 		data = malloc (total_data);
 		if (data == NULL)
 		{
-			LOG (("smb_receive_trans2: could not alloc data area\n"));
+			LOG (("could not alloc data area\n"));
 
-			result = -ENOMEM;
-			goto fail;
+			(*error_ptr) = ENOMEM;
+
+			result = -1;
+			goto out;
 		}
 	}
 
@@ -523,14 +565,16 @@ smb_receive_trans2 (
 		param = malloc(total_param);
 		if (param == NULL)
 		{
-			LOG (("smb_receive_trans2: could not alloc param area\n"));
+			LOG (("could not alloc param area\n"));
 
-			result = -ENOMEM;
-			goto fail;
+			(*error_ptr) = ENOMEM;
+
+			result = -1;
+			goto out;
 		}
 	}
 
-	LOG (("smb_rec_trans2: total_data/total_param: %ld/%ld\n", total_data, total_param));
+	LOG (("total_data/total_param: %ld/%ld\n", total_data, total_param));
 
 	param_len = 0;
 	data_len = 0;
@@ -550,10 +594,12 @@ smb_receive_trans2 (
 
 		if (parameter_displacement + parameter_count > total_param)
 		{
-			LOG (("smb_receive_trans2: invalid parameters\n"));
+			LOG (("invalid parameters\n"));
 
-			result = -EIO;
-			goto fail;
+			(*error_ptr) = error_invalid_parameter_size;
+
+			result = -1;
+			goto out;
 		}
 
 		if(param != NULL)
@@ -563,10 +609,12 @@ smb_receive_trans2 (
 
 		if (data_displacement + data_count > total_data)
 		{
-			LOG (("smb_receive_trans2: invalid data block\n"));
+			LOG (("invalid data block\n"));
 
-			result = -EIO;
-			goto fail;
+			(*error_ptr) = error_invalid_parameter_size;
+
+			result = -1;
+			goto out;
 		}
 
 		if(data != NULL)
@@ -574,15 +622,17 @@ smb_receive_trans2 (
 
 		data_len += data_count;
 
-		LOG (("smb_rec_trans2: data count/parameter count: %ld/%ld\n", data_count, parameter_count));
+		LOG (("data count/parameter count: %ld/%ld\n", data_count, parameter_count));
 
 		/* parse out the total lengths again - they can shrink! */
 		if (total_data_count > total_data || total_parameter_count > total_param)
 		{
-			LOG (("smb_receive_trans2: data/params grew!\n"));
+			LOG (("data/params grew!\n"));
 
-			result = -EIO;
-			goto fail;
+			(*error_ptr) = error_data_exceeds_buffer_size;
+
+			result = -1;
+			goto out;
 		}
 
 		total_data = total_data_count;
@@ -591,29 +641,30 @@ smb_receive_trans2 (
 		if (total_data <= data_len && total_param <= param_len)
 			break;
 
-		result = smb_receive (server, sock_fd, NULL, 0);
+		result = smb_receive (server, sock_fd, NULL, 0, error_ptr);
 		if (result < 0)
-			goto fail;
+			goto out;
 
 		if (server->rcls != 0)
 		{
-			result = -smb_errno (server->rcls, server->err);
-			goto fail;
+			(*error_ptr) = error_check_smb_error;
+
+			result = -1;
+			goto out;
 		}
 	}
 
 	(*param_ptr) = param;
 	(*param_len_ptr) = param_len;
+	param = NULL;
 
 	(*data_ptr) = data;
 	(*data_len_ptr) = data_len;
+	data = NULL;
 
-	LOG (("smb_receive_trans2: normal exit\n"));
-	return 0;
+	result = 0;
 
- fail:
-
-	LOG (("smb_receive_trans2: failed exit\n"));
+ out:
 
 	if(param != NULL)
 		free (param);
@@ -635,18 +686,24 @@ smb_release (struct smb_server *server)
 }
 
 int
-smb_connect (struct smb_server *server)
+smb_connect (struct smb_server *server, int * error_ptr)
 {
 	int result;
 
+	ASSERT( server != NULL );
+	ASSERT( error_ptr != NULL );
+
 	if(server->mount_data.fd < 0)
 	{
-		server->mount_data.fd = socket (AF_INET, SOCK_STREAM, 0);
-		if (server->mount_data.fd < 0)
+		result = socket (AF_INET, SOCK_STREAM, 0);
+		if (result < 0)
 		{
-			result = (-errno);
+			(*error_ptr) = errno;
+
 			goto out;
 		}
+
+		server->mount_data.fd = result;
 	}
 
 	LOG(("connecting to server %s\n", Inet_NtoA(server->mount_data.addr.sin_addr.s_addr)));
@@ -654,7 +711,8 @@ smb_connect (struct smb_server *server)
 	result = connect (server->mount_data.fd, (struct sockaddr *)&server->mount_data.addr, sizeof(struct sockaddr_in));
 	if(result < 0)
 	{
-		result = (-errno);
+		(*error_ptr) = errno;
+
 		goto out;
 	}
 
@@ -676,29 +734,79 @@ smb_connect (struct smb_server *server)
 	return(result);
 }
 
+/* If there was a network error, or data was left unread,
+ * the best option is to the close server connection and
+ * reopen it again.
+ */
+void
+smb_check_server_connection(struct smb_server *server, int error)
+{
+	if(server->state == CONN_VALID)
+	{
+		int close_connection;
+
+		switch(error)
+		{
+			case error_end_of_file:
+			case error_invalid_netbios_session:
+			case error_message_exceeds_buffer_size:
+			case error_invalid_buffer_format:
+			case error_data_exceeds_buffer_size:
+			case error_invalid_parameter_size:
+			case error_server_setup_incomplete:
+			case error_server_connection_invalid:
+			case error_smb_message_signature_missing:
+			case error_smb_message_too_short:
+			case error_smb_message_invalid_command:
+			case error_smb_message_invalid_word_count:
+			case error_smb_message_invalid_byte_count:
+
+				close_connection = TRUE;
+				break;
+
+			default:
+
+				close_connection = (error < error_end_of_file);
+				break;
+		}
+
+		if(close_connection)
+		{
+			server->state = CONN_INVALID;
+			smb_invalidate_all_inodes (server);
+		}
+	}
+}
+
 /* Returns number of bytes received (>= 0) or a negative value in
  * case of error.
  */
 int
-smb_request (struct smb_server *server, void * input_payload, const void * output_payload, int payload_size)
+smb_request (struct smb_server *server, void * input_payload, const void * output_payload, int payload_size, int * error_ptr)
 {
-	int len, result;
-	int sock_fd = server->mount_data.fd;
 	unsigned char *buffer = server->transmit_buffer;
+	int sock_fd = server->mount_data.fd;
+	int len, result;
+
+	ASSERT( error_ptr != NULL );
 
 	if ((sock_fd < 0) || (buffer == NULL))
 	{
-		LOG (("smb_request: Bad server!\n"));
+		LOG (("Bad server!\n"));
 
-		result = -EBADF;
+		(*error_ptr) = error_server_setup_incomplete;
+
+		result = -1;
 		goto out;
 	}
 
 	if (server->state != CONN_VALID)
 	{
-		LOG (("smb_request: Connection state is invalid\n"));
+		LOG (("Connection state is invalid\n"));
 
-		result = -EIO;
+		(*error_ptr) = error_server_connection_invalid;
+
+		result = -1;
 		goto out;
 	}
 
@@ -718,7 +826,7 @@ smb_request (struct smb_server *server, void * input_payload, const void * outpu
 		len -= payload_size;
 	}
 
-	LOG (("smb_request: len = %ld, cmd = 0x%lx, input_payload=0x%08lx, output_payload=0x%08lx, payload_size=%ld\n", len, buffer[8], input_payload, output_payload, payload_size));
+	LOG (("len = %ld, cmd = 0x%lx, input_payload=0x%08lx, output_payload=0x%08lx, payload_size=%ld\n", len, buffer[8], input_payload, output_payload, payload_size));
 
 	#if defined(DUMP_SMB)
 	dump_netbios_header(__FILE__,__LINE__,buffer,&buffer[NETBIOS_HEADER_SIZE],len);
@@ -728,9 +836,10 @@ smb_request (struct smb_server *server, void * input_payload, const void * outpu
 	result = send (sock_fd, (void *) buffer, len, 0);
 	if (result < 0)
 	{
-		LOG(("smb_request: send() for %ld bytes failed (errno=%ld)\n", len, errno));
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
 
-		result = (-errno);
+		(*error_ptr) = errno;
+
 		goto out;
 	}
 
@@ -739,24 +848,22 @@ smb_request (struct smb_server *server, void * input_payload, const void * outpu
 		result = send (sock_fd, (void *)output_payload, payload_size, 0);
 		if (result < 0)
 		{
-			LOG(("smb_request: payload send() for %ld bytes failed (errno=%ld)\n", payload_size, errno));
+			LOG(("payload send() for %ld bytes failed (errno=%ld)\n", payload_size, errno));
 
-			result = (-errno);
+			(*error_ptr) = errno;
+
 			goto out;
 		}
 	}
 
-	result = smb_receive (server, sock_fd, input_payload, payload_size);
+	result = smb_receive (server, sock_fd, input_payload, payload_size, error_ptr);
 
  out:
 
 	if (result < 0)
-	{
-		server->state = CONN_INVALID;
-		smb_invalidate_all_inodes (server);
-	}
+		smb_check_server_connection(server,(*error_ptr));
 
-	LOG (("smb_request: result = %ld\n", result));
+	LOG (("result = %ld\n", result));
 
 	return (result);
 }
@@ -765,17 +872,21 @@ smb_request (struct smb_server *server, void * input_payload, const void * outpu
  * one packet to send.
  */
 int
-smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, char **data, char **param)
+smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, char **data, char **param, int * error_ptr)
 {
-	int len, result;
-	int sock_fd = server->mount_data.fd;
 	unsigned char *buffer = server->transmit_buffer;
+	int sock_fd = server->mount_data.fd;
+	int len, result;
+
+	ASSERT( error_ptr != NULL );
 
 	if (server->state != CONN_VALID)
 	{
-		LOG (("smb_trans2_request: Connection state is invalid\n"));
+		LOG (("Connection state is invalid\n"));
 
-		result = -EIO;
+		(*error_ptr) = error_server_connection_invalid;
+
+		result = -1;
 		goto out;
 	}
 
@@ -784,7 +895,7 @@ smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, ch
 	 */
 	len = NETBIOS_HEADER_SIZE + smb_len (buffer);
 
-	LOG (("smb_request: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
+	LOG (("len = %ld cmd = 0x%02lx\n", len, buffer[8]));
 
 	#if defined(DUMP_SMB)
 	dump_netbios_header(__FILE__,__LINE__,buffer,NULL,0);
@@ -794,39 +905,40 @@ smb_trans2_request (struct smb_server *server, int *data_len, int *param_len, ch
 	result = send (sock_fd, (void *) buffer, len, 0);
 	if (result < 0)
 	{
-		LOG(("smb_trans2_request: send() for %ld bytes failed (errno=%ld)\n", len, errno));
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
 
-		result = (-errno);
+		(*error_ptr) = errno;
 		goto out;
 	}
 
-	result = smb_receive_trans2 (server, sock_fd, data_len, param_len, data, param);
+	result = smb_receive_trans2 (server, sock_fd, data_len, param_len, data, param, error_ptr);
 
  out:
 
 	if (result < 0)
-	{
-		server->state = CONN_INVALID;
-		smb_invalidate_all_inodes (server);
-	}
+		smb_check_server_connection(server,(*error_ptr));
 
-	LOG (("smb_trans2_request: result = %ld\n", result));
+	LOG (("result = %ld\n", result));
 
 	return result;
 }
 
 int
-smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_len)
+smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_len, int * error_ptr)
 {
-	int len, result;
-	int sock_fd = server->mount_data.fd;
 	unsigned char *buffer = server->transmit_buffer;
+	int sock_fd = server->mount_data.fd;
+	int len, result;
+
+	ASSERT( error_ptr != NULL );
 
 	if (server->state != CONN_VALID)
 	{
-		LOG (("smb_trans2_request: Connection state is invalid\n"));
+		LOG (("Connection state is invalid\n"));
 
-		result = -EIO;
+		(*error_ptr) = error_server_connection_invalid;
+
+		result = -1;
 		goto out;
 	}
 
@@ -835,9 +947,9 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	 */
 	len = NETBIOS_HEADER_SIZE + smb_len (buffer);
 
-	LOG (("smb_request_read_raw: len = %ld cmd = 0x%02lx\n", len, buffer[8]));
-	LOG (("smb_request_read_raw: target=%lx, max_len=%ld\n", (unsigned int) target, max_len));
-	LOG (("smb_request_read_raw: buffer=%lx, sock=%lx\n", (unsigned int) buffer, (unsigned int) sock_fd));
+	LOG (("len = %ld cmd = 0x%02lx\n", len, buffer[8]));
+	LOG (("target=%lx, max_len=%ld\n", (unsigned int) target, max_len));
+	LOG (("buffer=%lx, sock=%lx\n", (unsigned int) buffer, (unsigned int) sock_fd));
 
 	#if defined(DUMP_SMB)
 	dump_netbios_header(__FILE__,__LINE__,buffer,NULL,0);
@@ -848,24 +960,22 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	result = send (sock_fd, (void *) buffer, len, 0);
 	if (result < 0)
 	{
-		LOG(("smb_request_read_raw: send() for %ld bytes failed (errno=%ld)\n", len, errno));
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
 
-		result = (-errno);
+		(*error_ptr) = errno;
+
 		goto out;
 	}
 
 	/* Wait for the raw data to be sent by the server. */
-	result = smb_receive_raw (server, sock_fd, target, max_len, NULL, 0, FALSE);
+	result = smb_receive_raw (server, sock_fd, target, max_len, NULL, 0, FALSE, error_ptr);
 
  out:
 
 	if (result < 0)
-	{
-		server->state = CONN_INVALID;
-		smb_invalidate_all_inodes (server);
-	}
+		smb_check_server_connection(server,(*error_ptr));
 
-	LOG (("smb_request_read_raw: result = %ld\n", result));
+	LOG (("result = %ld\n", result));
 
 	return result;
 }
@@ -874,7 +984,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
  * completed successfully, so that we can send the raw data now.
  */
 int
-smb_request_write_raw (struct smb_server *server, unsigned const char *source, int length)
+smb_request_write_raw (struct smb_server *server, unsigned const char *source, int length, int * error_ptr)
 {
 	byte nb_header[NETBIOS_HEADER_SIZE];
 	int sock_fd = server->mount_data.fd;
@@ -882,9 +992,11 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 
 	if (server->state != CONN_VALID)
 	{
-		LOG (("smb_trans2_request: Connection state is invalid\n"));
+		LOG (("Connection state is invalid\n"));
 
-		result = -EIO;
+		(*error_ptr) = error_server_connection_invalid;
+
+		result = -1;
 		goto out;
 	}
 
@@ -900,9 +1012,10 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 	result = send (sock_fd, nb_header, NETBIOS_HEADER_SIZE, 0);
 	if(result < 0)
 	{
-		LOG(("smb_request_write_raw: send() for %ld bytes failed (errno=%ld)\n", NETBIOS_HEADER_SIZE, errno));
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", NETBIOS_HEADER_SIZE, errno));
 
-		result = (-errno);
+		(*error_ptr) = errno;
+
 		goto out;
 	}
 
@@ -914,16 +1027,17 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 	result = send (sock_fd, (void *)source, length, 0);
 	if(result < 0)
 	{
-		LOG(("smb_request_write_raw: send() for %ld bytes failed (errno=%ld)\n", length, errno));
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", length, errno));
 
-		result = (-errno);
+		(*error_ptr) = errno;
+
 		goto out;
 	}
 
 	/* Wait for the server to respond. */
 	if(!server->write_behind)
 	{
-		result = smb_receive (server, sock_fd, NULL, 0);
+		result = smb_receive (server, sock_fd, NULL, 0, error_ptr);
 		if(result < 0)
 			goto out;
 	}
@@ -937,13 +1051,9 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
  out:
 
 	if (result < 0)
-	{
-		server->state = CONN_INVALID;
+		smb_check_server_connection(server,(*error_ptr));
 
-		smb_invalidate_all_inodes (server);
-	}
-
-	LOG (("smb_request_write_raw: result = %ld\n", result));
+	LOG (("result = %ld\n", result));
 
 	return result;
 }

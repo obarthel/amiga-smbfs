@@ -38,10 +38,13 @@
 #include "utf-8-iso-8859-1-conversion.h"
 #include "cp437.h"
 #include "cp850.h"
+#include "errors.h"
 #include "dump_smb.h"
 
 /****************************************************************************/
 
+#include <smb/smb_fs_sb.h>
+#include <smb/smb_fs.h>
 #include <smb/smb.h>
 
 /****************************************************************************/
@@ -148,83 +151,14 @@ VOID ASM AsmFreePooled(REG(a0,APTR poolHeader),REG(a1,APTR memory),REG(d0,ULONG 
 /****************************************************************************/
 
 /* Forward declarations for local routines. */
-LONG _start(STRPTR args, LONG args_length, struct ExecBase * exec_base);
-LONG VARARGS68K LocalFPrintf(BPTR output, const UBYTE * format, ...);
-STRPTR amitcp_strerror(int error);
-STRPTR host_strerror(int error);
-LONG CompareNames(STRPTR a, STRPTR b);
-VOID StringToUpper(STRPTR s);
-VOID VARARGS68K ReportError(STRPTR fmt, ...);
-VOID FreeMemory(APTR address);
-APTR AllocateMemory(ULONG size);
-LONG GetTimeZoneDelta(VOID);
-ULONG GetCurrentTime(VOID);
-VOID GMTime(time_t seconds, struct tm *tm);
-time_t MakeTime(const struct tm *const tm);
-VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString, ...);
-int BroadcastNameQuery(const char *name, const char *scope, UBYTE *address);
-
-/****************************************************************************/
-
 STATIC LONG main(VOID);
 STATIC ULONG get_stack_size(VOID);
 STATIC VOID stack_usage_init(struct StackSwapStruct * stk);
 STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
-
-/****************************************************************************/
-
-STATIC BOOL ReallyRemoveDosEntry(struct DosList *entry);
-STATIC LONG BuildFullName(const UBYTE * parent_name, STRPTR name, STRPTR *result_ptr, LONG *result_size_ptr);
-STATIC BOOL TranslateCName(UBYTE *name, const UBYTE *map);
-STATIC VOID ConvertCString(void * bstring, LONG max_len, const UBYTE * cstring, LONG len);
-STATIC VOID DisplayErrorList(VOID);
-STATIC VOID AddError(STRPTR fmt, APTR args);
 STATIC LONG CVSPrintf(STRPTR format_string, APTR args);
 STATIC VOID VSPrintf(STRPTR buffer, STRPTR formatString, APTR args);
-STATIC VOID SendDiskChange(ULONG class);
-STATIC struct FileNode *FindFileNode(STRPTR name, struct FileNode *skip);
-STATIC struct LockNode *FindLockNode(STRPTR name, struct LockNode *skip);
-STATIC LONG CheckAccessModeCollision(STRPTR name, LONG mode);
-STATIC LONG NameAlreadyInUse(STRPTR name);
-STATIC BOOL IsReservedName(STRPTR name);
-STATIC LONG MapErrnoToIoErr(int error);
-STATIC BOOL TranslateBName(UBYTE *name, const UBYTE *map);
 STATIC VOID Cleanup(VOID);
 STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, BOOL opt_disable_write_raw, BOOL opt_disable_read_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
-STATIC VOID ConvertBString(LONG max_len, STRPTR cstring, const void * bstring);
-STATIC BPTR Action_Parent(struct FileLock *parent, LONG *error_ptr);
-STATIC LONG Action_DeleteObject(struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
-STATIC BPTR Action_CreateDir(struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
-STATIC BPTR Action_LocateObject(struct FileLock *parent, const void * bcpl_name, LONG mode, LONG *error_ptr);
-STATIC BPTR Action_CopyDir(struct FileLock *lock, LONG *error_ptr);
-STATIC LONG Action_FreeLock(struct FileLock *lock, LONG *error_ptr);
-STATIC LONG Action_SameLock(struct FileLock *lock1, struct FileLock *lock2, LONG *error_ptr);
-STATIC LONG Action_SetProtect(struct FileLock *parent, const void * bcpl_name, LONG mask, LONG *error_ptr);
-STATIC LONG Action_RenameObject(struct FileLock *source_lock, const void * source_bcpl_name, struct FileLock *destination_lock, const void * destination_bcpl_name, LONG *error_ptr);
-STATIC LONG Action_DiskInfo(struct InfoData *id, LONG *error_ptr);
-STATIC LONG Action_Info(struct FileLock *lock, struct InfoData *id, LONG *error_ptr);
-STATIC LONG Action_ExamineObject(struct FileLock *lock, struct FileInfoBlock *fib, LONG *error_ptr);
-STATIC BOOL NameIsAcceptable(const UBYTE * name, LONG max_len);
-STATIC LONG Action_ExamineNext(struct FileLock *lock, struct FileInfoBlock *fib, LONG *error_ptr);
-STATIC LONG Action_ExamineAll(struct FileLock *lock, struct ExAllData *ed, ULONG size, ULONG type, struct ExAllControl *eac, LONG *error_ptr);
-STATIC LONG Action_Find(LONG action, struct FileHandle *fh, struct FileLock *parent, const void * bcpl_name, LONG *error_ptr);
-STATIC LONG Action_Read(struct FileNode *fn, APTR mem, LONG length, LONG *error_ptr);
-STATIC LONG Action_Write(struct FileNode *fn, APTR mem, LONG length, LONG *error_ptr);
-STATIC LONG Action_End(struct FileNode *fn, LONG *error_ptr);
-STATIC LONG Action_Seek(struct FileNode *fn, LONG position, LONG mode, LONG *error_ptr);
-STATIC LONG Action_SetFileSize(struct FileNode *fn, LONG position, LONG mode, LONG *error_ptr);
-STATIC LONG Action_SetDate(struct FileLock *parent, const void * bcpl_name, const struct DateStamp *ds, LONG *error_ptr);
-STATIC LONG Action_ExamineFH(struct FileNode *fn, struct FileInfoBlock *fib, LONG *error_ptr);
-STATIC BPTR Action_ParentFH(struct FileNode *fn, LONG *error_ptr);
-STATIC BPTR Action_CopyDirFH(struct FileNode *fn, LONG *error_ptr);
-STATIC LONG Action_FHFromLock(struct FileHandle *fh, struct FileLock *fl, LONG *error_ptr);
-STATIC LONG Action_RenameDisk(const void * bcpl_name, LONG *error_ptr);
-STATIC LONG Action_ChangeMode(LONG type, APTR object, LONG new_mode, LONG *error_ptr);
-STATIC LONG Action_WriteProtect(LONG flag, ULONG key, LONG *error_ptr);
-STATIC LONG Action_MoreCache(LONG buffer_delta, LONG *error_ptr);
-STATIC LONG Action_SetComment(struct FileLock *parent, const void * bcpl_name, const void * bcpl_comment, LONG *error_ptr);
-STATIC LONG Action_LockRecord(struct FileNode *fn, LONG offset, LONG length, LONG mode, ULONG timeout, LONG *error_ptr);
-STATIC LONG Action_FreeRecord(struct FileNode *fn, LONG offset, LONG length, LONG *error_ptr);
 STATIC VOID HandleFileSystem(STRPTR device_name, STRPTR volume_name, STRPTR service_name);
 
 /****************************************************************************/
@@ -1255,23 +1189,67 @@ LocalFPrintf(BPTR output, const UBYTE * format, ...)
 /****************************************************************************/
 
 /* Obtain the descriptive text corresponding to an error number
- * that may have been generated by the TCP/IP stack.
+ * that may have been generated by the TCP/IP stack, or by
+ * the SMB POSIX error conversion code.
  */
 STRPTR
-amitcp_strerror(int error)
+posix_strerror(int error)
 {
-	struct TagItem tags[2];
 	STRPTR result;
 
-	tags[0].ti_Tag	= SBTM_GETVAL(SBTC_ERRNOSTRPTR);
-	tags[0].ti_Data	= error;
-	tags[1].ti_Tag	= TAG_END;
+	/* Is this one of our own error codes? */
+	if(error >= error_end_of_file)
+	{
+		static const struct { int code; const char * message; } messages[] =
+		{
+			{ error_end_of_file,						"end of file" },
+			{ error_invalid_netbios_session,			"invalid NetBIOS session" },
+			{ error_message_exceeds_buffer_size,		"message exceeds buffer size" },
+			{ error_invalid_buffer_format,				"invalid buffer format" },
+			{ error_data_exceeds_buffer_size,			"data exceeds buffer size" },
+			{ error_invalid_parameter_size,				"invalid parameter size" },
+			{ error_check_smb_error,					"check SMB error class and code" },
+			{ error_server_setup_incomplete,			"server setup incomplete" },
+			{ error_server_connection_invalid,			"server connection invalid" },
+			{ error_smb_message_signature_missing,		"SMB message signature missing" },
+			{ error_smb_message_too_short,				"SMB message too short" },
+			{ error_smb_message_invalid_command,		"SMB message invalid command" },
+			{ error_smb_message_invalid_word_count,		"SMB message invalid word count" },
+			{ error_smb_message_invalid_byte_count,		"SMB message invalid byte count" },
+			{ error_looping_in_find_next,				"looping in find_next" },
+			{ error_invalid_directory_size,				"invalid directory size" },
+			{ error_session_request_failed,				"session request failed" },
+			{ error_unsupported_dialect,				"unsupported dialect" },
+			{ -1, NULL }
+		};
 
-	SocketBaseTagList(tags);
+		int i;
 
-	result = (STRPTR)tags[0].ti_Data;
+		result = "";
 
-	return(result);
+		for(i = 0 ; messages[i].code != -1 ; i++)
+		{
+			if(messages[i].code == error)
+			{
+				result = (STRPTR)messages[i].message;
+				break;
+			}
+		}
+	}
+	else
+	{
+		struct TagItem tags[2];
+
+		tags[0].ti_Tag	= SBTM_GETVAL(SBTC_ERRNOSTRPTR);
+		tags[0].ti_Data	= error;
+		tags[1].ti_Tag	= TAG_END;
+
+		SocketBaseTagList(tags);
+
+		result = (STRPTR)tags[0].ti_Data;
+
+		return(result);
+	}
 }
 
 /****************************************************************************/
@@ -2119,7 +2097,7 @@ CheckAccessModeCollision(STRPTR name,LONG mode)
 {
 	struct LockNode * ln;
 	struct FileNode * fn;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 	SHOWSTRING(name);
@@ -2158,7 +2136,7 @@ CheckAccessModeCollision(STRPTR name,LONG mode)
 STATIC LONG
 NameAlreadyInUse(STRPTR name)
 {
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
@@ -2221,7 +2199,7 @@ MapErrnoToIoErr(int error)
 	 * POSIX covers more than a hundred different error codes
 	 * whereas with AmigaDOS we're stranded with a measly 48...
 	 */
-	STATIC const LONG Map[][2] =
+	STATIC const LONG map_posix_to_amigados[][2] =
 	{
 		{ EPERM,			ERROR_OBJECT_NOT_FOUND },		/* Operation not permitted */
 		{ ENOENT,			ERROR_OBJECT_NOT_FOUND },		/* No such file or directory */
@@ -2239,7 +2217,7 @@ MapErrnoToIoErr(int error)
 		{ ENOTDIR,			ERROR_OBJECT_WRONG_TYPE },		/* Not a directory */
 		{ EISDIR,			ERROR_OBJECT_WRONG_TYPE },		/* Is a directory */
 		{ EINVAL,			ERROR_BAD_NUMBER },				/* Invalid argument */
-		{ EFBIG,			ERROR_DISK_FULL },				/* File too large */
+		{ EFBIG,			ERROR_OBJECT_IN_USE },			/* File too large */
 		{ ENOSPC,			ERROR_DISK_FULL },				/* No space left on device */
 		{ ESPIPE,			ERROR_SEEK_ERROR },				/* Illegal seek */
 		{ EROFS,			ERROR_WRITE_PROTECTED },		/* Read-only file system */
@@ -2261,7 +2239,7 @@ MapErrnoToIoErr(int error)
 		{ ENETRESET,		ERROR_OBJECT_NOT_FOUND },		/* Network dropped connection on reset */
 		{ ECONNABORTED,		ERROR_OBJECT_NOT_FOUND },		/* Software caused connection abort */
 		{ ECONNRESET,		ERROR_OBJECT_NOT_FOUND },		/* Connection reset by peer */
-		{ ENOBUFS,			ERROR_DISK_FULL },				/* No buffer space available */
+		{ ENOBUFS,			ERROR_BUFFER_OVERFLOW },		/* No buffer space available */
 		{ EISCONN,			ERROR_OBJECT_IN_USE },			/* Socket is already connected */
 		{ ENOTCONN,			ERROR_OBJECT_WRONG_TYPE },		/* Socket is not connected */
 		{ ESHUTDOWN,		ERROR_INVALID_LOCK },			/* Can't send after socket shutdown */
@@ -2279,18 +2257,29 @@ MapErrnoToIoErr(int error)
 	};
 
 	LONG result = ERROR_ACTION_NOT_KNOWN;
-	LONG i;
+	int i;
 
 	ENTER();
+
+	/* Try our best to translate the SMB error class and code into a POSIX
+	 * error code...
+	 */
+	if(error == error_check_smb_error)
+	{
+		int error_class	= ((struct smb_server *)ServerData)->rcls;
+		int error_code	= ((struct smb_server *)ServerData)->err;
+
+		error = smb_errno(error_class, error_code);
+	}
 
 	if(error < 0)
 		error = (-error);
 
-	for(i = 0 ; Map[i][0] != -1 ; i++)
+	for(i = 0 ; map_posix_to_amigados[i][0] != -1 ; i++)
 	{
-		if(Map[i][0] == error)
+		if(map_posix_to_amigados[i][0] == error)
 		{
-			result = Map[i][1];
+			result = map_posix_to_amigados[i][1];
 			break;
 		}
 	}
@@ -2301,7 +2290,21 @@ MapErrnoToIoErr(int error)
 
 		Fault(result,NULL,amigados_error_text,sizeof(amigados_error_text));
 
-		LOG(("Translated POSIX error code %ld (%s), to AmigaDOS error code %ld (%s)\n", error, amitcp_strerror(error), result, amigados_error_text));
+		if(error == error_check_smb_error)
+		{
+			int error_class	= ((struct smb_server *)ServerData)->rcls;
+			int error_code	= ((struct smb_server *)ServerData)->err;
+			char * smb_class_name;
+			char * smb_code_text;
+
+			smb_translate_error_class_and_code(error_class,error_code,&smb_class_name,&smb_code_text);
+
+			LOG(("Translated SMB error %ld/%ld (%s/%s) -> POSIX error code %ld (%s) -> AmigaDOS error code %ld (%s)\n", error_class, error_code, smb_class_name, smb_code_text, error, posix_strerror(error), result, amigados_error_text));
+		}
+		else
+		{
+			LOG(("Translated POSIX error code %ld (%s) -> AmigaDOS error code %ld (%s)\n", error, posix_strerror(error), result, amigados_error_text));
+		}
 	}
 	#endif /* DEBUG */
 
@@ -2319,28 +2322,25 @@ STATIC BOOL
 TranslateBName(UBYTE * name,const UBYTE * map)
 {
 	BOOL success = TRUE;
-	UBYTE c, d;
+	UBYTE c;
 	int len;
 
 	len = (*name++);
 
 	while(len-- > 0)
 	{
-		c = (*name);
-		d = map[c];
+		c = map[(*name)];
 
-		/* Only the NUL character maps to itself, any
-		 * other mapping which produces a NUL means that
-		 * the respective mapping cannot represent the
-		 * desired character.
+		/* The NUL means that the respective mapping cannot
+		 * represent the desired character.
 		 */
-		if(d == '\0' && c != d)
+		if(c == '\0')
 		{
 			success = FALSE;
 			break;
 		}
 
-		(*name++) = d;
+		(*name++) = c;
 	}
 
 	return(success);
@@ -2360,10 +2360,8 @@ TranslateCName(UBYTE * name,const UBYTE * map)
 	{
 		c = map[c];
 
-		/* Only the NUL character maps to itself, any
-		 * other mapping which produces a NUL means that
-		 * the respective mapping cannot represent the
-		 * desired character.
+		/* The NUL means that the respective mapping cannot
+		 * represent the desired character.
 		 */
 		if(c == '\0')
 		{
@@ -2616,7 +2614,8 @@ Setup(
 {
 	BOOL result = FALSE;
 	struct DosList * dl;
-	int error;
+	int error = 0;
+	int smb_error_class = 0, smb_error = 0;
 	STRPTR actual_volume_name;
 	LONG actual_volume_name_len;
 	UBYTE name[MAX_FILENAME_LEN];
@@ -2717,7 +2716,7 @@ Setup(
 	TAG_END);
 	if(error != OK)
 	{
-		ReportError("Could not initialize 'bsdsocket.library' (%ld, %s).",error,amitcp_strerror(error));
+		ReportError("Could not initialize 'bsdsocket.library' (%ld, %s).",error,posix_strerror(error));
 		goto out;
 	}
 
@@ -2773,7 +2772,7 @@ Setup(
 		}
 	}
 
-	error = smba_start(
+	if(smba_start(
 		service,
 		workgroup,
 		username,
@@ -2788,9 +2787,13 @@ Setup(
 		opt_prefer_write_raw,
 		opt_disable_write_raw,
 		opt_disable_read_raw,
-		&ServerData);
-	if(error < 0)
+		&error,
+		&smb_error_class,
+		&smb_error,
+		&ServerData) < 0)
+	{
 		goto out;
+	}
 
 	FileSystemPort = CreateMsgPort();
 	if(FileSystemPort == NULL)
@@ -3017,7 +3020,7 @@ BuildFullName(
 	STRPTR *		result_ptr,
 	LONG *			result_size_ptr)
 {
-	LONG error = OK;
+	int error = OK;
 	STRPTR buffer;
 	LONG len,size;
 	LONG i;
@@ -3212,7 +3215,7 @@ Action_Parent(
 	STRPTR parent_name;
 	BOOL cleanup = TRUE;
 	struct LockNode * ln = NULL;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -3257,8 +3260,7 @@ Action_Parent(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&ln->ln_File);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3330,8 +3332,9 @@ Action_DeleteObject(
 	STRPTR full_parent_name = NULL;
 	UBYTE name[MAX_FILENAME_LEN];
 	struct LockNode * ln;
+	int ignored_error;
 	smba_stat_t st;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -3452,29 +3455,26 @@ Action_DeleteObject(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&file);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
-	error = smba_getattr(file,&st);
-	if(error < 0)
+	if(smba_getattr(file,&st,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
-	smba_close(file);
+	smba_close(file,&ignored_error);
 	file = NULL;
 
 	if(st.is_dir)
 	{
 		SHOWMSG("removing a directory");
 
-		error = smba_rmdir(ServerData,full_name);
-		if(error < 0)
+		if(smba_rmdir(ServerData,full_name,&error) < 0)
 		{
 			SHOWVALUE(error);
 
@@ -3483,7 +3483,7 @@ Action_DeleteObject(
 			 * but in practice 'EACCES' seems to be returned
 			 * if the directory to remove is not empty.
 			 */
-			if(error == (-EACCES))
+			if(error == EACCES || (error == error_check_smb_error && smb_errno(((struct smb_server *)ServerData)->rcls,((struct smb_server *)ServerData)->err) == EACCES))
 				error = ERROR_DIRECTORY_NOT_EMPTY;
 			else
 				error = MapErrnoToIoErr(error);
@@ -3495,8 +3495,7 @@ Action_DeleteObject(
 	{
 		SHOWMSG("removing a file");
 
-		error = smba_remove(ServerData,full_name);
-		if(error < 0)
+		if(smba_remove(ServerData,full_name,&error) < 0)
 		{
 			SHOWVALUE(error);
 
@@ -3515,7 +3514,11 @@ Action_DeleteObject(
 	FreeMemory(full_parent_name);
 
 	if(file != NULL)
-		smba_close(file);
+	{
+		int ignored_error;
+
+		smba_close(file,&ignored_error);
+	}
 
 	(*error_ptr) = error;
 
@@ -3541,7 +3544,8 @@ Action_CreateDir(
 	smba_file_t * dir = NULL;
 	STRPTR base_name;
 	UBYTE name[MAX_FILENAME_LEN];
-	LONG error;
+	int ignored_error;
+	int error;
 	LONG i;
 
 	ENTER();
@@ -3656,27 +3660,24 @@ Action_CreateDir(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	error = smba_open(ServerData,dir_name,dir_name_size,&dir);
-	if(error < 0)
+	if(smba_open(ServerData,dir_name,dir_name_size,&dir,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
-	error = smba_mkdir(dir,base_name);
-	if(error < 0)
+	if(smba_mkdir(dir,base_name,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
-	smba_close(dir);
+	smba_close(dir,&ignored_error);
 	dir = NULL;
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&ln->ln_File);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3689,7 +3690,11 @@ Action_CreateDir(
  out:
 
 	if(dir != NULL)
-		smba_close(dir);
+	{
+		int ignored_error;
+
+		smba_close(dir,&ignored_error);
+	}
 
 	FreeMemory(dir_name);
 
@@ -3720,7 +3725,7 @@ Action_LocateObject(
 	struct LockNode * ln = NULL;
 	STRPTR parent_name;
 	UBYTE name[MAX_FILENAME_LEN];
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -3802,8 +3807,7 @@ Action_LocateObject(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&ln->ln_File);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3840,7 +3844,7 @@ Action_CopyDir(
 	struct LockNode * ln = NULL;
 	STRPTR source_name;
 	LONG source_mode;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -3896,8 +3900,7 @@ Action_CopyDir(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&ln->ln_File);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3930,7 +3933,8 @@ Action_FreeLock(
 {
 	LONG result = DOSTRUE;
 	struct LockNode * ln;
-	LONG error = OK;
+	int ignored_error;
+	int error = OK;
 
 	ENTER();
 
@@ -3943,7 +3947,7 @@ Action_FreeLock(
 
 	Remove((struct Node *)ln);
 
-	smba_close(ln->ln_File);
+	smba_close(ln->ln_File,&ignored_error);
 	FreeMemory(ln->ln_FullName);
 	FreeMemory(ln);
 
@@ -3966,7 +3970,7 @@ Action_SameLock(
 	LONG result = DOSFALSE;
 	STRPTR name1;
 	STRPTR name2;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
@@ -4023,7 +4027,7 @@ Action_SetProtect(
 	STRPTR parent_name;
 	UBYTE name[MAX_FILENAME_LEN];
 	smba_stat_t st;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -4089,8 +4093,7 @@ Action_SetProtect(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&file);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -4123,8 +4126,7 @@ Action_SetProtect(
 	/* The 'system' attribute is associated with the 'pure' bit for now. */
 	st.is_system = ((mask & FIBF_PURE) != 0);
 
-	error = smba_setattr(file,&st);
-	if(error < 0)
+	if(smba_setattr(file,&st,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -4137,7 +4139,11 @@ Action_SetProtect(
 	FreeMemory(full_name);
 
 	if(file != NULL)
-		smba_close(file);
+	{
+		int ignored_error;
+
+		smba_close(file, &ignored_error);
+	}
 
 	(*error_ptr) = error;
 
@@ -4163,7 +4169,7 @@ Action_RenameObject(
 	LONG full_destination_name_size;
 	UBYTE name[MAX_FILENAME_LEN];
 	STRPTR parent_name;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -4287,8 +4293,7 @@ Action_RenameObject(
 	SHOWSTRING(full_source_name);
 	SHOWSTRING(full_destination_name);
 
-	error = smba_rename(ServerData,full_source_name,full_destination_name);
-	if(error < 0)
+	if(smba_rename(ServerData,full_source_name,full_destination_name,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -4318,7 +4323,7 @@ Action_DiskInfo(
 	LONG block_size;
 	LONG num_blocks;
 	LONG num_blocks_free;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -4329,8 +4334,7 @@ Action_DiskInfo(
 	else
 		id->id_DiskState = ID_VALIDATED;
 
-	error = smba_statfs(ServerData,&block_size,&num_blocks,&num_blocks_free);
-	if(error >= 0)
+	if(smba_statfs(ServerData,&block_size,&num_blocks,&num_blocks_free,&error) >= 0)
 	{
 		SHOWMSG("got the disk data");
 		SHOWVALUE(block_size);
@@ -4431,7 +4435,7 @@ Action_ExamineObject(
 	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
@@ -4465,8 +4469,7 @@ Action_ExamineObject(
 		LONG seconds;
 		smba_stat_t st;
 
-		error = smba_getattr(ln->ln_File,&st);
-		if(error < 0)
+		if(smba_getattr(ln->ln_File,&st,&error) < 0)
 		{
 			SHOWMSG("information not available");
 
@@ -4757,7 +4760,7 @@ Action_ExamineNext(
 {
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
-	LONG error = OK;
+	int error = OK;
 	long offset;
 	int count;
 
@@ -4799,11 +4802,11 @@ Action_ExamineNext(
 	SHOWMSG("calling 'smba_readdir'");
 	SHOWVALUE(offset);
 
-	count = smba_readdir(ln->ln_File,offset,fib,(smba_callback_t)dir_scan_callback_func_exnext);
+	count = smba_readdir(ln->ln_File,offset,fib,(smba_callback_t)dir_scan_callback_func_exnext,&error);
 
 	SHOWVALUE(count);
 
-	if(count == 0 || fib->fib_FileName[0] == '\0')
+	if(error == OK && (count == 0 || fib->fib_FileName[0] == '\0'))
 	{
 		SHOWMSG("nothing to be read");
 		fib->fib_DiskKey = -1;
@@ -4811,21 +4814,13 @@ Action_ExamineNext(
 		error = ERROR_NO_MORE_ENTRIES;
 		goto out;
 	}
-	else if (count == (-EIO))
-	{
-		SHOWMSG("ouch! directory read error");
-		fib->fib_DiskKey = -1;
-
-		error = ERROR_NO_DEFAULT_DIR;
-		goto out;
-	}
-	else if (count < 0)
+	else if (error != OK)
 	{
 		SHOWMSG("error whilst scanning");
-		SHOWVALUE(count);
+		SHOWVALUE(error);
 		fib->fib_DiskKey = -1;
 
-		error = MapErrnoToIoErr(count);
+		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
@@ -5060,7 +5055,7 @@ Action_ExamineAll(
 	struct ExAllContext ec;
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
-	LONG error = OK;
+	int error = OK;
 	LONG offset;
 	int count;
 
@@ -5175,8 +5170,7 @@ Action_ExamineAll(
 		SHOWMSG("first invocation");
 
 		SHOWMSG("getting file attributes");
-		error = smba_getattr(ln->ln_File,&st);
-		if(error < 0)
+		if(smba_getattr(ln->ln_File,&st,&error) < 0)
 		{
 			SHOWMSG("didn't work");
 			error = MapErrnoToIoErr(error);
@@ -5196,11 +5190,11 @@ Action_ExamineAll(
 	SHOWMSG("calling 'smba_readdir'");
 	SHOWVALUE(offset);
 
-	count = smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall);
+	count = smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&error);
 
 	SHOWVALUE(count);
 
-	if(count == 0 || eac->eac_Entries == 0)
+	if(error == OK && (count == 0 || eac->eac_Entries == 0))
 	{
 		SHOWMSG("nothing to be read");
 		if(ec.ec_Error != OK)
@@ -5213,20 +5207,12 @@ Action_ExamineAll(
 
 		goto out;
 	}
-	else if (count == (-EIO))
-	{
-		SHOWMSG("ouch! directory read error");
-		eac->eac_LastKey = (ULONG)-1;
-
-		error = ERROR_NO_DEFAULT_DIR;
-		goto out;
-	}
-	else if (count < 0)
+	else if (error != OK)
 	{
 		SHOWMSG("error whilst scanning");
 		eac->eac_LastKey = (ULONG)-1;
 
-		error = MapErrnoToIoErr(count);
+		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
@@ -5272,7 +5258,7 @@ Action_Find(
 	STRPTR parent_name;
 	UBYTE name[MAX_FILENAME_LEN];
 	BOOL create_new_file;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -5381,10 +5367,11 @@ Action_Find(
 	else if (action == ACTION_FINDUPDATE)
 	{
 		smba_file_t * file = NULL;
+		int ignored_error;
 		smba_stat_t st;
 
-		if(smba_open(ServerData,full_name,full_name_size,&file) == OK &&
-		   smba_getattr(file,&st) == OK)
+		if(smba_open(ServerData,full_name,full_name_size,&file,&ignored_error) == OK &&
+		   smba_getattr(file,&st,&ignored_error) == OK)
 		{
 			/* File apparently opens Ok and information on it
 			 * is available, don't try to replace it.
@@ -5403,7 +5390,7 @@ Action_Find(
 		}
 
 		if(file != NULL)
-			smba_close(file);
+			smba_close(file,&ignored_error);
 	}
 	else
 	{
@@ -5415,6 +5402,7 @@ Action_Find(
 	/* Create a new file? */
 	if(create_new_file)
 	{
+		int ignored_error;
 		smba_stat_t st;
 		smba_file_t * dir;
 		STRPTR base_name;
@@ -5455,8 +5443,7 @@ Action_Find(
 		SHOWMSG("creating a file; finding parent path first");
 		SHOWSTRING(parent_path);
 
-		error = smba_open(ServerData,parent_path,strlen(full_name)+3,&dir);
-		if(error < 0)
+		if(smba_open(ServerData,parent_path,strlen(full_name)+3,&dir,&error) < 0)
 		{
 			error = MapErrnoToIoErr(error);
 			goto out;
@@ -5468,13 +5455,12 @@ Action_Find(
 		SHOWMSG("now trying to create the file");
 		SHOWSTRING(base_name);
 
-		error = smba_create(dir,base_name,&st);
-		if(error < 0)
+		if(smba_create(dir,base_name,&st,&error) < 0)
 		{
 			SHOWMSG("didn't work.");
 			SHOWVALUE(error);
 
-			smba_close(dir);
+			smba_close(dir,&ignored_error);
 			error = MapErrnoToIoErr(error);
 
 			SHOWVALUE(error);
@@ -5484,12 +5470,11 @@ Action_Find(
 
 		SHOWMSG("good.");
 
-		smba_close(dir);
+		smba_close(dir,&ignored_error);
 	}
 
 	/* Now for the remainder... */
-	error = smba_open(ServerData,full_name,full_name_size,&fn->fn_File);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&fn->fn_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5526,16 +5511,17 @@ Action_Read(
 	LONG *				error_ptr)
 {
 	LONG result = 0;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
 	if(length > 0)
 	{
-		result = smba_read(fn->fn_File,mem,length,fn->fn_Offset);
+		result = smba_read(fn->fn_File,mem,length,fn->fn_Offset,&error);
 		if(result < 0)
 		{
 			error = MapErrnoToIoErr(result);
+
 			result = -1;
 			goto out;
 		}
@@ -5561,7 +5547,7 @@ Action_Write(
 	LONG *				error_ptr)
 {
 	LONG result = DOSFALSE;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
@@ -5573,10 +5559,11 @@ Action_Write(
 
 	if(length > 0)
 	{
-		result = smba_write(fn->fn_File,mem,length,fn->fn_Offset);
+		result = smba_write(fn->fn_File,mem,length,fn->fn_Offset,&error);
 		if(result < 0)
 		{
-			error = MapErrnoToIoErr(result);
+			error = MapErrnoToIoErr(error);
+
 			result = -1;
 			goto out;
 		}
@@ -5599,9 +5586,11 @@ Action_End(
 	struct FileNode *	fn,
 	LONG *				error_ptr)
 {
+	int ignored_error;
+
 	Remove((struct Node *)fn);
 
-	smba_close(fn->fn_File);
+	smba_close(fn->fn_File,&ignored_error);
 	FreeMemory(fn->fn_FullName);
 	FreeMemory(fn);
 
@@ -5621,7 +5610,7 @@ Action_Seek(
 	LONG previous_position = fn->fn_Offset;
 	LONG result = -1;
 	LONG offset;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -5729,8 +5718,7 @@ Action_Seek(
 
 			case OFFSET_END:
 
-				error = smba_getattr(fn->fn_File,&st);
-				if(error < 0)
+				if(smba_getattr(fn->fn_File,&st,&error) < 0)
 				{
 					error = MapErrnoToIoErr(error);
 					goto out;
@@ -5751,8 +5739,7 @@ Action_Seek(
 			goto out;
 		}
 
-		error = smba_seek (fn->fn_File, offset, 0, (off_t *) &offset);
-		if(error < 0)
+		if(smba_seek (fn->fn_File, offset, 0, (off_t *) &offset, &error) < 0)
 		{
 			error = MapErrnoToIoErr(error);
 			goto out;
@@ -5785,7 +5772,7 @@ Action_SetFileSize(
 {
 	smba_stat_t st;
 	LONG result = -1;
-	LONG error;
+	int error;
 	long offset;
 
 	ENTER();
@@ -5796,8 +5783,7 @@ Action_SetFileSize(
 		goto out;
 	}
 
-	error = smba_getattr(fn->fn_File,&st);
-	if(error < 0)
+	if(smba_getattr(fn->fn_File,&st,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5839,8 +5825,7 @@ Action_SetFileSize(
 	st.mtime	= -1;
 	st.size		= offset;
 
-	error = smba_setattr(fn->fn_File,&st);
-	if(error < 0)
+	if(smba_setattr(fn->fn_File,&st,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5876,7 +5861,7 @@ Action_SetDate(
 	UBYTE name[MAX_FILENAME_LEN];
 	smba_stat_t st;
 	LONG seconds;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -5940,15 +5925,13 @@ Action_SetDate(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&file);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
-	error = smba_getattr(file,&st);
-	if(error < 0)
+	if(smba_getattr(file,&st,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5961,8 +5944,7 @@ Action_SetDate(
 	st.mtime = seconds + UNIX_TIME_OFFSET + GetTimeZoneDelta();
 	st.size = -1;
 
-	error = smba_setattr(file,&st);
-	if(error < 0)
+	if(smba_setattr(file,&st,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5975,7 +5957,11 @@ Action_SetDate(
 	FreeMemory(full_name);
 
 	if(file != NULL)
-		smba_close(file);
+	{
+		int ignored_error;
+
+		smba_close(file,&ignored_error);
+	}
 
 	(*error_ptr) = error;
 
@@ -5993,7 +5979,7 @@ Action_ExamineFH(
 {
 	LONG result = DOSFALSE;
 	smba_stat_t st;
-	LONG error;
+	int error;
 	LONG seconds;
 	STRPTR name;
 	LONG name_len;
@@ -6001,8 +5987,7 @@ Action_ExamineFH(
 
 	ENTER();
 
-	error = smba_getattr(fn->fn_File,&st);
-	if(error < 0)
+	if(smba_getattr(fn->fn_File,&st,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6110,7 +6095,7 @@ Action_ParentFH(
 {
 	BPTR result = ZERO;
 	struct LockNode * ln = NULL;
-	LONG error;
+	int error;
 	STRPTR full_name;
 	LONG full_name_size;
 	LONG i;
@@ -6161,8 +6146,7 @@ Action_ParentFH(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&ln->ln_File);
-	if(error < 0)
+	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6197,7 +6181,7 @@ Action_CopyDirFH(
 	struct LockNode * ln = NULL;
 	STRPTR full_name = NULL;
 	LONG full_name_size;
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -6237,8 +6221,7 @@ Action_CopyDirFH(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&ln->ln_File);
-	if(error < 0)
+	if (smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6273,7 +6256,7 @@ Action_FHFromLock(
 	LONG result = DOSFALSE;
 	struct FileNode * fn;
 	struct LockNode * ln;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
@@ -6319,7 +6302,7 @@ Action_RenameDisk(
 	LONG *			error_ptr)
 {
 	LONG result = DOSFALSE;
-	LONG error = OK;
+	int error = OK;
 	STRPTR old_name;
 	STRPTR new_name;
 	const UBYTE * name;
@@ -6395,7 +6378,7 @@ Action_ChangeMode(
 	struct LockNode * ln = NULL;
 	STRPTR name;
 	LONG old_mode;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
@@ -6497,7 +6480,7 @@ Action_WriteProtect(
 	LONG *	error_ptr)
 {
 	LONG result = DOSFALSE;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
@@ -6565,7 +6548,6 @@ Action_MoreCache(
 	old_size = smba_get_dircache_size(ServerData);
 
 	result = smba_change_dircache_size(ServerData,old_size + buffer_delta);
-
 	if(result == old_size && buffer_delta != 0)
 	{
 		result = DOSFALSE;
@@ -6592,7 +6574,7 @@ Action_SetComment(
 	STRPTR parent_name;
 	UBYTE name[MAX_FILENAME_LEN];
 	UBYTE comment[80];
-	LONG error;
+	int error;
 
 	ENTER();
 
@@ -6656,8 +6638,7 @@ Action_SetComment(
 
 	SHOWSTRING(full_name);
 
-	error = smba_open(ServerData,full_name,full_name_size,&file);
-	if(error < 0)
+	if (smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6681,7 +6662,11 @@ Action_SetComment(
 	FreeMemory(full_name);
 
 	if(file != NULL)
-		smba_close(file);
+	{
+		int ignored_error;
+
+		smba_close(file, &ignored_error);
+	}
 
 	(*error_ptr) = error;
 
@@ -6701,7 +6686,7 @@ Action_LockRecord (
 	LONG *				error_ptr)
 {
 	LONG result = DOSFALSE;
-	LONG error;
+	int error;
 	LONG umode;
 
 	/* Sanity checks... */
@@ -6734,8 +6719,7 @@ Action_LockRecord (
 			timeout *= 20;	/* milliseconds instead of Ticks */
 	}
 
-	error = smba_lockrec (fn->fn_File, offset, length, umode, 0, (long)timeout);
-	if(error < 0)
+	if (smba_lockrec (fn->fn_File, offset, length, umode, 0, (long)timeout, &error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6761,7 +6745,7 @@ Action_FreeRecord (
 	LONG *				error_ptr)
 {
 	LONG result = DOSFALSE;
-	LONG error;
+	int error;
 
 	/* Sanity checks... */
 	if(offset < 0 || length <= 0 || offset + length < offset)
@@ -6770,8 +6754,7 @@ Action_FreeRecord (
 		goto out;
 	}
 
-	error = smba_lockrec (fn->fn_File, offset, length, 2, -1, 0);
-	if (error < 0)
+	if (smba_lockrec (fn->fn_File, offset, length, 2, -1, 0, &error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -7134,25 +7117,32 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 
 					case ACTION_LOCK_RECORD:
 						/* FileHandle->fh_Arg1,position,length,mode,time-out -> Bool */
+
 						res1 = Action_LockRecord((struct FileNode *)dp->dp_Arg1,dp->dp_Arg2,dp->dp_Arg3,dp->dp_Arg4,(ULONG)dp->dp_Arg5,&res2);
 						break;
 
 					case ACTION_FREE_RECORD:
 						/* FileHandle->fh_Arg1,position,length -> Bool */
+
 						res1 = Action_FreeRecord((struct FileNode *)dp->dp_Arg1,dp->dp_Arg2,dp->dp_Arg3,&res2);
+						break;
+
+					case ACTION_READ_LINK:
+
+						/* Return -1 for ACTION_READ_LINK, for which DOSFALSE (= 0)
+						 * would otherwise be a valid response. Bug fix contributed
+						 * by Harry 'Piru' Sintonen.
+						 */
+						res1 = -1;
+						res2 = ERROR_ACTION_NOT_KNOWN;
 						break;
 
 					default:
 
 						D(("Anything goes: dp->dp_Action=%ld (0x%lx)",dp->dp_Action,dp->dp_Action));
 
-						/* Return -1 for ACTION_READ_LINK, for which DOSFALSE (= 0)
-						 * would otherwise be a valid response. Bug fix contributed
-						 * by Harry 'Piru' Sintonen.
-						 */
-						res1 = (dp->dp_Action == ACTION_READ_LINK) ? -1 : DOSFALSE;
+						res1 = DOSFALSE;
 						res2 = ERROR_ACTION_NOT_KNOWN;
-
 						break;
 				}
 

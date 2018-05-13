@@ -44,38 +44,38 @@ struct smb_lkrng
 /* proc.c */
 byte *smb_encode_smb_length(byte *p, int len);
 int smb_len(const byte *packet);
+void smb_translate_error_class_and_code(int errcls,int error,char ** class_ptr,char ** code_ptr);
 int smb_errno(int errcls, int error);
 int smb_payload_size(const struct smb_server *server, int wct, int bcc);
-int smb_proc_open(struct smb_server *server, const char *pathname, int len, struct smb_dirent *entry);
-int smb_proc_close(struct smb_server *server, word fileid, dword mtime);
-int smb_proc_read(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data);
-int smb_proc_read_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data);
-int smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data);
-int smb_proc_write_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data);
-int smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offset, int mode, off_t  * new_position_ptr);
-int smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct smb_lkrng *locks, int num_entries, int mode, long timeout);
-int smb_proc_create(struct smb_server *server, const char *path, int len, struct smb_dirent *entry);
-int smb_proc_mv(struct smb_server *server, const char *opath, const int olen, const char *npath, const int nlen);
-int smb_proc_mkdir(struct smb_server *server, const char *path, const int len);
-int smb_proc_rmdir(struct smb_server *server, const char *path, const int len);
-int smb_proc_unlink(struct smb_server *server, const char *path, const int len);
-int smb_proc_trunc(struct smb_server *server, word fid, dword length);
-int smb_proc_readdir(struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry);
-int smb_proc_getattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *entry);
-int smb_proc_getattrE(struct smb_server *server, struct smb_dirent *entry);
-int smb_proc_setattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *new_finfo);
-int smb_proc_setattrE(struct smb_server *server, word fid, struct smb_dirent *new_entry);
-int smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr);
-int smb_proc_connect(struct smb_server *server);
+int smb_proc_open(struct smb_server *server, const char *pathname, int len, struct smb_dirent *entry, int * error_ptr);
+int smb_proc_close(struct smb_server *server, word fileid, dword mtime, int * error_ptr);
+int smb_proc_read(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr);
+int smb_proc_read_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr);
+int smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr);
+int smb_proc_write_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr);
+int smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offset, int mode, off_t  * new_position_ptr, int * error_ptr);
+int smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct smb_lkrng *locks, int num_entries, int mode, long timeout, int * error_ptr);
+int smb_proc_create(struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr);
+int smb_proc_mv(struct smb_server *server, const char *opath, const int olen, const char *npath, const int nlen, int * error_ptr);
+int smb_proc_mkdir(struct smb_server *server, const char *path, const int len, int * error_ptr);
+int smb_proc_rmdir(struct smb_server *server, const char *path, const int len, int * error_ptr);
+int smb_proc_unlink(struct smb_server *server, const char *path, const int len, int * error_ptr);
+int smb_proc_trunc(struct smb_server *server, word fid, dword length, int * error_ptr);
+int smb_proc_readdir(struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr);
+int smb_proc_getattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr);
+int smb_proc_getattrE(struct smb_server *server, struct smb_dirent *entry, int * error_ptr);
+int smb_proc_setattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *new_finfo, int * error_ptr);
+int smb_proc_setattrE(struct smb_server *server, word fid, struct smb_dirent *new_entry, int * error_ptr);
+int smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * error_ptr);
+int smb_proc_connect(struct smb_server *server, int * error_ptr);
 
 /* sock.c */
-int smb_catch_keepalive(struct smb_server *server);
-int smb_dont_catch_keepalive(struct smb_server *server);
+void smb_check_server_connection(struct smb_server *server, int error);
 void smb_release(struct smb_server *server);
-int smb_connect(struct smb_server *server);
-int smb_request(struct smb_server *server,void * input_payload,const void * output_payload,int payload_size);
-int smb_trans2_request(struct smb_server *server, int *data_len, int *param_len, char **data, char **param);
-int smb_request_read_raw(struct smb_server *server, unsigned char *target, int max_len);
-int smb_request_write_raw(struct smb_server *server, unsigned const char *source, int length);
+int smb_connect(struct smb_server *server, int * error_ptr);
+int smb_request(struct smb_server *server,void * input_payload,const void * output_payload,int payload_size, int * error_ptr);
+int smb_trans2_request(struct smb_server *server, int *data_len, int *param_len, char **data, char **param, int * error_ptr);
+int smb_request_read_raw(struct smb_server *server, unsigned char *target, int max_len, int * error_ptr);
+int smb_request_write_raw(struct smb_server *server, unsigned const char *source, int length, int * error_ptr);
 
 #endif /* _LINUX_SMB_FS_H */

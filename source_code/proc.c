@@ -13,6 +13,7 @@
 
 #include "smbfs.h"
 #include "quad_math.h"
+#include "errors.h"
 
 /*****************************************************************************/
 
@@ -65,29 +66,8 @@
 
 /*****************************************************************************/
 
-static INLINE byte * smb_encode_word(byte *p, word data);
-static INLINE byte * smb_decode_word(const byte *p, word *data);
-static INLINE byte * smb_decode_dword(const byte *p, dword *data);
-static INLINE word smb_bcc(const byte *packet);
-static INLINE int smb_verify(const byte *packet, int command, int wct, int bcc);
-static byte *smb_encode_dialect(byte *p, const byte *name, int len);
-static byte *smb_encode_ascii(byte *p, const byte *name, int len);
-static void smb_encode_vblock(byte *p, const byte *data, int len);
-static byte *smb_decode_data(const byte *p, byte *data, word *data_len);
-static byte *smb_name_mangle(byte *p, const byte *name);
-static int date_dos2unix(unsigned short time_value, unsigned short date);
-static void date_unix2dos(int unix_date, unsigned short *time_value, unsigned short *date);
-static INLINE int smb_valid_packet(const byte *packet);
-static int smb_request_ok(struct smb_server *s, int command, int wct, int bcc);
-static int smb_retry(struct smb_server *server);
-static byte *smb_setup_header(struct smb_server *server, byte command, int wct, int bcc);
-static int smb_proc_do_create(struct smb_server *server, const char *path, int len, struct smb_dirent *entry, word command);
-static char *smb_decode_dirent(char *p, struct smb_dirent *entry);
-static int smb_proc_readdir_short(struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry);
-static char *smb_decode_long_dirent(char *p, struct smb_dirent *finfo, int level);
-static int smb_proc_readdir_long(struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry);
-static int smb_proc_reconnect(struct smb_server *server);
 static void smb_printerr(int class, int num);
+static int smb_proc_reconnect (struct smb_server *server, int * error_ptr);
 
 /*****************************************************************************/
 
@@ -95,49 +75,50 @@ static void smb_printerr(int class, int num);
    merik -at- blackadder -dot- dsh -dot- oz -dot- au */
 typedef struct
 {
-	char *name;
-	int code;
-	char *message;
+	const char *	name;
+	int				code;
+	const char *	message;
 } err_code_struct;
 
 /* Dos Error Messages */
 static const err_code_struct dos_msgs[] =
 {
-	{"ERRbadfunc", 1, "Invalid function"},
-	{"ERRbadfile", 2, "File not found"},
-	{"ERRbadpath", 3, "Directory invalid"},
-	{"ERRnofids", 4, "No file descriptors available"},
-	{"ERRnoaccess", 5, "Access denied"},
-	{"ERRbadfid", 6, "Invalid file handle"},
-	{"ERRbadmcb", 7, "Memory control blocks destroyed"},
-	{"ERRnomem", 8, "Insufficient server memory to perform the requested function"},
-	{"ERRbadmem", 9, "Invalid memory block address"},
-	{"ERRbadenv", 10, "Invalid environment"},
-	{"ERRbadformat", 11, "Invalid format"},
-	{"ERRbadaccess", 12, "Invalid open mode"},
-	{"ERRbaddata", 13, "Invalid data"},
-	{"ERR", 14, "reserved"},
-	{"ERRbaddrive", 15, "Invalid drive specified"},
-	{"ERRremcd", 16, "A Delete Directory request attempted to remove the server's current directory"},
-	{"ERRdiffdevice", 17, "Not same device"},
-	{"ERRnofiles", 18, "A File Search command can find no more files matching the specified criteria"},
-	{"ERRbadshare", 32, "The sharing mode specified for an Open conflicts with existing FIDs on the file"},
-	{"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
-	{"ERRnosuchshare", 67, "Share name not found"},
-	{"ERRfilexists", 80, "The file named in a Create Directory, Make New File or Link request already exists"},
-	{"ERRpaused", 81, "The server is temporarily paused"},
-	{"ERRtimeout", 88, "The requested operation on a named pipe or an I/O device has timed out"},
-	{"ERRnoresource", 89, "No resources currently available for this SMB request"},
-	{"ERRtoomanyuids", 90, "Too many UIDs active for this SMB connection"},
-	{"ERRbaduid", 91, "The UID supplied is not known to the session, or the user identified by the UID does not have sufficient privileges"},
-	{"ERROR_DIRECTORY_NOT_EMPTY", 145, "The directory is not empty"},
-	{"ERRbadpipe", 230, "Pipe invalid"},
-	{"ERRpipebusy", 231, "All instances of the requested pipe are busy"},
-	{"ERRpipeclosing", 232, "Pipe close in progress"},
-	{"ERRnotconnected", 233, "No process on other end of pipe"},
-	{"ERRmoredata", 234, "There is more data to be returned"},
-	{"ERROR_EAS_DIDNT_FIT", 275, "Either there are no extended attributes, or the available extended attributes did not fit into the response"},
-	{"ERROR_EAS_NOT_SUPPORTED", 282, "The server file system does not support Extended Attributes"},
+	{"ERRbadfunc",					1,		"Invalid function"},
+	{"ERRbadfile",					2,		"File not found"},
+	{"ERRbadpath",					3,		"Directory invalid"},
+	{"ERRnofids",					4,		"No file descriptors available"},
+	{"ERRnoaccess",					5,		"Access denied"},
+	{"ERRbadfid",					6,		"Invalid file handle"},
+	{"ERRbadmcb",					7,		"Memory control blocks destroyed"},
+	{"ERRnomem",					8,		"Insufficient server memory to perform the requested function"},
+	{"ERRbadmem",					9,		"Invalid memory block address"},
+	{"ERRbadenv",					10,		"Invalid environment"},
+	{"ERRbadformat",				11,		"Invalid format"},
+	{"ERRbadaccess",				12,		"Invalid open mode"},
+	{"ERRbaddata",					13,		"Invalid data"},
+	{"ERR",							14,		"reserved"},
+	{"ERRbaddrive",					15,		"Invalid drive specified"},
+	{"ERRremcd",					16,		"A Delete Directory request attempted to remove the server's current directory"},
+	{"ERRdiffdevice",				17,		"Not same device"},
+	{"ERRnofiles",					18,		"A File Search command can find no more files matching the specified criteria"},
+	{"ERRbadshare",					32,		"The sharing mode specified for an Open conflicts with existing FIDs on the file"},
+	{"ERRlock",						33,		"A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
+	{"ERRnosuchshare",				67,		"Share name not found"},
+	{"ERRfilexists",				80,		"The file named in a Create Directory, Make New File or Link request already exists"},
+	{"ERRpaused",					81,		"The server is temporarily paused"},
+	{"ERRtimeout",					88,		"The requested operation on a named pipe or an I/O device has timed out"},
+	{"ERRnoresource",				89,		"No resources currently available for this SMB request"},
+	{"ERRtoomanyuids",				90,		"Too many UIDs active for this SMB connection"},
+	{"ERRbaduid",					91,		"The UID supplied is not known to the session, or the user identified by the UID does not have sufficient privileges"},
+	{"ERROR_DIRECTORY_NOT_EMPTY",	145,	"The directory is not empty"},
+	{"OBJECT_NAME_COLLISION",		183,	"Object name collision"},
+	{"ERRbadpipe",					230,	"Pipe invalid"},
+	{"ERRpipebusy",					231,	"All instances of the requested pipe are busy"},
+	{"ERRpipeclosing",				232,	"Pipe close in progress"},
+	{"ERRnotconnected",				233,	"No process on other end of pipe"},
+	{"ERRmoredata",					234,	"There is more data to be returned"},
+	{"ERROR_EAS_DIDNT_FIT",			275,	"Either there are no extended attributes, or the available extended attributes did not fit into the response"},
+	{"ERROR_EAS_NOT_SUPPORTED",		282,	"The server file system does not support Extended Attributes"},
 
 	{NULL, -1, NULL}
 };
@@ -145,42 +126,42 @@ static const err_code_struct dos_msgs[] =
 /* Server Error Messages */
 static const err_code_struct server_msgs[] =
 {
-	{"ERRerror", 1, "Non-specific error code"},
-	{"ERRbadpw", 2, "Bad password - name/password pair in a Tree Connect or Session Setup are invalid"},
-	{"ERRbadtype", 3, "reserved"},
-	{"ERRaccess", 4, "The requester does not have the necessary access rights within the specified context for the requested function. The context is defined by the TID or the UID"},
-	{"ERRinvnid", 5, "The tree ID (TID) specified in a command was invalid"},
-	{"ERRinvnetname", 6, "Invalid network name in tree connect"},
-	{"ERRinvdevice", 7, "Invalid device - printer request made to non-printer connection or non-printer request made to printer connection"},
-	{"ERRqfull", 49, "Print queue full (files) -- returned by open print file"},
-	{"ERRqtoobig", 50, "Print queue full -- no space"},
-	{"ERRqeof", 51, "EOF on print queue dump"},
-	{"ERRinvpfid", 52, "Invalid print file FID"},
-	{"ERRsmbcmd", 64, "The server did not recognize the command received"},
-	{"ERRsrverror", 65, "The server encountered an internal error, e.g., system file unavailable"},
-	{"ERRfilespecs", 67, "The file handle (FID) and pathname parameters contained an invalid combination of values"},
-	{"ERRreserved", 68, "reserved"},
-	{"ERRbadpermits", 69, "The access permissions specified for a file or directory are not a valid combination. The server cannot set the requested attribute"},
-	{"ERRreserved", 70, "reserved"},
-	{"ERRsetattrmode", 71, "The attribute mode in the Set File Attribute request is invalid"},
-	{"ERRpaused", 81, "Server is paused"},
-	{"ERRmsgoff", 82, "Not receiving messages"},
-	{"ERRnoroom", 83, "No room to buffer message"},
-	{"ERRrmuns", 87, "Too many remote user names"},
-	{"ERRtimeout", 88, "Operation timed out"},
-	{"ERRnoresource", 89, "No resources currently available for request"},
-	{"ERRtoomanyuids", 90, "Too many UIDs active on this session"},
-	{"ERRbaduid", 91, "The UID is not known as a valid ID on this session"},
-	{"ERRusempx", 250, "Temp unable to support Raw, use MPX mode"},
-	{"ERRusestd", 251, "Temp unable to support Raw, use standard read/write"},
-	{"ERRcontmpx", 252, "Continue in MPX mode"},
-	{"ERRreserved", 253, "reserved"},
-	{"ERRbadPW", 254, "Invalid password"},
-	{"ERRaccountExpired", 2239, "User account on the target machine is disabled or has expired"},
-	{"ERRbadClient", 2240, "The client does not have permission to access this server"},
-	{"ERRbadLogonTime", 2241, "Access to the server is not permitted at this time"},
-	{"ERRpasswordExpired", 2242, "The user's password has expired"},
-	{"ERRnosupport", 0xFFFF, "Function not supported"},
+	{"ERRerror",			1,		"Non-specific error code"},
+	{"ERRbadpw",			2,		"Bad password - name/password pair in a Tree Connect or Session Setup are invalid"},
+	{"ERRbadtype",			3,		"reserved"},
+	{"ERRaccess",			4,		"The requester does not have the necessary access rights within the specified context for the requested function. The context is defined by the TID or the UID"},
+	{"ERRinvnid",			5,		"The tree ID (TID) specified in a command was invalid"},
+	{"ERRinvnetname",		6,		"Invalid network name in tree connect"},
+	{"ERRinvdevice",		7,		"Invalid device - printer request made to non-printer connection or non-printer request made to printer connection"},
+	{"ERRqfull",			49,		"Print queue full (files) -- returned by open print file"},
+	{"ERRqtoobig",			50,		"Print queue full -- no space"},
+	{"ERRqeof",				51,		"EOF on print queue dump"},
+	{"ERRinvpfid",			52,		"Invalid print file FID"},
+	{"ERRsmbcmd",			64,		"The server did not recognize the command received"},
+	{"ERRsrverror",			65,		"The server encountered an internal error, e.g., system file unavailable"},
+	{"ERRfilespecs",		67,		"The file handle (FID) and pathname parameters contained an invalid combination of values"},
+	{"ERRreserved",			68,		"reserved"},
+	{"ERRbadpermits",		69,		"The access permissions specified for a file or directory are not a valid combination. The server cannot set the requested attribute"},
+	{"ERRreserved",			70,		"reserved"},
+	{"ERRsetattrmode",		71,		"The attribute mode in the Set File Attribute request is invalid"},
+	{"ERRpaused",			81,		"Server is paused"},
+	{"ERRmsgoff",			82,		"Not receiving messages"},
+	{"ERRnoroom",			83,		"No room to buffer message"},
+	{"ERRrmuns",			87,		"Too many remote user names"},
+	{"ERRtimeout",			88,		"Operation timed out"},
+	{"ERRnoresource",		89,		"No resources currently available for request"},
+	{"ERRtoomanyuids",		90,		"Too many UIDs active on this session"},
+	{"ERRbaduid",			91,		"The UID is not known as a valid ID on this session"},
+	{"ERRusempx",			250,	"Temp unable to support Raw, use MPX mode"},
+	{"ERRusestd",			251,	"Temp unable to support Raw, use standard read/write"},
+	{"ERRcontmpx",			252,	"Continue in MPX mode"},
+	{"ERRreserved",			253,	"reserved"},
+	{"ERRbadPW",			254,	"Invalid password"},
+	{"ERRaccountExpired",	2239,	"User account on the target machine is disabled or has expired"},
+	{"ERRbadClient",		2240,	"The client does not have permission to access this server"},
+	{"ERRbadLogonTime",		2241,	"Access to the server is not permitted at this time"},
+	{"ERRpasswordExpired",	2242,	"The user's password has expired"},
+	{"ERRnosupport",		0xFFFF,	"Function not supported"},
 
 	{NULL, -1, NULL}
 };
@@ -188,47 +169,47 @@ static const err_code_struct server_msgs[] =
 /* Hard Error Messages */
 static const err_code_struct hard_msgs[] =
 {
-	{"ERRnowrite", 19, "Attempt to write on write-protected diskette"},
-	{"ERRbadunit", 20, "Unknown unit"},
-	{"ERRnotready", 21, "Drive not ready"},
-	{"ERRbadcmd", 22, "Unknown command"},
-	{"ERRdata", 23, "Data error (CRC)"},
-	{"ERRbadreq", 24, "Bad request structure length"},
-	{"ERRseek", 25, "Seek error"},
-	{"ERRbadmedia", 26, "Unknown media type"},
-	{"ERRbadsector", 27, "Sector not found"},
-	{"ERRnopaper", 28, "Printer out of paper"},
-	{"ERRwrite", 29, "Write fault"},
-	{"ERRread", 30, "Read fault"},
-	{"ERRgeneral", 31, "General failure"},
-	{"ERRbadshare", 32, "A open conflicts with an existing open"},
-	{"ERRlock", 33, "A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
-	{"ERRwrongdisk", 34, "The wrong disk was found in a drive"},
-	{"ERRFCBUnavail", 35, "No FCBs are available to process request"},
-	{"ERRsharebufexc", 36, "A sharing buffer has been exceeded"},
-	{"ERRdiskfull", 39, "The file system is full"},
+	{"ERRnowrite",		19,	"Attempt to write on write-protected diskette"},
+	{"ERRbadunit",		20,	"Unknown unit"},
+	{"ERRnotready",		21,	"Drive not ready"},
+	{"ERRbadcmd",		22,	"Unknown command"},
+	{"ERRdata",			23,	"Data error (CRC)"},
+	{"ERRbadreq",		24,	"Bad request structure length"},
+	{"ERRseek",			25,	"Seek error"},
+	{"ERRbadmedia",		26,	"Unknown media type"},
+	{"ERRbadsector",	27,	"Sector not found"},
+	{"ERRnopaper",		28,	"Printer out of paper"},
+	{"ERRwrite",		29,	"Write fault"},
+	{"ERRread",			30,	"Read fault"},
+	{"ERRgeneral",		31,	"General failure"},
+	{"ERRbadshare",		32,	"A open conflicts with an existing open"},
+	{"ERRlock",			33,	"A Lock request conflicted with an existing lock or specified an invalid mode, or an Unlock requested attempted to remove a lock held by another process"},
+	{"ERRwrongdisk",	34,	"The wrong disk was found in a drive"},
+	{"ERRFCBUnavail",	35,	"No FCBs are available to process request"},
+	{"ERRsharebufexc",	36,	"A sharing buffer has been exceeded"},
+	{"ERRdiskfull",		39,	"The file system is full"},
 
 	{NULL, -1, NULL}
 };
 
 typedef struct
 {
-	int code;
-	char *class;
-	const err_code_struct *err_msgs;
+	int						code;
+	const char *			class;
+	const err_code_struct *	err_msgs;
 } err_class_struct;
 
 static const err_class_struct err_classes[] =
 {
-	{ 0, "SUCCESS", NULL },
-	{ 0x01, "ERRDOS", dos_msgs },
-	{ 0x02, "ERRSRV", server_msgs },
-	{ 0x03, "ERRHRD", hard_msgs },
-	{ 0x04, "ERRXOS", NULL },
-	{ 0xE1, "ERRRMX1", NULL },
-	{ 0xE2, "ERRRMX2", NULL },
-	{ 0xE3, "ERRRMX3", NULL },
-	{ 0xFF, "ERRCMD", NULL },
+	{ 0,	"SUCCESS",	NULL },
+	{ 0x01,	"ERRDOS",	dos_msgs },
+	{ 0x02,	"ERRSRV",	server_msgs },
+	{ 0x03,	"ERRHRD",	hard_msgs },
+	{ 0x04,	"ERRXOS",	NULL },
+	{ 0xE1,	"ERRRMX1",	NULL },
+	{ 0xE2,	"ERRRMX2",	NULL },
+	{ 0xE3,	"ERRRMX3",	NULL },
+	{ 0xFF,	"ERRCMD",	NULL },
 
 	{ -1, NULL, NULL }
 };
@@ -309,24 +290,6 @@ smb_encode_vblock (byte * p, const byte * data, int len)
 	(*p++) = 5;
 	p = smb_encode_word (p, len);
 	memcpy (p, data, len);
-}
-
-static byte *
-smb_decode_data (const byte * p, byte * data, word * data_len)
-{
-	word len;
-
-	if (!((*p) == 1 || (*p) == 5))
-		LOG (("Warning! Data block not starting with 1 or 5\n"));
-
-	len = WVAL (p, 1);
-	p += 3;
-
-	memcpy (data, p, len);
-
-	(*data_len) = len;
-
-	return p + len;
 }
 
 static byte *
@@ -444,44 +407,82 @@ smb_bcc (const byte * packet)
 
 /* smb_valid_packet: We check if packet fulfills the basic
    requirements of a smb packet */
-static INLINE int
+static int
 smb_valid_packet (const byte * packet)
 {
-	int result;
+	int error;
 
-	LOG (("len: %ld, wct: %ld, bcc: %ld -- SMB_HEADER_LEN[%ld] + SMB_WCT (packet) * 2[%ld] + SMB_BCC (packet)[%ld] + 2 = %ld\n",
-	smb_len (packet),
-	SMB_WCT (packet),
-	SMB_BCC (packet),
-	33,
-	SMB_WCT (packet),
-	SMB_BCC (packet),
-	33 + SMB_WCT (packet) * sizeof(word) + sizeof(word) + SMB_BCC (packet)));
+	if (memcmp(&packet[4],"\xffSMB",4) != SAME)
+		error = error_smb_message_signature_missing;
+	else if (smb_len(packet) < (int)(32 + 1 + SMB_WCT (packet) * sizeof(word) + sizeof(word) + SMB_BCC (packet)) )
+		error = error_smb_message_too_short;
+	else
+		error = 0;
 
-	/* olsen: During protocol negotiation Samba 3.2.5 may return SMB responses which contain
-	          more data than is called for. I'm not sure what the right approach to handle
-	          this would be. But for now, I've modified this test to check only if there
-	          is less data in a response than required. */
-	result = (packet[4] == 0xff
-		   && packet[5] == 'S'
-		   && packet[6] == 'M'
-		   && packet[7] == 'B'
-		   && (smb_len (packet) >=
-				(32 + 1 + SMB_WCT (packet) * sizeof(word) + sizeof(word) + SMB_BCC (packet)))) ? 0 : (-EIO);
-
-	return result;
+	return error;
 }
 
 /* smb_verify: We check if we got the answer we expected, and if we
    got enough data. If bcc == -1, we don't care. */
-static INLINE int
+static int
 smb_verify (const byte * packet, int command, int wct, int bcc)
 {
-	return (
-		SMB_CMD (packet) == command &&
-		SMB_WCT (packet) >= wct &&
-		(bcc == -1 || SMB_BCC (packet) >= bcc)
-	) ? 0 : -EIO;
+	int error;
+
+	if (SMB_CMD (packet) != command)
+		error = error_smb_message_invalid_command;
+	else if (SMB_WCT (packet) < wct)
+		error = error_smb_message_invalid_word_count;
+	else if (bcc != -1 && SMB_BCC (packet) < bcc)
+		error = error_smb_message_invalid_byte_count;
+	else
+		error = 0;
+
+	return(error);
+}
+
+void
+smb_translate_error_class_and_code(int errcls,int error,char ** class_ptr,char ** code_ptr)
+{
+	const err_class_struct * err_class = NULL;
+	const err_code_struct * err_code = NULL;
+	int i;
+
+	for (i = 0; err_classes[i].class; i++)
+	{
+		if (err_classes[i].code == errcls)
+		{
+			err_class = &err_classes[i];
+
+			if(err_class->err_msgs != NULL)
+			{
+				const err_code_struct * err = err_class->err_msgs;
+				int j;
+
+				for (j = 0; err[j].name; j++)
+				{
+					if(err[j].code == error)
+					{
+						err_code = &err[j];
+						break;
+					}
+				}
+			}
+
+			break;
+		}
+	}
+
+	if(err_class != NULL && err_code != NULL)
+	{
+		(*class_ptr)	= (char *)err_class->class;
+		(*code_ptr)		= (char *)err_code->message;
+	}
+	else
+	{
+		(*class_ptr)	= "?";
+		(*code_ptr)		= "?";
+	}
 }
 
 int
@@ -493,30 +494,28 @@ smb_errno (int errcls, int error)
 	{
 		static const int map[][2] =
 		{
-			{ ERRbadfunc,EINVAL },
-			{ ERRbadfile,ENOENT },
-			{ ERRbadpath,ENOENT },
-			{ ERRnofids,EMFILE },
-			{ ERRnoaccess,EACCES },
-			{ ERRbadfid,EBADF },
-			{ ERRbadmcb,EIO },
-			{ ERRnomem,ENOMEM },
-			{ ERRbadmem,EFAULT },
-			{ ERRbadenv,EIO },
-			{ ERRbadformat,EIO },
-			{ ERRbadaccess,EACCES },
-			{ ERRbaddata,E2BIG },
-			{ ERRbaddrive,ENXIO },
-			{ ERRremcd,EIO },
-			{ ERRdiffdevice,EXDEV },
-			{ ERRnofiles,0 },
-			{ ERRbadshare,ETXTBSY },
-			{ ERRlock,EDEADLK },
-			{ ERRfilexists,EEXIST },
-			{ 87,0 },/* Unknown error! */
-			{ 145,ENOTEMPTY},/* Directory is not empty; this is what Samba reports (2016-04-23) */
-			{ 183,EEXIST },/* This next error seems to occur on an mv when the destination exists ("object name collision") */
-			{ -1,-1 }
+			{ ERRbadfunc,		EINVAL },
+			{ ERRbadfile,		ENOENT },
+			{ ERRbadpath,		ENOENT },
+			{ ERRnofids,		EMFILE },
+			{ ERRnoaccess,		EPERM },
+			{ ERRbadfid,		EBADF },
+			{ ERRbadmcb,		EIO },
+			{ ERRnomem,			ENOMEM },
+			{ ERRbadmem,		EFAULT },
+			{ ERRbadenv,		EIO },
+			{ ERRbadformat,		EIO },
+			{ ERRbadaccess,		EACCES },
+			{ ERRbaddata,		E2BIG },
+			{ ERRbaddrive,		ENXIO },
+			{ ERRremcd,			EIO },
+			{ ERRdiffdevice,	EXDEV },
+			{ ERRbadshare,		ETXTBSY },
+			{ ERRlock,			EDEADLK },
+			{ ERRfilexists,		EEXIST },
+			{ 145,				ENOTEMPTY},/* Directory is not empty; this is what Samba reports (2016-04-23) */
+			{ 183,				EEXIST },/* This next error seems to occur on an mv when the destination exists ("object name collision") */
+			{ -1,				-1 }
 		};
 
 		result = EIO;
@@ -534,10 +533,10 @@ smb_errno (int errcls, int error)
 	{
 		static const int map[][2] =
 		{
-			{ ERRerror,ENFILE },
-			{ ERRbadpw,EINVAL },
-			{ ERRbadtype,EIO },
-			{ ERRaccess,EACCES },
+			{ ERRerror,		ENFILE },
+			{ ERRbadpw,		EINVAL },
+			{ ERRbadtype,	EIO },
+			{ ERRaccess,	EACCES },
 			{ -1, -1 }
 		};
 
@@ -556,15 +555,16 @@ smb_errno (int errcls, int error)
 	{
 		static const int map[][2] =
 		{
-			{ ERRnowrite,EROFS },
-			{ ERRbadunit,ENODEV },
-			{ ERRnotready,EBUSY },
-			{ ERRbadcmd,EIO },
-			{ ERRdata,EIO },
-			{ ERRbadreq,ERANGE },
-			{ ERRbadshare,ETXTBSY },
-			{ ERRlock,EDEADLK },
-			{ -1, -1 }
+			{ ERRnowrite,	EROFS },
+			{ ERRbadunit,	ENODEV },
+			{ ERRnotready,	EBUSY },
+			{ ERRbadcmd,	EIO },
+			{ ERRdata,		EIO },
+			{ ERRbadreq,	ERANGE },
+			{ ERRbadshare,	ETXTBSY },
+			{ ERRlock,		EDEADLK },
+			{ ERRdiskfull,	ENOSPC },
+			{ -1,			-1 }
 		};
 
 		result = EIO;
@@ -698,22 +698,23 @@ smb_dump_packet (const byte * packet)
    the answer is <=0, the returned number is a valid unix errno. */
 static int
 smb_request_ok_with_payload (
-	struct smb_server *	s,
+	struct smb_server *	server,
 	int					command,
 	int					wct,
 	int					bcc,
 	void *				input_payload,
 	const void *		output_payload,
-	int					payload_size)
+	int					payload_size,
+	int *				error_ptr)
 {
 	int result;
 	int error;
 
-	s->rcls = 0;
-	s->err = 0;
+	server->rcls = 0;
+	server->err = 0;
 
 	/* Send the message and wait for the response to arrive. */
-	result = smb_request (s, input_payload, output_payload, payload_size);
+	result = smb_request (server, input_payload, output_payload, payload_size, error_ptr);
 
 	/* smb_request() failed? */
 	if (result < 0)
@@ -721,27 +722,35 @@ smb_request_ok_with_payload (
 		LOG (("smb_request failed\n"));
 	}
 	/* The message received is inconsistent? */
-	else if ((error = smb_valid_packet (s->transmit_buffer)) != 0)
+	else if ((error = smb_valid_packet (server->transmit_buffer)) != 0)
 	{
 		LOG (("not a valid packet!\n"));
-		result = error;
+		
+		(*error_ptr) = error;
+		result = -1;
 	}
 	/* An error condition was flagged? */
-	else if (s->rcls != 0)
+	else if (server->rcls != 0)
 	{
-		smb_printerr (s->rcls, s->err);
+		smb_printerr (server->rcls, server->err);
 
-		result = -smb_errno (s->rcls, s->err);
+		(*error_ptr) = error_check_smb_error;
+		result = -1;
 	}
 	/* The message received does not contain the expected
 	 * number of parameters and/or payload? A bcc value of
 	 * -1 means that payload size should be ignored.
 	 */
-	else if ((error = smb_verify (s->transmit_buffer, command, wct, bcc)) != 0)
+	else if ((error = smb_verify (server->transmit_buffer, command, wct, bcc)) != 0)
 	{
 		LOG (("smb_verify failed\n"));
-		result = error;
+
+		(*error_ptr) = error;
+		result = -1;
 	}
+
+	if(result < 0)
+		smb_check_server_connection(server, (*error_ptr));
 
 	return(result);
 }
@@ -750,9 +759,9 @@ smb_request_ok_with_payload (
  * business...
  */
 static int
-smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
+smb_request_ok (struct smb_server *s, int command, int wct, int bcc, int * error_ptr)
 {
-	return(smb_request_ok_with_payload (s, command, wct, bcc, NULL, NULL, 0));
+	return(smb_request_ok_with_payload (s, command, wct, bcc, NULL, NULL, 0, error_ptr));
 }
 
 /* smb_retry: This function should be called when smb_request_ok has
@@ -761,7 +770,7 @@ smb_request_ok (struct smb_server *s, int command, int wct, int bcc)
    the error was indicated for another reason, so a retry would not be
    of any use. */
 static int
-smb_retry (struct smb_server *server)
+smb_retry (struct smb_server *server, int * error_ptr)
 {
 	int result = 0;
 
@@ -770,7 +779,7 @@ smb_retry (struct smb_server *server)
 
 	smb_release (server);
 
-	if (smb_proc_reconnect (server) < 0)
+	if (smb_proc_reconnect (server, error_ptr) < 0)
 	{
 		LOG (("smb_proc_reconnect failed\n"));
 		server->state = CONN_RETRIED;
@@ -872,9 +881,9 @@ smb_payload_size(const struct smb_server *server, int wct, int bcc)
  ****************************************************************************/
 
 int
-smb_proc_open (struct smb_server *server, const char *pathname, int len, struct smb_dirent *entry)
+smb_proc_open (struct smb_server *server, const char *pathname, int len, struct smb_dirent *entry,int * error_ptr)
 {
-	int error;
+	int result;
 	char *p;
 	char *buf = server->transmit_buffer;
 	const word o_attr = aSYSTEM | aHIDDEN | aDIR;
@@ -890,26 +899,34 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, struct 
 	WSET (buf, smb_vwv1, o_attr);
 	smb_encode_ascii (p, pathname, len);
 
-	if ((error = smb_request_ok (server, SMBopen, 7, 0)) < 0)
+	result = smb_request_ok (server, SMBopen, 7, 0, error_ptr);
+	if (result < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 
-		if (error != -EACCES)
-			goto out;
+		/* ZZZ Why is the file opened in read-only mode here? */
 
-		ASSERT( smb_payload_size(server, 2, 2 + len) >= 0 );
-
-		p = smb_setup_header (server, SMBopen, 2, 2 + len);
-		WSET (buf, smb_vwv0, 0x40); /* read only */
-		WSET (buf, smb_vwv1, o_attr);
-		smb_encode_ascii (p, pathname, len);
-
-		if ((error = smb_request_ok (server, SMBopen, 7, 0)) < 0)
+		if ((*error_ptr) == EACCES || ((*error_ptr) == error_check_smb_error && smb_errno(server->rcls,server->err) == EACCES))
 		{
-			if (smb_retry (server))
-				goto retry;
+			ASSERT( smb_payload_size(server, 2, 2 + len) >= 0 );
 
+			p = smb_setup_header (server, SMBopen, 2, 2 + len);
+			WSET (buf, smb_vwv0, 0x40); /* read only */
+			WSET (buf, smb_vwv1, o_attr);
+			smb_encode_ascii (p, pathname, len);
+
+			result = smb_request_ok (server, SMBopen, 7, 0, error_ptr);
+			if (result < 0)
+			{
+				if (smb_retry (server, error_ptr))
+					goto retry;
+
+				goto out;
+			}
+		}
+		else
+		{
 			goto out;
 		}
 	}
@@ -941,13 +958,13 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, struct 
 
  out:
 
-	return error;
+	return result;
 }
 
 /* smb_proc_close: in finfo->mtime we can send a modification time to
    the server */
 int
-smb_proc_close (struct smb_server *server, word fileid, dword mtime)
+smb_proc_close (struct smb_server *server, word fileid, dword mtime, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int local_time;
@@ -967,7 +984,7 @@ smb_proc_close (struct smb_server *server, word fileid, dword mtime)
 	WSET (buf, smb_vwv0, fileid);
 	DSET (buf, smb_vwv1, local_time);
 
-	result = smb_request_ok (server, SMBclose, 0, 0);
+	result = smb_request_ok (server, SMBclose, 0, 0, error_ptr);
 
 	return result;
 }
@@ -976,11 +993,10 @@ smb_proc_close (struct smb_server *server, word fileid, dword mtime)
    file-id would not be valid after a reconnection. */
 
 int
-smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data)
+smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
-	int error;
 
 	ASSERT( count <= 65535 );
 
@@ -991,69 +1007,20 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 	DSET (buf, smb_vwv2, offset);
 	WSET (buf, smb_vwv4, 0);
 
-	#if 1
-	{
-		int buffer_format;
+	LOG(("requesting %ld bytes\n", count));
 
-		LOG(("smb_proc_read: requesting %ld bytes\n", count));
+	result = smb_request_ok_with_payload (server, SMBread, 5, -1, data, NULL, count, error_ptr);
+	if (result < 0)
+		goto out;
 
-		if ((error = smb_request_ok_with_payload (server, SMBread, 5, -1, data, NULL, count)) < 0)
-		{
-			LOG(("smb_proc_read: error=%ld\n", error));
+	/* The buffer format must be 1; smb_request_ok_with_payload() already checked this. */
+	LOG(("buffer_format=%ld, should be %ld\n", BVAL(buf, NETBIOS_HEADER_SIZE+45), 1));
 
-			result = error;
-			goto out;
-		}
+	result = WVAL (buf, NETBIOS_HEADER_SIZE+46); /* count of bytes to read */
 
-		buffer_format = BVAL(buf, NETBIOS_HEADER_SIZE+45);
-		LOG(("smb_proc_read: buffer_format=%ld, should be %ld\n", buffer_format, 1));
+	ASSERT( result <= count );
 
-		/* The buffer format must be 1. */
-		if(buffer_format == 1)
-		{
-			result = WVAL (buf, NETBIOS_HEADER_SIZE+46); /* count of bytes to read */
-
-			ASSERT( result <= count );
-
-			LOG(("smb_proc_read: read %ld bytes (should be < %ld)\n", result, count));
-		}
-		else
-		{
-			LOG(("smb_proc_read: returning EOF\n"));
-			result = 0;
-		}
-	}
-	#else
-	{
-		word returned_count, data_len;
-
-		if ((error = smb_request_ok_with_payload (server, SMBread, 5, -1, data, NULL, count)) < 0)
-		{
-			result = error;
-			goto out;
-		}
-
-		returned_count = WVAL (buf, smb_vwv0);
-
-		/* ZZZ olsen 2018-05-01: this should not be necessary; we should be
-		 *                       able to break this down into two subsequent
-		 *                       recv() calls.
-		 */
-		smb_decode_data (SMB_BUF (server->transmit_buffer), data, &data_len);
-
-		if (returned_count != data_len)
-		{
-			LOG (("Warning, returned_count != data_len\n"));
-			LOG (("ret_c=%ld, data_len=%ld\n", returned_count, data_len));
-		}
-		else
-		{
-			LOG (("ret_c=%ld, data_len=%ld\n", returned_count, data_len));
-		}
-
-		result = data_len;
-	}
-	#endif
+	LOG(("read %ld bytes (should be < %ld)\n", result, count));
 
  out:
 
@@ -1064,7 +1031,7 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
    indicates an error, which has to be investigated by a normal read
    call. */
 int
-smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data)
+smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -1080,15 +1047,15 @@ smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t of
 	DSET (buf, smb_vwv5, 0); /* timeout */
 	WSET (buf, smb_vwv7, 0); /* reserved */
 
-	result = smb_request_read_raw (server, data, count);
+	result = smb_request_read_raw (server, data, count, error_ptr);
 
 	return result;
 }
 
 int
-smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data)
+smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr)
 {
-	int res;
+	int result;
 	char *buf = server->transmit_buffer;
 	byte *p;
 
@@ -1103,14 +1070,15 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	(*p++) = 1; /* Buffer format - this field must be 1 */
 	WSET (p, 0, count); /* Data length - this field must match what the count field in the SMB header says */
 
-	if ((res = smb_request_ok_with_payload (server, SMBwrite, 1, 0, NULL, data, count)) >= 0)
-		res = WVAL (buf, smb_vwv0);
+	result = smb_request_ok_with_payload (server, SMBwrite, 1, 0, NULL, data, count, error_ptr);
+	if (result >= 0)
+		result = WVAL (buf, smb_vwv0);
 
-	return res;
+	return result;
 }
 
 int
-smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data)
+smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int num_bytes_written = 0;
@@ -1165,7 +1133,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	}
 	else
 	{
-		len = count - max_len;	/* Send some of the data as part of the SMB_COM_WRITE_RAW message, followed by the remaining raw data. */
+		len = count - max_len; /* Send some of the data as part of the SMB_COM_WRITE_RAW message, followed by the remaining raw data. */
 
 		LOG(("count (%ld) > max_len (%ld) -- send %ld bytes with the message.\n",count,max_len,len));
 	}
@@ -1196,7 +1164,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 
 	LOG(("requesting SMBwritebraw\n"));
 
-	result = smb_request_ok_with_payload (server, SMBwritebraw, 1, 0, NULL, data, len);
+	result = smb_request_ok_with_payload (server, SMBwritebraw, 1, 0, NULL, data, len, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1213,7 +1181,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 
 		ASSERT( count <= 65535 );
 
-		result = smb_request_write_raw (server, data, count);
+		result = smb_request_write_raw (server, data, count, error_ptr);
 		if (result < 0)
 			goto out;
 
@@ -1229,21 +1197,24 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 			int error;
 
 			/* We have to do the checks of smb_request_ok here as well */
-			if((error = smb_valid_packet (server->transmit_buffer)) != 0)
+			if ((error = smb_valid_packet (server->transmit_buffer)) != 0)
 			{
 				LOG (("not a valid packet!\n"));
 
-				result = error;
+				(*error_ptr) = error;
+				result = -1;
+
 				goto out;
 			}
-
-			if(server->rcls != 0)
+			else if (server->rcls != 0)
 			{
 				LOG (("server error %ld/%ld\n", server->rcls, server->err));
 
 				smb_printerr (server->rcls, server->err);
 
-				result = -smb_errno (server->rcls, server->err);
+				(*error_ptr) = error_check_smb_error;
+				result = -1;
+
 				goto out;
 			}
 
@@ -1259,10 +1230,10 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 }
 
 int
-smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offset, int mode, off_t * new_position_ptr)
+smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offset, int mode, off_t * new_position_ptr, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
-	int error;
+	int result;
 
  retry:
 
@@ -1274,9 +1245,10 @@ smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	WSET (buf, smb_vwv1, mode);
 	DSET (buf, smb_vwv2, offset);
 
-	if ((error = smb_request_ok (server, SMBlseek, 1, 0)) < 0)
+	result = smb_request_ok (server, SMBlseek, 1, 0, error_ptr);
+	if (result < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 	}
 	else
@@ -1284,12 +1256,12 @@ smb_proc_lseek (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 		(*new_position_ptr) = DVAL(buf, smb_vwv0);
 	}
 
-	return error;
+	return result;
 }
 
 /* smb_proc_lockingX: We don't chain any further packets to the initial one */
 int
-smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct smb_lkrng *locks, int num_entries, int mode, long timeout)
+smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct smb_lkrng *locks, int num_entries, int mode, long timeout, int * error_ptr)
 {
 	int result;
 	int num_locks, num_unlocks;
@@ -1326,9 +1298,10 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct s
 		DSET (data, SMB_LKLEN_OFFSET(i), p->len);
 	}
 
-	if ((result = smb_request_ok (server, SMBlockingX, 0, 0)) < 0)
+	result = smb_request_ok (server, SMBlockingX, 0, 0, error_ptr);
+	if (result < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 	}
 
@@ -1337,9 +1310,9 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct s
 
 /* smb_proc_do_create: We expect entry->attry & entry->ctime to be set. */
 static int
-smb_proc_do_create (struct smb_server *server, const char *path, int len, struct smb_dirent *entry, word command)
+smb_proc_do_create (struct smb_server *server, const char *path, int len, struct smb_dirent *entry, word command, int * error_ptr)
 {
-	int error;
+	int result;
 	char *p;
 	char *buf = server->transmit_buffer;
 	int local_time;
@@ -1354,9 +1327,10 @@ smb_proc_do_create (struct smb_server *server, const char *path, int len, struct
 	DSET (buf, smb_vwv1, local_time);
 	smb_encode_ascii (p, path, len);
 
-	if ((error = smb_request_ok (server, command, 1, 0)) < 0)
+	result = smb_request_ok (server, command, 1, 0, error_ptr);
+	if (result < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 
 		goto out;
@@ -1365,21 +1339,21 @@ smb_proc_do_create (struct smb_server *server, const char *path, int len, struct
 	entry->opened = 1;
 	entry->fileid = WVAL (buf, smb_vwv0);
 
-	smb_proc_close (server, entry->fileid, entry->mtime);
+	smb_proc_close (server, entry->fileid, entry->mtime, error_ptr);
 
  out:
 
-	return error;
+	return result;
 }
 
 int
-smb_proc_create (struct smb_server *server, const char *path, int len, struct smb_dirent *entry)
+smb_proc_create (struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr)
 {
-	return smb_proc_do_create (server, path, len, entry, SMBcreate);
+	return smb_proc_do_create (server, path, len, entry, SMBcreate, error_ptr);
 }
 
 int
-smb_proc_mv (struct smb_server *server, const char *opath, const int olen, const char *npath, const int nlen)
+smb_proc_mv (struct smb_server *server, const char *opath, const int olen, const char *npath, const int nlen, int * error_ptr)
 {
 	char *p;
 	char *buf = server->transmit_buffer;
@@ -1396,9 +1370,10 @@ smb_proc_mv (struct smb_server *server, const char *opath, const int olen, const
 	p = smb_encode_ascii (p, opath, olen);
 	smb_encode_ascii (p, npath, olen);
 
-	if ((result = smb_request_ok (server, SMBmv, 0, 0)) < 0)
+	result = smb_request_ok (server, SMBmv, 0, 0, error_ptr);
+	if (result < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 	}
 
@@ -1406,10 +1381,10 @@ smb_proc_mv (struct smb_server *server, const char *opath, const int olen, const
 }
 
 int
-smb_proc_mkdir (struct smb_server *server, const char *path, const int len)
+smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int * error_ptr)
 {
-	char *p;
 	int result;
+	char *p;
 
  retry:
 
@@ -1419,9 +1394,9 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len)
 
 	smb_encode_ascii (p, path, len);
 
-	if ((result = smb_request_ok (server, SMBmkdir, 0, 0)) < 0)
+	if ((result = smb_request_ok (server, SMBmkdir, 0, 0, error_ptr)) < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 	}
 
@@ -1429,10 +1404,10 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len)
 }
 
 int
-smb_proc_rmdir (struct smb_server *server, const char *path, const int len)
+smb_proc_rmdir (struct smb_server *server, const char *path, const int len, int * error_ptr)
 {
-	char *p;
 	int result;
+	char *p;
 
  retry:
 
@@ -1442,9 +1417,9 @@ smb_proc_rmdir (struct smb_server *server, const char *path, const int len)
 
 	smb_encode_ascii (p, path, len);
 
-	if ((result = smb_request_ok (server, SMBrmdir, 0, 0)) < 0)
+	if ((result = smb_request_ok (server, SMBrmdir, 0, 0, error_ptr)) < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 	}
 
@@ -1452,7 +1427,7 @@ smb_proc_rmdir (struct smb_server *server, const char *path, const int len)
 }
 
 int
-smb_proc_unlink (struct smb_server *server, const char *path, const int len)
+smb_proc_unlink (struct smb_server *server, const char *path, const int len, int * error_ptr)
 {
 	char *p;
 	char *buf = server->transmit_buffer;
@@ -1468,9 +1443,9 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len)
 
 	smb_encode_ascii (p, path, len);
 
-	if ((result = smb_request_ok (server, SMBunlink, 0, 0)) < 0)
+	if ((result = smb_request_ok (server, SMBunlink, 0, 0, error_ptr)) < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 	}
 
@@ -1478,7 +1453,7 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len)
 }
 
 int
-smb_proc_trunc (struct smb_server *server, word fid, dword length)
+smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_ptr)
 {
 	char *p;
 	char *buf = server->transmit_buffer;
@@ -1493,7 +1468,7 @@ smb_proc_trunc (struct smb_server *server, word fid, dword length)
 	WSET (buf, smb_vwv4, 0);
 	smb_encode_ascii (p, "", 0);
 
-	result = smb_request_ok (server, SMBwrite, 1, 0);
+	result = smb_request_ok (server, SMBwrite, 1, 0, error_ptr);
 	if (result >= 0)
 		result = DVAL(buf, smb_vwv0);
 
@@ -1520,7 +1495,7 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 
 	entry->complete_path[name_size] = '\0';
 
-	LOG (("smb_decode_dirent: path = %s\n", entry->complete_path));
+	LOG (("path = %s\n", entry->complete_path));
 
 	#if DEBUG
 	{
@@ -1546,11 +1521,10 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 /* This routine is used to read in directory entries from the network.
    Note that it is for short directory name seeks, i.e.: protocol < PROTOCOL_LANMAN2 */
 static int
-smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry)
+smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
 {
 	char *p;
 	char *buf;
-	int error;
 	int result = 0;
 	int i;
 	int first, total_count;
@@ -1560,12 +1534,14 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 	char status[SMB_STATUS_SIZE];
 	int entries_asked = (server->max_recv - 100) / SMB_DIRINFO_SIZE;
 	int dirlen = strlen (path);
-	char * mask;
+	char * mask = NULL;
 
 	mask = malloc(dirlen + 4 + 1);
 	if (mask == NULL)
 	{
-		result = (-ENOMEM);
+		(*error_ptr) = ENOMEM;
+
+		result = -1;
 		goto out;
 	}
 
@@ -1607,21 +1583,20 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 			(void) smb_encode_vblock (p, status, SMB_STATUS_SIZE);
 		}
 
-		if ((error = smb_request_ok (server, SMBsearch, 1, -1)) < 0)
+		if (smb_request_ok (server, SMBsearch, 1, -1, error_ptr) < 0)
 		{
-			if ((server->rcls == ERRDOS) && (server->err == ERRnofiles))
+			if (server->rcls == ERRDOS && server->err == ERRnofiles)
 			{
 				result = total_count - fpos;
-				goto unlock_return;
+				goto out;
 			}
 			else
 			{
-				if (smb_retry (server))
+				if (smb_retry (server, error_ptr))
 					goto retry;
 
-				result = error;
-
-				goto unlock_return;
+				result = -1;
+				goto out;
 			}
 		}
 
@@ -1635,16 +1610,17 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 		{
 			result = total_count - fpos;
 
-			goto unlock_return;
+			goto out;
 		}
 
 		if (bcc != count * SMB_DIRINFO_SIZE + 3)
 		{
-			LOG (("smb_proc_readdir: byte count (%ld) does not match expected size (%ld)\n", bcc, count * SMB_DIRINFO_SIZE + 3));
+			LOG (("byte count (%ld) does not match expected size (%ld)\n", bcc, count * SMB_DIRINFO_SIZE + 3));
 
-			result = -EIO;
+			(*error_ptr) = error_invalid_directory_size;
 
-			goto unlock_return;
+			result = -1;
+			goto out;
 		}
 
 		p += 3; /* Skipping VBLOCK header (5, length lo, length hi). */
@@ -1660,13 +1636,13 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 			{
 				p += SMB_DIRINFO_SIZE;
 
-				LOG (("smb_proc_readdir: skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
+				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 			}
 			else if (total_count >= fpos + cache_size)
 			{
 				result = total_count - fpos;
 
-				goto unlock_return;
+				goto out;
 			}
 			else
 			{
@@ -1679,19 +1655,17 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 		}
 	}
 
- unlock_return:
+ out:
 
 	if(mask != NULL)
 		free(mask);
-
- out:
 
 	return result;
 }
 
 /*****************************************************************************/
 
-/* Interpret an 8 byte "filetime" structure to a 'time_t'.
+/* Translate an 8 byte "filetime" structure to a 'time_t'.
  * It's originally in "100ns units since jan 1st 1601".
  *
  * Unlike the Samba implementation of that date conversion
@@ -1987,7 +1961,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level)
 }
 
 static int
-smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry)
+smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
 {
 	int max_matches = 512; /* this should actually be based on the max_recv value */
 
@@ -2000,14 +1974,13 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	int total_count = 0;
 	struct smb_dirent *current_entry;
 
-	char *resp_data;
-	char *resp_param;
+	char *resp_data = NULL;
+	char *resp_param = NULL;
 	int resp_data_len = 0;
 	int resp_param_len = 0;
 
 	int attribute = aSYSTEM | aHIDDEN | aDIR;
-	int result;
-	int error = 0;
+	int result = 0;
 
 	int ff_searchcount;
 	int ff_eos = 0;
@@ -2018,7 +1991,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	unsigned char *outbuf = server->transmit_buffer;
 
 	int dirlen = strlen (path) + 2 + 1;
-	char *mask;
+	char *mask = NULL;
 	int masklen;
 
 	ENTER();
@@ -2038,8 +2011,10 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	if (mask == NULL)
 	{
 		LOG (("Memory allocation failed\n"));
-		error = (-ENOMEM);
-		SHOWVALUE(error);
+
+		(*error_ptr) = ENOMEM;
+
+		result = -1;
 		goto out;
 	}
 
@@ -2064,8 +2039,11 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 		loop_count++;
 		if (loop_count > 200)
 		{
-			LOG (("smb_proc_readdir_long: Looping in FIND_NEXT???\n"));
-			error = -EIO;
+			LOG (("Looping in FIND_NEXT???\n"));
+
+			(*error_ptr) = error_looping_in_find_next;
+
+			result = -1;
 			break;
 		}
 
@@ -2127,24 +2105,26 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 		(*p++) = 0;
 		(*p) = 0;
 
-		result = smb_trans2_request (server, &resp_data_len, &resp_param_len, &resp_data, &resp_param);
+		result = smb_trans2_request (server, &resp_data_len, &resp_param_len, &resp_data, &resp_param, error_ptr);
 
-		LOG (("smb_proc_readdir_long: smb_trans2_request returns %ld\n", result));
+		LOG (("smb_trans2_request returns %ld\n", result));
 
-		if (result < 0)
+		/* If an error was flagged, check first if it's a protocol
+		 * error which could handle below. Otherwise, try again.
+		 */
+		if (result < 0 && (*error_ptr) != error_check_smb_error)
 		{
-			if (smb_retry (server))
+			if (smb_retry (server, error_ptr))
 				goto retry;
 
-			LOG (("smb_proc_readdir_long: got error from trans2_request\n"));
-			error = result;
-			SHOWVALUE(error);
+			LOG (("got error from trans2_request\n"));
 			break;
 		}
 
 		/* Apparently, there is a bug in Windows 95 and friends which
-		   causes the directory read attempt to fail if you're asking
-		   for too much data too fast... */
+		 * causes the directory read attempt to fail if you're asking
+		 * for too much data too fast...
+		 */
 		if(server->rcls == ERRSRV && server->err == ERRerror)
 		{
 			SHOWMSG("ouch; delaying and retrying");
@@ -2154,14 +2134,16 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 			continue;
 		}
 
+		/* If there's a protocol error, stop and abort. */
 		if (server->rcls != 0)
 		{
 			LOG (("server->rcls = %ld err = %ld\n",server->rcls, server->err));
 
 			smb_printerr (server->rcls, server->err);
 
-			error = -smb_errno (server->rcls, server->err);
-			SHOWVALUE(error);
+			(*error_ptr) = error_check_smb_error;
+
+			result = -1;
 			break;
 		}
 
@@ -2239,13 +2221,12 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 						mask = malloc (dirlen);
 						if (mask == NULL)
 						{
-							LOG (("smb_proc_readdir_long: Memory allocation failed\n"));
+							LOG (("Memory allocation failed\n"));
 
-							error = -ENOMEM;
+							(*error_ptr) = ENOMEM;
 
-							SHOWVALUE(error);
-
-							goto fail;
+							result = -1;
+							goto out;
 						}
 					}
 
@@ -2260,13 +2241,13 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 			{
 				p = smb_decode_long_dirent (p, NULL, info_level);
 
-				LOG (("smb_proc_readdir: skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
+				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
 			}
 			else if (total_count >= fpos + cache_size)
 			{
 				p = smb_decode_long_dirent (p, NULL, info_level);
 
-				LOG (("smb_proc_readdir: skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
+				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
 
 				continue;
 			}
@@ -2300,7 +2281,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 			loop_count = 0;
 	}
 
- fail:
+ out:
 
 	/* finished: not needed any more */
 	if (mask != NULL)
@@ -2312,41 +2293,34 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	if (resp_param != NULL)
 		free (resp_param);
 
- out:
+	if(result == 0)
+		result = total_count - fpos;
 
-	if(error < 0)
-	{
-		RETURN(error);
-		return(error);
-	}
-	else
-	{
-		RETURN (total_count - fpos);
-		return (total_count - fpos);
-	}
+	RETURN(result);
+	return(result);
 }
 
 int
-smb_proc_readdir (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry)
+smb_proc_readdir (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
 {
 	int result;
 
 	if (server->protocol >= PROTOCOL_LANMAN2)
-		result = smb_proc_readdir_long (server, path, fpos, cache_size, entry);
+		result = smb_proc_readdir_long (server, path, fpos, cache_size, entry, error_ptr);
 	else
-		result = smb_proc_readdir_short (server, path, fpos, cache_size, entry);
+		result = smb_proc_readdir_short (server, path, fpos, cache_size, entry, error_ptr);
 
 	return result;
 }
 
 int
-smb_proc_getattr_core (struct smb_server *server, const char *path, int len, struct smb_dirent *entry)
+smb_proc_getattr_core (struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr)
 {
 	int result;
 	char *p;
 	char *buf = server->transmit_buffer;
 
-	LOG (("smb_proc_getattr: %s\n", path));
+	LOG (("path=%s\n", path));
 
  retry:
 
@@ -2355,9 +2329,9 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	p = smb_setup_header (server, SMBgetatr, 0, 2 + len);
 	smb_encode_ascii (p, path, len);
 
-	if ((result = smb_request_ok (server, SMBgetatr, 10, 0)) < 0)
+	if ((result = smb_request_ok (server, SMBgetatr, 10, 0, error_ptr)) < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 
 		goto out;
@@ -2395,7 +2369,7 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 
 /* smb_proc_getattrE: entry->fid must be valid */
 int
-smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
+smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -2403,7 +2377,7 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
 	smb_setup_header (server, SMBgetattrE, 1, 0);
 	WSET (buf, smb_vwv0, entry->fileid);
 
-	if ((result = smb_request_ok (server, SMBgetattrE, 11, 0)) < 0)
+	if ((result = smb_request_ok (server, SMBgetattrE, 11, 0, error_ptr)) < 0)
 		goto out;
 
 	entry->ctime	= date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
@@ -2440,7 +2414,7 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry)
  * entry->mtime, to make touch work.
  */
 int
-smb_proc_setattr_core (struct smb_server *server, const char *path, int len, struct smb_dirent *new_finfo)
+smb_proc_setattr_core (struct smb_server *server, const char *path, int len, struct smb_dirent *new_finfo, int * error_ptr)
 {
 	char *p;
 	char *buf = server->transmit_buffer;
@@ -2448,8 +2422,6 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, str
 	int local_time;
 
  retry:
-
-	LOG (("smb_proc_setattr_core\n"));
 
 	ASSERT( smb_payload_size(server, 8, 4 + len) >= 0 );
 
@@ -2460,9 +2432,9 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, str
 	p = smb_encode_ascii (p, path, len);
 	(void) smb_encode_ascii (p, "", 0);
 
-	if ((result = smb_request_ok (server, SMBsetatr, 0, 0)) < 0)
+	if ((result = smb_request_ok (server, SMBsetatr, 0, 0, error_ptr)) < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 	}
 
@@ -2473,13 +2445,11 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, str
  * which would not be valid after a retry.
  */
 int
-smb_proc_setattrE (struct smb_server *server, word fid, struct smb_dirent *new_entry)
+smb_proc_setattrE (struct smb_server *server, word fid, struct smb_dirent *new_entry, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	word date, time_value;
 	int result;
-
-	LOG (("smb_proc_setattrE\n"));
 
 	smb_setup_header (server, SMBsetattrE, 7, 0);
 
@@ -2497,15 +2467,15 @@ smb_proc_setattrE (struct smb_server *server, word fid, struct smb_dirent *new_e
 	WSET (buf, smb_vwv5, date);
 	WSET (buf, smb_vwv6, time_value);
 
-	result = smb_request_ok (server, SMBsetattrE, 0, 0);
+	result = smb_request_ok (server, SMBsetattrE, 0, 0, error_ptr);
 
 	return result;
 }
 
 int
-smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr)
+smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * error_ptr)
 {
-	int error;
+	int result;
 	char *p;
 
  retry:
@@ -2514,9 +2484,9 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr)
 
 	smb_setup_header (server, SMBdskattr, 0, 0);
 
-	if ((error = smb_request_ok (server, SMBdskattr, 5, 0)) < 0)
+	if ((result = smb_request_ok (server, SMBdskattr, 5, 0, error_ptr)) < 0)
 	{
-		if (smb_retry (server))
+		if (smb_retry (server, error_ptr))
 			goto retry;
 
 		goto out;
@@ -2530,7 +2500,7 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr)
 
  out:
 
-	return error;
+	return result;
 }
 
 /*****************************************************************************
@@ -2545,7 +2515,7 @@ struct smb_prots
 };
 
 static int
-smb_proc_reconnect (struct smb_server *server)
+smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 {
 	static const struct smb_prots prots[] =
 	{
@@ -2596,9 +2566,10 @@ smb_proc_reconnect (struct smb_server *server)
 	dword max_buffer_size;
 	int packet_size;
 
-	if ((result = smb_connect (server)) < 0)
+	result = smb_connect (server, error_ptr);
+	if (result < 0)
 	{
-		LOG (("smb_proc_reconnect: could not smb_connect\n"));
+		LOG (("could not smb_connect\n"));
 		goto fail;
 	}
 
@@ -2631,8 +2602,8 @@ smb_proc_reconnect (struct smb_server *server)
 	 * it could be the other way round.
 	 */
 	packet_size = server->max_recv;
-	if (packet_size < server->max_buffer_size)
-		packet_size = server->max_buffer_size;
+	if (packet_size < (int)server->max_buffer_size)
+		packet_size = (int)server->max_buffer_size;
 
 	SHOWVALUE(packet_size);
 
@@ -2649,8 +2620,11 @@ smb_proc_reconnect (struct smb_server *server)
 	server->transmit_buffer = malloc (server->transmit_buffer_allocation_size);
 	if (server->transmit_buffer == NULL)
 	{
-		LOG (("smb_proc_connect: No memory! Bailing out.\n"));
-		result = -ENOMEM;
+		LOG (("No memory! Bailing out.\n"));
+
+		(*error_ptr) = ENOMEM;
+
+		result = -1;
 		goto fail;
 	}
 
@@ -2669,15 +2643,16 @@ smb_proc_reconnect (struct smb_server *server)
 
 		packet[0] = 0x81; /* SESSION REQUEST */
 
-		if ((result = smb_request (server, NULL, NULL, 0)) < 0)
+		result = smb_request (server, NULL, NULL, 0, error_ptr);
+		if (result < 0)
 		{
-			LOG (("smb_proc_connect: Failed to send SESSION REQUEST.\n"));
+			LOG (("Failed to send SESSION REQUEST.\n"));
 			goto fail;
 		}
 
 		if (packet[0] != 0x82)
 		{
-			LOG (("smb_proc_connect: Did not receive positive response (err = %lx)\n",packet[0]));
+			LOG (("Did not receive positive response (err = %lx)\n",packet[0]));
 
 			#if DEBUG
 			{
@@ -2685,11 +2660,13 @@ smb_proc_reconnect (struct smb_server *server)
 			}
 			#endif /* DEBUG */
 
-			result = -EIO;
+			(*error_ptr) = error_session_request_failed;
+
+			result = -1;
 			goto fail;
 		}
 
-		LOG (("smb_proc_connect: Passed SESSION REQUEST.\n"));
+		LOG (("Passed SESSION REQUEST.\n"));
 	}
 
 	/* Now we are ready to send a SMB Negotiate Protocol packet. */
@@ -2706,10 +2683,10 @@ smb_proc_reconnect (struct smb_server *server)
 	for (i = 0; i < num_prots ; i++)
 		p = smb_encode_dialect (p, prots[i].name, strlen (prots[i].name));
 
-	LOG (("smb_proc_connect: Request SMBnegprot...\n"));
-	if ((result = smb_request_ok (server, SMBnegprot, 1, -1)) < 0)
+	LOG (("Request SMBnegprot...\n"));
+	if ((result = smb_request_ok (server, SMBnegprot, 1, -1, error_ptr)) < 0)
 	{
-		LOG (("smb_proc_connect: Failure requesting SMBnegprot\n"));
+		LOG (("Failure requesting SMBnegprot\n"));
 		goto fail;
 	}
 
@@ -2724,15 +2701,17 @@ smb_proc_reconnect (struct smb_server *server)
 	 */
 	if(dialect_index > num_prots || dialect_index == 0xFFFFU)
 	{
-		LOG (("smb_proc_connect: Unsupported dialect\n"));
+		LOG (("Unsupported dialect\n"));
 
-		result = -EACCES;
+		(*error_ptr) = error_unsupported_dialect;
+
+		result = -1;
 		goto fail;
 	}
 
 	server->protocol = prots[dialect_index].prot;
 
-	LOG (("smb_proc_connect: Server wants %s protocol.\n",prots[dialect_index].name));
+	LOG (("Server wants %s protocol.\n",prots[dialect_index].name));
 
 	if (server->protocol > PROTOCOL_LANMAN1)
 	{
@@ -2740,10 +2719,10 @@ smb_proc_reconnect (struct smb_server *server)
 		dword server_sesskey;
 
 		/*
-		LOG (("smb_proc_connect: password = %s\n",server->mount_data.password*));
+		LOG (("password = %s\n",server->mount_data.password*));
 		*/
-		LOG (("smb_proc_connect: usernam = %s\n",server->mount_data.username));
-		LOG (("smb_proc_connect: blkmode = %ld\n",WVAL (packet, smb_vwv5)));
+		LOG (("usernam = %s\n",server->mount_data.username));
+		LOG (("blkmode = %ld\n",WVAL (packet, smb_vwv5)));
 
 		/* NT LAN Manager or newer. */
 		if (server->protocol >= PROTOCOL_NT1)
@@ -2856,7 +2835,7 @@ smb_proc_reconnect (struct smb_server *server)
 		SHOWVALUE(password_len);
 		SHOWVALUE(nt_password_len);
 
-		LOG (("smb_proc_connect: workgroup = %s\n", server->mount_data.workgroup_name));
+		LOG (("workgroup = %s\n", server->mount_data.workgroup_name));
 
 		/* NT LAN Manager or newer. */
 		if (server->protocol >= PROTOCOL_NT1)
@@ -2935,9 +2914,9 @@ smb_proc_reconnect (struct smb_server *server)
 			memcpy (p, server->mount_data.username, user_len);
 		}
 
-		if ((result = smb_request_ok (server, SMBsesssetupX, 3, 0)) < 0)
+		if ((result = smb_request_ok (server, SMBsesssetupX, 3, 0, error_ptr)) < 0)
 		{
-			LOG (("smb_proc_connect: SMBsessetupX failed\n"));
+			LOG (("SMBsessetupX failed\n"));
 			goto fail;
 		}
 
@@ -2993,11 +2972,11 @@ smb_proc_reconnect (struct smb_server *server)
 
 		strcpy(p,dev);
 
-		if ((result = smb_request_ok (server, SMBtconX, 3, 0)) < 0)
+		if ((result = smb_request_ok (server, SMBtconX, 3, 0, error_ptr)) < 0)
 		{
 			SHOWVALUE(SMB_WCT(packet));
 
-			LOG (("smb_proc_connect: SMBtconX not verified.\n"));
+			LOG (("SMBtconX not verified.\n"));
 			goto fail;
 		}
 
@@ -3019,9 +2998,9 @@ smb_proc_reconnect (struct smb_server *server)
 		p = smb_encode_ascii (p, server->mount_data.password, strlen (server->mount_data.password));
 		(void) smb_encode_ascii (p, dev, strlen (dev));
 
-		if ((result = smb_request_ok (server, SMBtcon, 2, 0)) < 0)
+		if ((result = smb_request_ok (server, SMBtcon, 2, 0, error_ptr)) < 0)
 		{
-			LOG (("smb_proc_connect: SMBtcon not verified.\n"));
+			LOG (("SMBtcon not verified.\n"));
 			goto fail;
 		}
 
@@ -3062,8 +3041,11 @@ smb_proc_reconnect (struct smb_server *server)
 		server->transmit_buffer = malloc (server->transmit_buffer_allocation_size);
 		if (server->transmit_buffer == NULL)
 		{
-			LOG (("smb_proc_connect: No memory! Bailing out.\n"));
-			result = -ENOMEM;
+			LOG (("No memory! Bailing out.\n"));
+
+			(*error_ptr) = ENOMEM;
+
+			result = -1;
 			goto fail;
 		}
 	}
@@ -3079,7 +3061,7 @@ smb_proc_reconnect (struct smb_server *server)
 
 	server->max_buffer_size = max_buffer_size;
 
-	LOG (("smb_proc_connect: Normal exit\n"));
+	LOG (("Normal exit\n"));
 
 	return 0;
 
@@ -3093,11 +3075,11 @@ smb_proc_reconnect (struct smb_server *server)
 /* smb_proc_reconnect: server->transmit_buffer is allocated with
    server->max_buffer_size bytes if and only if we return >= 0 */
 int
-smb_proc_connect (struct smb_server *server)
+smb_proc_connect (struct smb_server *server, int * error_ptr)
 {
 	int result;
 
-	result = smb_proc_reconnect (server);
+	result = smb_proc_reconnect (server, error_ptr);
 
 	if ((result < 0) && (server->transmit_buffer != NULL))
 	{

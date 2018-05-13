@@ -20,16 +20,6 @@
 
 /*****************************************************************************/
 
-#ifndef min
-#define min(a,b) ((a) < (b) ? (a) : (b))
-#endif /* min */
-
-#ifndef max
-#define max(a,b) ((a) > (b) ? (a) : (b))
-#endif /* max */
-
-/*****************************************************************************/
-
 #define ATTR_CACHE_TIME		5	/* cache attributes for this time (seconds) */
 #define DIR_CACHE_TIME		5	/* cache directories for this time (seconds) */
 #define DIRCACHE_SIZE		170
@@ -89,13 +79,8 @@ struct smba_file
 
 /*****************************************************************************/
 
-static int make_open(smba_file_t *f, int need_fid);
-static int write_attr(smba_file_t *f);
-static void invalidate_dircache(struct smba_server *server, char *path);
-static void close_path(smba_server_t *s, char *path);
-static void smba_cleanup_dircache(struct smba_server *server);
-static int smba_setup_dircache(struct smba_server *server, int cache_size);
-static int extract_service (char *service, char *server, size_t server_size, char *share, size_t share_size);
+static void smba_cleanup_dircache(struct smba_server * server);
+static int smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr);
 
 /*****************************************************************************/
 
@@ -113,21 +98,25 @@ smba_connect (
 	int							opt_prefer_write_raw,
 	int							opt_disable_write_raw,
 	int							opt_disable_read_raw,
-	smba_server_t **			result)
+	int *						error_ptr,
+	int *						smb_error_class_ptr,
+	int *						smb_error_ptr,
+	smba_server_t **			smba_server_ptr)
 {
 	smba_server_t *res;
 	struct smb_mount_data data;
-	int errnum;
 	char hostname[MAXHOSTNAMELEN], *s;
 	struct servent * servent;
+	int result = -1;
 
-	(*result) = NULL;
+	(*smba_server_ptr) = NULL;
 
 	res = malloc (sizeof(*res));
 	if(res == NULL)
 	{
 		ReportError("Not enough memory.");
-		errnum = -ENOMEM;
+
+		(*error_ptr) = ENOMEM;
 		goto error_occured;
 	}
 
@@ -162,10 +151,9 @@ smba_connect (
 	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
 	res->server.timeout = timeout;
 
-	errnum = smba_setup_dircache (res,cache_size);
-	if(errnum < 0)
+	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
 	{
-		ReportError("Directory cache initialization failed (%ld, %s).",-errnum,amitcp_strerror(-errnum));
+		ReportError("Directory cache initialization failed (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
 		goto error_occured;
 	}
 
@@ -180,12 +168,6 @@ smba_connect (
 
 	data.addr.sin_family		= AF_INET;
 	data.addr.sin_addr.s_addr	= ip_addr;
-
-	#if DEBUG
-	{
-		
-	}
-	#endif /* DEBUG */
 
 	if(res->server.raw_smb)
 	{
@@ -207,8 +189,9 @@ smba_connect (
 	data.fd = socket (AF_INET, SOCK_STREAM, 0);
 	if (data.fd < 0)
 	{
-		errnum = (-errno);
-		ReportError("socket() call failed (%ld, %s).", errno, amitcp_strerror (errno));
+		ReportError("socket() call failed (%ld, %s).", errno, posix_strerror(errno));
+
+		(*error_ptr) = errno;
 		goto error_occured;
 	}
 
@@ -226,8 +209,9 @@ smba_connect (
 	{
 		if (strlen (p->server_ipname) > 16)
 		{
-			errnum = -ENAMETOOLONG;
 			ReportError("Server name '%s' is too long for NetBIOS (max %ld characters).",p->server_ipname,16);
+			
+			(*error_ptr) = ENAMETOOLONG;
 			goto error_occured;
 		}
 
@@ -240,8 +224,9 @@ smba_connect (
 	{
 		if (strlen (hostname) > 16)
 		{
-			errnum = -ENAMETOOLONG;
 			ReportError("Local host name '%s' is too long for NetBIOS (max %ld characters).", hostname, 16);
+
+			(*error_ptr) = ENAMETOOLONG;
 			goto error_occured;
 		}
 
@@ -253,29 +238,32 @@ smba_connect (
 
 	NewList((struct List *)&res->open_files);
 
-	if ((errnum = smb_proc_connect (&res->server)) < 0)
+	if (smb_proc_connect (&res->server, error_ptr) < 0)
 	{
-		ReportError("Cannot connect to server (%ld, %s).", -errnum,amitcp_strerror(-errnum));
+		ReportError("Cannot connect to server (%ld, %s).", (*error_ptr),posix_strerror(*error_ptr));
 		goto error_occured;
 	}
 
 	if (!use_E)
 		res->supports_E_known = 1;
 
-	(*result) = res;
+	(*smba_server_ptr) = res;
 	res = NULL;
 
-	errnum = 0;
+	result = 0;
 
  error_occured:
 
 	if(res != NULL)
 	{
+		(*smb_error_class_ptr) = res->server.rcls;
+		(*smb_error_ptr) = res->server.err;
+		
 		smba_cleanup_dircache (res);
 		free (res);
 	}
 
-	return errnum;
+	return result;
 }
 
 /*****************************************************************************/
@@ -283,7 +271,8 @@ smba_connect (
 void
 smba_disconnect (smba_server_t * server)
 {
-	CloseSocket (server->server.mount_data.fd);
+	if(server->server.mount_data.fd >= 0)
+		CloseSocket (server->server.mount_data.fd);
 
 	smba_cleanup_dircache(server);
 
@@ -293,10 +282,10 @@ smba_disconnect (smba_server_t * server)
 /*****************************************************************************/
 
 static int
-make_open (smba_file_t * f, int need_fid)
+make_open (smba_file_t * f, int need_fid, int * error_ptr)
 {
 	smba_server_t *s;
-	int errnum;
+	int result;
 
 	if (!f->is_valid || (need_fid && !f->dirent.opened))
 	{
@@ -306,8 +295,8 @@ make_open (smba_file_t * f, int need_fid)
 
 		if (!f->is_valid || f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 		{
-			errnum = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
-			if (errnum < 0)
+			result = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+			if (result < 0)
 				goto out;
 		}
 
@@ -316,13 +305,13 @@ make_open (smba_file_t * f, int need_fid)
 			if (need_fid || !s->supports_E_known || s->supports_E)
 			{
 				LOG (("opening file %s\n", f->dirent.complete_path));
-				errnum = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
-				if (errnum < 0)
+				result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+				if (result < 0)
 					goto out;
 
 				if (s->supports_E || !s->supports_E_known)
 				{
-					if (smb_proc_getattrE (&s->server, &f->dirent) < 0)
+					if (smb_proc_getattrE (&s->server, &f->dirent, error_ptr) < 0)
 					{
 						if (!s->supports_E_known)
 						{
@@ -353,27 +342,29 @@ make_open (smba_file_t * f, int need_fid)
 		f->is_valid		= 1;
 	}
 
-	errnum = 0;
+	result = 0;
 
  out:
 
-	return errnum;
+	return result;
 }
 
 /*****************************************************************************/
 
 int
-smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file)
+smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file, int * error_ptr)
 {
 	smba_file_t *f;
-	int errnum;
+	int result;
 
 	(*file) = NULL;
 
 	f = malloc (sizeof(*f));
 	if(f == NULL)
 	{
-		errnum = -ENOMEM;
+		(*error_ptr) = ENOMEM;
+		
+		result = -1;
 		goto out;
 	}
 
@@ -384,8 +375,8 @@ smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file)
 	f->dirent.len = strlen (name);
 	f->server = s;
 
-	errnum = make_open (f, 0);
-	if (errnum < 0)
+	result = make_open (f, 0, error_ptr);
+	if (result < 0)
 		goto out;
 
 	AddTail ((struct List *)&s->open_files, (struct Node *)f);
@@ -393,35 +384,33 @@ smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file)
 	(*file) = f;
 	f = NULL;
 
-	errnum = 0;
-
  out:
 
 	if (f != NULL)
 		free (f);
 
-	return errnum;
+	return result;
 }
 
 /*****************************************************************************/
 
 static int
-write_attr (smba_file_t * f)
+write_attr (smba_file_t * f, int * error_ptr)
 {
-	int errnum;
+	int result;
 
 	LOG (("file %s\n", f->dirent.complete_path));
 
-	errnum = make_open (f, 0);
-	if (errnum < 0)
+	result = make_open (f, 0, error_ptr);
+	if (result < 0)
 		goto out;
 
 	if (f->dirent.opened && f->server->supports_E)
-		errnum = smb_proc_setattrE (&f->server->server, f->dirent.fileid, &f->dirent);
+		result = smb_proc_setattrE (&f->server->server, f->dirent.fileid, &f->dirent, error_ptr);
 	else
-		errnum = smb_proc_setattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
+		result = smb_proc_setattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
 
-	if (errnum < 0)
+	if (result < 0)
 	{
 		f->attr_time = 0;
 		goto out;
@@ -429,17 +418,15 @@ write_attr (smba_file_t * f)
 
 	f->attr_dirty = 0;
 
-	errnum = 0;
-
  out:
 
-	return errnum;
+	return result;
 }
 
 /*****************************************************************************/
 
 void
-smba_close (smba_file_t * f)
+smba_close (smba_file_t * f, int * error_ptr)
 {
 	if(f != NULL)
 	{
@@ -447,12 +434,12 @@ smba_close (smba_file_t * f)
 			Remove((struct Node *)f);
 
 		if(f->attr_dirty)
-			write_attr(f);
+			write_attr(f, error_ptr);
 
 		if (f->dirent.opened)
 		{
 			LOG (("closing file %s\n", f->dirent.complete_path));
-			smb_proc_close (&f->server->server, f->dirent.fileid, f->dirent.mtime);
+			smb_proc_close (&f->server->server, f->dirent.fileid, f->dirent.mtime, error_ptr);
 		}
 
 		if (f->dircache != NULL)
@@ -469,13 +456,13 @@ smba_close (smba_file_t * f)
 /*****************************************************************************/
 
 int
-smba_read (smba_file_t * f, char *data, long len, long offset)
+smba_read (smba_file_t * f, char *data, long len, long offset, int * error_ptr)
 {
 	int max_receive = f->server->server.max_recv;
 	int num_bytes_read = 0;
 	int result;
 
-	result = make_open (f, 1);
+	result = make_open (f, 1, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -502,7 +489,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 			if(n > max_receive)
 				n = max_receive;
 
-			result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, n, data);
+			result = smb_proc_read_raw (&f->server->server, &f->dirent, offset, n, data, error_ptr);
 			if(result <= 0)
 			{
 				D(("!!! wanted to read %ld bytes, got %ld",n,result));
@@ -572,7 +559,7 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 			if(count > max_receive)
 				count = max_receive;
 
-			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, data);
+			result = smb_proc_read (&f->server->server, &f->dirent, offset, count, data, error_ptr);
 			if (result < 0)
 				goto out;
 
@@ -600,13 +587,13 @@ smba_read (smba_file_t * f, char *data, long len, long offset)
 /*****************************************************************************/
 
 int
-smba_write (smba_file_t * f, const char *data, long len, long offset)
+smba_write (smba_file_t * f, const char *data, long len, long offset, int * error_ptr)
 {
 	int num_bytes_written = 0;
 	int max_buffer_size;
 	int result;
 
-	result = make_open (f, 1);
+	result = make_open (f, 1, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -658,7 +645,7 @@ smba_write (smba_file_t * f, const char *data, long len, long offset)
 
 			ASSERT( n <= 65535 );
 
-			result = smb_proc_write_raw (&f->server->server, &f->dirent, offset, n, data);
+			result = smb_proc_write_raw (&f->server->server, &f->dirent, offset, n, data, error_ptr);
 			if(result < 0)
 				goto out;
 
@@ -711,7 +698,7 @@ smba_write (smba_file_t * f, const char *data, long len, long offset)
 
 			ASSERT( count <= 65535 );
 
-			result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data);
+			result = smb_proc_write (&f->server->server, &f->dirent, offset, count, data, error_ptr);
 			if (result < 0)
 				goto out;
 
@@ -736,7 +723,7 @@ smba_write (smba_file_t * f, const char *data, long len, long offset)
 	 * at writing some data. Hence we update the cached file
 	 * size here.
 	 */
-	if (offset + num_bytes_written > f->dirent.size)
+	if (offset + num_bytes_written > (int)f->dirent.size)	/* ZZZ overflow check needed? */
 		f->dirent.size = offset + num_bytes_written;
 
 	return result;
@@ -744,29 +731,18 @@ smba_write (smba_file_t * f, const char *data, long len, long offset)
 
 /*****************************************************************************/
 
-long
-smba_seek (smba_file_t *f, long offset, long mode, off_t * new_position_ptr)
+int
+smba_seek (smba_file_t *f, long offset, long mode, off_t * new_position_ptr, int * error_ptr)
 {
-	long result;
-	int errnum;
+	int result;
 
 	D(("seek %ld bytes from position %s",offset,mode > 0 ? (mode == 2 ? "SEEK_END" : "SEEK_CUR") : "SEEK_SET"));
 
-	errnum = make_open (f, 1);
-	if(errnum < 0)
-	{
-		result = errnum;
+	result = make_open (f, 1, error_ptr);
+	if(result < 0)
 		goto out;
-	}
 
-	errnum = smb_proc_lseek (&f->server->server, &f->dirent, offset, mode, new_position_ptr);
-	if(errnum < 0)
-	{
-		result = errnum;
-		goto out;
-	}
-
-	result = 0;
+	result = smb_proc_lseek (&f->server->server, &f->dirent, offset, mode, new_position_ptr, error_ptr);
 
  out:
 
@@ -777,18 +753,14 @@ smba_seek (smba_file_t *f, long offset, long mode, off_t * new_position_ptr)
 
 /* perform a single record-lock */
 int
-smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, long timeout)
+smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, long timeout, int * error_ptr)
 {
 	struct smb_lkrng *rec_lock = NULL;
-	int errnum;
 	int result;
 
-	errnum = make_open (f, 1);
-	if(errnum < 0)
-	{
-		result = errnum;
+	result = make_open (f, 1, error_ptr);
+	if(result < 0)
 		goto out;
-	}
 
 	if (unlocked)
 		mode |= 2;
@@ -796,21 +768,16 @@ smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, lo
 	rec_lock = malloc (sizeof (*rec_lock));
 	if (rec_lock == NULL)
 	{
-		result = -ENOMEM;
+		(*error_ptr) = ENOMEM;
+		
+		result = -1;
 		goto out;
 	}
 
 	rec_lock->offset = offset,
 	rec_lock->len = len;
 
-	errnum = smb_proc_lockingX (&f->server->server, &f->dirent, rec_lock, 1, mode, timeout);
-	if(errnum < 0)
-	{
-		result = errnum;
-		goto out;
-	}
-
-	result = 0;
+	result = smb_proc_lockingX (&f->server->server, &f->dirent, rec_lock, 1, mode, timeout, error_ptr);
 
  out:
 
@@ -823,18 +790,14 @@ smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, lo
 /*****************************************************************************/
 
 int
-smba_getattr (smba_file_t * f, smba_stat_t * data)
+smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 {
-	int errnum;
 	int result;
 	ULONG now;
 
-	errnum = make_open (f, 0);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = make_open (f, 0, error_ptr);
+	if (result < 0)
 		goto out;
-	}
 
 	now = GetCurrentTime();
 
@@ -843,15 +806,12 @@ smba_getattr (smba_file_t * f, smba_stat_t * data)
 		LOG (("file %s\n", f->dirent.complete_path));
 
 		if (f->dirent.opened && f->server->supports_E)
-			errnum = smb_proc_getattrE (&f->server->server, &f->dirent);
+			result = smb_proc_getattrE (&f->server->server, &f->dirent, error_ptr);
 		else
-			errnum = smb_proc_getattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent);
+			result = smb_proc_getattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
 
-		if (errnum < 0)
-		{
-			result = errnum;
+		if (result < 0)
 			goto out;
-		}
 
 		f->attr_time = now;
 	}
@@ -867,8 +827,6 @@ smba_getattr (smba_file_t * f, smba_stat_t * data)
 	data->ctime = f->dirent.ctime;
 	data->mtime = f->dirent.mtime;
 
-	result = 0;
-
  out:
 
 	return(result);
@@ -877,9 +835,8 @@ smba_getattr (smba_file_t * f, smba_stat_t * data)
 /*****************************************************************************/
 
 int
-smba_setattr (smba_file_t * f, smba_stat_t * data)
+smba_setattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 {
-	int errnum;
 	int result;
 
 	if (data->atime != -1)
@@ -908,33 +865,22 @@ smba_setattr (smba_file_t * f, smba_stat_t * data)
 
 	f->attr_dirty = 1;
 
-	errnum = write_attr (f);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = write_attr (f, error_ptr);
+	if (result < 0)
 		goto out;
-	}
 
 	if (data->size != -1 && data->size != (int)f->dirent.size)
 	{
-		errnum = make_open (f, 1);
-		if(errnum < 0)
-		{
-			result = errnum;
+		result = make_open (f, 1, error_ptr);
+		if(result < 0)
 			goto out;
-		}
 
-		errnum = smb_proc_trunc (&f->server->server, f->dirent.fileid, data->size);
-		if(errnum < 0)
-		{
-			result = errnum;
+		result = smb_proc_trunc (&f->server->server, f->dirent.fileid, data->size, error_ptr);
+		if(result < 0)
 			goto out;
-		}
 
 		f->dirent.size = data->size;
 	}
-
-	result = 0;
 
  out:
 
@@ -944,21 +890,17 @@ smba_setattr (smba_file_t * f, smba_stat_t * data)
 /*****************************************************************************/
 
 int
-smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
+smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int * error_ptr)
 {
 	int cache_index, o, eof, count = 0;
 	int num_entries;
 	smba_stat_t data;
 	int result;
-	int errnum;
 	ULONG now;
 
-	errnum = make_open (f, 0);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = make_open (f, 0, error_ptr);
+	if (result < 0)
 		goto out;
-	}
 
 	now = GetCurrentTime();
 
@@ -1000,7 +942,7 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			f->dircache->len = 0;
 			f->dircache->base = cache_index;
 
-			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size, f->dircache->cache);
+			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size, f->dircache->cache, error_ptr);
 
 			/* We stop on error, or if the directory is empty. */
 			if (num_entries <= 0)
@@ -1015,7 +957,10 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback)
 			if (f->dircache == NULL)
 			{
 				LOG (("lost dircache due to an error, bailing out!\n"));
-				result = -ENOMEM;
+				
+				(*error_ptr) = ENOMEM;
+
+				result = -1;
 				goto out;
 			}
 
@@ -1114,19 +1059,15 @@ invalidate_dircache (struct smba_server * server, char * path)
 /*****************************************************************************/
 
 int
-smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
+smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr, int * error_ptr)
 {
 	struct smb_dirent entry;
 	char *path = NULL;
 	int result;
-	int errnum;
 
-	errnum = make_open (dir, 0);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = make_open (dir, 0, error_ptr);
+	if (result < 0)
 		goto out;
-	}
 
 	memset (&entry, 0, sizeof (entry));
 
@@ -1144,7 +1085,9 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
 	path = malloc (strlen (name) + dir->dirent.len + 2);
 	if(path == NULL)
 	{
-		result = -ENOMEM;
+		(*error_ptr) = ENOMEM;
+		
+		result = -1;
 		goto out;
 	}
 
@@ -1152,16 +1095,11 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
 	path[dir->dirent.len] = DOS_PATHSEP;
 	strcpy (&path[dir->dirent.len + 1], name);
 
-	errnum = smb_proc_create (&dir->server->server, path, strlen (path), &entry);
-	if(errnum < 0)
-	{
-		result = errnum;
+	result = smb_proc_create (&dir->server->server, path, strlen (path), &entry, error_ptr);
+	if(result < 0)
 		goto out;
-	}
 
 	invalidate_dircache (dir->server, path);
-
-	result = 0;
 
  out:
 
@@ -1174,23 +1112,21 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr)
 /*****************************************************************************/
 
 int
-smba_mkdir (smba_file_t * dir, const char *name)
+smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 {
 	char *path = NULL;
-	int errnum;
 	int result;
 
-	errnum = make_open (dir, 0);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = make_open (dir, 0, error_ptr);
+	if (result < 0)
 		goto out;
-	}
 
 	path = malloc (strlen (name) + dir->dirent.len + 2);
 	if(path == NULL)
 	{
-		result = -ENOMEM;
+		(*error_ptr) = ENOMEM;
+
+		result = -1;
 		goto out;
 	}
 
@@ -1198,16 +1134,11 @@ smba_mkdir (smba_file_t * dir, const char *name)
 	path[dir->dirent.len] = DOS_PATHSEP;
 	strcpy (&path[dir->dirent.len + 1], name);
 
-	errnum = smb_proc_mkdir (&dir->server->server, path, strlen (path));
-	if(errnum < 0)
-	{
-		result = errnum;
+	result = smb_proc_mkdir (&dir->server->server, path, strlen (path), error_ptr);
+	if(result < 0)
 		goto out;
-	}
 
 	invalidate_dircache (dir->server, path);
-
-	result = 0;
 
  out:
 
@@ -1220,7 +1151,7 @@ smba_mkdir (smba_file_t * dir, const char *name)
 /*****************************************************************************/
 
 static void
-close_path (smba_server_t * s, char *path)
+close_path (smba_server_t * s, char *path, int * error_ptr)
 {
 	smba_file_t *p;
 
@@ -1231,10 +1162,12 @@ close_path (smba_server_t * s, char *path)
 		if (p->is_valid && CompareNames(p->dirent.complete_path, path) == SAME)
 		{
 			if (p->dirent.opened)
-				smb_proc_close (&s->server, p->dirent.fileid, p->dirent.mtime);
-
-			p->dirent.opened = 0;
-			p->is_valid = 0;
+			{
+				smb_proc_close (&s->server, p->dirent.fileid, p->dirent.mtime, error_ptr);
+				p->dirent.opened = FALSE;
+			}
+			
+			p->is_valid = FALSE;
 		}
 	}
 }
@@ -1242,23 +1175,17 @@ close_path (smba_server_t * s, char *path)
 /*****************************************************************************/
 
 int
-smba_remove (smba_server_t * s, char *path)
+smba_remove (smba_server_t * s, char *path, int * error_ptr)
 {
-	int errnum;
 	int result;
 
-	close_path (s, path);
+	close_path (s, path, error_ptr);
 
-	errnum = smb_proc_unlink (&s->server, path, strlen (path));
-	if(errnum < 0)
-	{
-		result = errnum;
+	result = smb_proc_unlink (&s->server, path, strlen (path), error_ptr);
+	if(result < 0)
 		goto out;
-	}
 
 	invalidate_dircache (s, path);
-
-	result = 0;
 
  out:
 
@@ -1268,23 +1195,17 @@ smba_remove (smba_server_t * s, char *path)
 /*****************************************************************************/
 
 int
-smba_rmdir (smba_server_t * s, char *path)
+smba_rmdir (smba_server_t * s, char *path, int * error_ptr)
 {
 	int result;
-	int errnum;
 
-	close_path (s, path);
+	close_path (s, path, error_ptr);
 
-	errnum = smb_proc_rmdir (&s->server, path, strlen (path));
-	if(errnum < 0)
-	{
-		result = errnum;
+	result = smb_proc_rmdir (&s->server, path, strlen (path), error_ptr);
+	if(result < 0)
 		goto out;
-	}
 
 	invalidate_dircache (s, path);
-
-	result = 0;
 
  out:
 
@@ -1294,23 +1215,17 @@ smba_rmdir (smba_server_t * s, char *path)
 /*****************************************************************************/
 
 int
-smba_rename (smba_server_t * s, char *from, char *to)
+smba_rename (smba_server_t * s, char *from, char *to, int * error_ptr)
 {
 	int result;
-	int errnum;
 
-	close_path (s, from);
+	close_path (s, from, error_ptr);
 
-	errnum = smb_proc_mv (&s->server, from, strlen (from), to, strlen (to));
-	if(errnum < 0)
-	{
-		result = errnum;
+	result = smb_proc_mv (&s->server, from, strlen (from), to, strlen (to), error_ptr);
+	if(result < 0)
 		goto out;
-	}
 
 	invalidate_dircache (s, from);
-
-	result = 0;
 
  out:
 
@@ -1320,24 +1235,18 @@ smba_rename (smba_server_t * s, char *from, char *to)
 /*****************************************************************************/
 
 int
-smba_statfs (smba_server_t * s, long *bsize, long *blocks, long *bfree)
+smba_statfs (smba_server_t * s, long *bsize, long *blocks, long *bfree, int * error_ptr)
 {
 	struct smb_dskattr dskattr;
-	int errnum;
 	int result;
 
-	errnum = smb_proc_dskattr (&s->server, &dskattr);
-	if (errnum < 0)
-	{
-		result = errnum;
+	result = smb_proc_dskattr (&s->server, &dskattr, error_ptr);
+	if (result < 0)
 		goto out;
-	}
 
 	(*bsize) = dskattr.blocksize * dskattr.allocblocks;
 	(*blocks) = dskattr.total;
 	(*bfree) = dskattr.free;
-
-	result = 0;
 
  out:
 
@@ -1392,15 +1301,18 @@ smba_cleanup_dircache(struct smba_server * server)
 }
 
 static int
-smba_setup_dircache (struct smba_server * server,int cache_size)
+smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr)
 {
 	dircache_t * the_dircache;
-	int error = -ENOMEM;
+	int result = -1;
 	int i;
 
 	the_dircache = malloc(sizeof(*the_dircache) + (cache_size-1) * sizeof(the_dircache->cache));
 	if(the_dircache == NULL)
+	{
+		(*error_ptr) = ENOMEM;
 		goto out;
+	}
 
 	memset(the_dircache,0,sizeof(*the_dircache));
 	the_dircache->cache_size = cache_size;
@@ -1409,7 +1321,10 @@ smba_setup_dircache (struct smba_server * server,int cache_size)
 	{
 		the_dircache->cache[i].complete_path = malloc (SMB_MAXNAMELEN + 1);
 		if(the_dircache->cache[i].complete_path == NULL)
+		{
+			(*error_ptr) = ENOMEM;
 			goto out;
+		}
 
 		the_dircache->cache[i].complete_path_size = SMB_MAXNAMELEN + 1;
 	}
@@ -1417,32 +1332,34 @@ smba_setup_dircache (struct smba_server * server,int cache_size)
 	server->dircache = the_dircache;
 	the_dircache = NULL;
 
-	error = 0;
+	result = 0;
 
  out:
 
 	if(the_dircache != NULL)
 		free_dircache(the_dircache);
 
-	return(error);
+	return(result);
 }
 
 /*****************************************************************************/
 
 static int
-extract_service (char *service, char *server, size_t server_size, char *share, size_t share_size)
+extract_service (char *service, char *server, size_t server_size, char *share, size_t share_size,int * error_ptr)
 {
 	char * share_start;
 	char * root_start;
 	char * complete_service;
 	char * service_copy;
-	int result = 0;
+	int result = -1;
 
 	service_copy = malloc(strlen(service)+1);
 	if(service_copy == NULL)
 	{
-		result = -ENOMEM;
 		ReportError("Not enough memory.");
+		
+		(*error_ptr) = ENOMEM;
+		
 		goto out;
 	}
 
@@ -1451,8 +1368,10 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 
 	if (strlen (complete_service) < 4 || complete_service[0] != '/')
 	{
-		result = -EINVAL;
 		ReportError("Invalid service name '%s'.",complete_service);
+
+		(*error_ptr) = EINVAL;
+
 		goto out;
 	}
 
@@ -1462,8 +1381,10 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 	share_start = strchr (complete_service, '/');
 	if (share_start == NULL)
 	{
-		result = -EINVAL;
 		ReportError("Invalid share name '%s'.",complete_service);
+
+		(*error_ptr) = EINVAL;
+
 		goto out;
 	}
 
@@ -1475,13 +1396,17 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 
 	if ((strlen (complete_service) > 63) || (strlen (share_start) > 63))
 	{
-		result = -ENAMETOOLONG;
 		ReportError("Server or share name is too long in '%s' (max %ld characters).",service,63);
+
+		(*error_ptr) = ENAMETOOLONG;
+
 		goto out;
 	}
 
 	strlcpy (server, complete_service, server_size);
 	strlcpy (share, share_start, share_size);
+
+	result = 0;
 
  out:
 
@@ -1507,7 +1432,10 @@ smba_start(
 	int					opt_prefer_write_raw,
 	int					opt_disable_write_raw,
 	int					opt_disable_read_raw,
-	smba_server_t **	result)
+	int *				error_ptr,
+	int *				smb_error_class_ptr,
+	int *				smb_error_ptr,
+	smba_server_t **	smba_server_ptr)
 {
 	smba_connect_parameters_t par;
 	smba_server_t *the_server = NULL;
@@ -1519,13 +1447,17 @@ smba_start(
 	char workgroup[20];
 	char server[64], share[64];
 	in_addr_t ipAddr;
-	int error;
+	int result = -1;
 
-	(*result) = NULL;
+	ASSERT( error_ptr != NULL );
+	ASSERT( smb_error_class_ptr != NULL );
+	ASSERT( smb_error_ptr != NULL );
+
+	(*error_ptr) = (*smb_error_class_ptr) = (*smb_error_ptr) = 0;
+	(*smba_server_ptr) = NULL;
 	(*username) = (*password) = (*server_name) = (*client_name) = '\0';
 
-	error = extract_service (service, server, sizeof(server), share, sizeof(share));
-	if(error < 0)
+	if(extract_service (service, server, sizeof(server), share, sizeof(share), error_ptr) < 0)
 		goto out;
 
 	ipAddr = inet_addr (server);
@@ -1543,7 +1475,8 @@ smba_start(
 		else if (BroadcastNameQuery(server,"",(UBYTE *)&ipAddr) != 0)
 		{
 			ReportError("Unknown host '%s' (%ld, %s).",server,lookup_error,host_strerror(lookup_error));
-			error = (-ENOENT);
+			
+			(*error_ptr) = ENOENT;
 			goto out;
 		}
 	}
@@ -1555,7 +1488,8 @@ smba_start(
 		if (h == NULL)
 		{
 			ReportError("Unknown host '%s' (%ld, %s).",server,h_errno,host_strerror(errno));
-			error = (-ENOENT);
+
+			(*error_ptr) = ENOENT;
 			goto out;
 		}
 
@@ -1575,7 +1509,8 @@ smba_start(
 		if (strlen (hostName) > 16)
 		{
 			ReportError("Server host name '%s' is too long (max %ld characters).", hostName, 16);
-			error = (-ENAMETOOLONG);
+
+			(*error_ptr) = ENAMETOOLONG;
 			goto out;
 		}
 
@@ -1587,7 +1522,8 @@ smba_start(
 		if(strlen(opt_password) >= sizeof(password))
 		{
 			ReportError("Password is too long (max %ld characters).", sizeof(password)-1);
-			error = (-ENAMETOOLONG);
+
+			(*error_ptr) = ENAMETOOLONG;
 			goto out;
 		}
 
@@ -1597,7 +1533,8 @@ smba_start(
 	if(strlen(opt_username) >= sizeof(username))
 	{
 		ReportError("User name '%s' is too long (max %ld characters).", username,sizeof(username)-1);
-		error = (-ENAMETOOLONG);
+
+		(*error_ptr) = ENAMETOOLONG;
 		goto out;
 	}
 
@@ -1607,7 +1544,8 @@ smba_start(
 	if (strlen(opt_workgroup) > 15)
 	{
 		ReportError("Workgroup/domain name '%s' is too long (max %ld characters).", opt_workgroup,15);
-		error = (-ENAMETOOLONG);
+
+		(*error_ptr) = ENAMETOOLONG;
 		goto out;
 	}
 
@@ -1619,7 +1557,8 @@ smba_start(
 		if (strlen (opt_servername) > 16)
 		{
 			ReportError("Server name '%s' is too long (max %ld characters).", opt_servername,16);
-			error = (-ENAMETOOLONG);
+
+			(*error_ptr) = ENAMETOOLONG;
 			goto out;
 		}
 
@@ -1631,7 +1570,8 @@ smba_start(
 		if (strlen (opt_clientname) > 16)
 		{
 			ReportError("Client name '%s' is too long (max %ld characters).", opt_clientname,16);
-			error = (-ENAMETOOLONG);
+
+			(*error_ptr) = ENAMETOOLONG;
 			goto out;
 		}
 
@@ -1651,7 +1591,7 @@ smba_start(
 	par.username = username;
 	par.password = password;
 
-	error = smba_connect (
+	if(smba_connect (
 		&par,
 		ipAddr,
 		use_extended,
@@ -1664,20 +1604,22 @@ smba_start(
 		opt_prefer_write_raw,
 		opt_disable_write_raw,
 		opt_disable_read_raw,
-		&the_server);
-	if(error < 0)
+		error_ptr,
+		smb_error_class_ptr,
+		smb_error_ptr,
+		&the_server) < 0)
 	{
-		ReportError("Could not connect to server (%ld, %s).",-error,amitcp_strerror(-error));
+		ReportError("Could not connect to server (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
 		goto out;
 	}
 
-	(*result) = the_server;
+	(*smba_server_ptr) = the_server;
 
-	error = 0;
+	result = 0;
 
  out:
 
-	return(error);
+	return(result);
 }
 
 /*****************************************************************************/

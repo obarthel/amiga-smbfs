@@ -1398,3 +1398,24 @@ smbfs 1.128 (10.5.2018)
 - The code page based translation now checks if the respective
   file or directory name can be translated and will ignore or
   reject it if necessary.
+
+
+smbfs 1.129 (13.5.2018)
+
+- The SMB protocol error information (error class and error code)
+  is now retained in untranslated form for the AmigaDOS file system
+  layer to report and maybe convert into a more suitable form.
+
+- Error reporting ("something's wrong"), and specifically what is
+  wrong are no longer the same thing throughout the file system
+  code. This allows for the SMB protocol errors to be distinct
+  from the POSIX error information, which previously was lumped
+  together and made it harder to act upon. For example, a
+  protocol error could be misinterpreted as a network error,
+  causing the server connection to be dropped when this was
+  not strictly necessary.
+
+- SMB message decoding now produces its own specific error codes
+  instead of using EIO. The errors which the directory entry
+  decoding has to put up with are now specific to this function's
+  purpose.

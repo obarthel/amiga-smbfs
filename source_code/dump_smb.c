@@ -4459,7 +4459,7 @@ dump_smb(const char *file_name,int line_number,int is_raw_data,
 		}
 		else
 		{
-			if(length > 4 && memcmp(packet,"\xffSMB",4) == 0)
+			if(length > 4 && memcmp(packet,"\xffSMB",4) == SAME)
 			{
 				struct smb_header header;
 				int num_bytes_read;

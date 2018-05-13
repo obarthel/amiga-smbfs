@@ -90,6 +90,10 @@
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #endif /* min */
 
+#ifndef max
+#define max(a,b) ((a) > (b) ? (a) : (b))
+#endif /* max */
+
 /****************************************************************************/
 
 #if defined(__SASC)
@@ -129,7 +133,7 @@ extern int h_errno;
 extern int BroadcastNameQuery(const char *name, const char *scope, UBYTE *address);
 extern LONG CompareNames(STRPTR a,STRPTR b);
 extern LONG GetTimeZoneDelta(VOID);
-extern STRPTR amitcp_strerror(int error);
+extern STRPTR posix_strerror(int error);
 extern STRPTR host_strerror(int error);
 extern time_t MakeTime(const struct tm * const tm);
 extern ULONG GetCurrentTime(VOID);
