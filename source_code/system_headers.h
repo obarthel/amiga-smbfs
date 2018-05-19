@@ -79,6 +79,22 @@
 
 /*****************************************************************************/
 
+/* A quick workaround for the timeval/timerequest->TimeVal/TimeRequest
+   change in the recent OS4 header files. */
+#if defined(__NEW_TIMEVAL_DEFINITION_USED__)
+
+#define timeval		TimeVal
+#define tv_secs		Seconds
+#define tv_micro	Microseconds
+
+#define timerequest	TimeRequest
+#define tr_node		Request
+#define tr_time		Time
+
+#endif /* __NEW_TIMEVAL_DEFINITION_USED__ */
+
+/*****************************************************************************/
+
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
@@ -87,6 +103,13 @@
 #include <proto/locale.h>
 #include <proto/timer.h>
 #include <proto/icon.h>
+
+/*****************************************************************************/
+
+/* This is for backwards compatibility only. */
+#if defined(__amigaos4__)
+#define fib_EntryType fib_Obsolete
+#endif /* __amigaos4__ */
 
 /*****************************************************************************/
 

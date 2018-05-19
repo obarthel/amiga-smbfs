@@ -51,6 +51,7 @@
 #define ERRnoresource			89
 #define ERRtoomanyuids			90
 #define ERRbaduid				91
+#define ERRinvalidname			123	/* Object name collision */
 #define ERRbadpipe				230	/* Named pipe invalid */
 #define ERRpipebusy				231	/* All instances of pipe are busy */
 #define ERRpipeclosing			232	/* named pipe close in progress */
@@ -265,28 +266,66 @@
 #define SMBfclose		0x84	/* find close */
 #define SMBinvalid		0xFE	/* invalid command */
 
-
-/* Extended 2.0 protocol */
+/* Extended 2.0 protocol (LAN Manager 2.0) */
 #define SMBtrans2		0x32	/* TRANS2 protocol set */
 #define SMBtranss2		0x33	/* TRANS2 protocol set, secondary command */
 #define SMBfindclose	0x34	/* Terminate a TRANSACT2_FINDFIRST */
 #define SMBfindnclose	0x35	/* Terminate a TRANSACT2_FINDNOTIFYFIRST */
 #define SMBulogoffX		0x74	/* user logoff */
 
+/* NT LAN Manager */
+#define SMBntcreateX	0xA2	/* Create or open file */
+
 /* these are the TRANS2 sub commands */
 #define TRANSACT2_OPEN				0
 #define TRANSACT2_FINDFIRST			1
 #define TRANSACT2_FINDNEXT			2
-#define TRANSACT2_QFSINFO			3
+#define TRANSACT2_QFSINFO			3	/* TRANS2_QUERY_FS_INFORMATION */
 #define TRANSACT2_SETFSINFO			4
-#define TRANSACT2_QPATHINFO			5
-#define TRANSACT2_SETPATHINFO		6
+#define TRANSACT2_QPATHINFO			5	/* TRANS2_QUERY_PATH_INFORMATION */
+#define TRANSACT2_SETPATHINFO		6	/* TRANS2_SET_PATH_INFORMATION */
 #define TRANSACT2_QFILEINFO			7
 #define TRANSACT2_SETFILEINFO		8
 #define TRANSACT2_FSCTL				9
 #define TRANSACT2_IOCTL				10
 #define TRANSACT2_FINDNOTIFYFIRST	11
 #define TRANSACT2_FINDNOTIFYNEXT	12
-#define TRANSACT2_MKDIR				13
+#define TRANSACT2_MKDIR				13	/* TRANS2_CREATE_DIRECTORY */
+
+/* These are used by SMBntcreateX */
+#define FILE_READ_DATA			0x00000001
+#define FILE_WRITE_DATA			0x00000002
+#define FILE_READ_ATTRIBUTES	0x00000080
+#define FILE_WRITE_ATTRIBUTES	0x00000100
+#define FILE_DELETE				0x00001000
+#define GENERIC_WRITE			0x40000000
+#define GENERIC_READ			0x80000000
+
+#define FILE_SHARE_READ			0x00000001
+#define FILE_SHARE_WRITE		0x00000002
+
+#define SEC_ANONYMOUS			0x00000000
+
+#define FILE_OPEN				0x00000001
+#define FILE_CREATE				0x00000002
+#define FILE_OVERWRITE_IF		0x00000005
+
+#define NT_CREATE_REQUEST_OPBATCH 0x00000004
+
+/* Directory entry formats supported by TRANSACT2_FINDFIRST/TRANSACT2_FINDNEXT */
+#define SMB_INFO_STANDARD				0x0001	/* LAN Manager 2.0 */
+#define SMB_FILE_BOTH_DIRECTORY_INFO	0x0104	/* NT LAN Manager */
+
+/* File system information formats supported by TRANSACT2_QFSINFO (actually,
+ * we only need this one).
+ */
+#define SMB_QUERY_FS_SIZE_INFO 0x0103
+
+/* Path information formats supported by TRANSACT2_QPATHINFO and TRANSACT2_QFILEINFO. */
+#define SMB_QUERY_FILE_ALL_INFO 0x0107
+
+/* Set information formats supported by TRANSACT2_SETFILEINFO. */
+#define SMB_SET_FILE_BASIC_INFO			0x0101	/* NT LAN Manager */
+#define SMB_SET_FILE_END_OF_FILE_INFO	0x0104	/* NT LAN Manager */
 
 #endif /* _SMBNO_H_ */

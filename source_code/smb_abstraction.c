@@ -62,20 +62,6 @@ struct smba_file
 
 /*****************************************************************************/
 
-/* Some message size calculations include the size of the NetBIOS session
- * header, which may not be necessary. The "message size" in question is not
- * the same as the underlying transport layer, which in this case is
- * NetBIOS over TCP.
- */
-#define NETBIOS_HEADER_SIZE 4
-
-/* The NetBIOS frame payload cannot be larger than 131071 bytes,
- * which is (2^71)-1.
- */
-#define MAX_NETBIOS_FRAME_SIZE 131071
-
-/*****************************************************************************/
-
 #include "smb_abstraction.h"
 
 /*****************************************************************************/
@@ -99,6 +85,7 @@ smba_connect (
 	int							opt_prefer_write_raw,
 	int							opt_disable_write_raw,
 	int							opt_disable_read_raw,
+	char *						opt_native_os,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
 	int *						smb_error_ptr,
@@ -151,6 +138,9 @@ smba_connect (
 
 	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
 	res->server.timeout = timeout;
+
+	/* olsen (2018-05-18): Override the "Native OS" name passed to the server. */
+	res->server.native_os = opt_native_os;
 
 	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
 	{
@@ -280,7 +270,7 @@ smba_disconnect (smba_server_t * server)
 /*****************************************************************************/
 
 static int
-make_open (smba_file_t * f, int need_fid, int * error_ptr)
+make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * error_ptr)
 {
 	smba_server_t *s;
 	int result;
@@ -293,17 +283,32 @@ make_open (smba_file_t * f, int need_fid, int * error_ptr)
 
 		if (!f->is_valid || f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 		{
-			result = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+			if (f->server->server.protocol >= PROTOCOL_LANMAN2)
+				result = smb_query_path_information (&s->server, f->dirent.complete_path, f->dirent.len, 0, &f->dirent, error_ptr);
+			else
+				result = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+
 			if (result < 0)
 				goto out;
 		}
 
 		if ((f->dirent.attr & aDIR) == 0) /* a regular file */
 		{
-			if (need_fid || !s->supports_E_known || s->supports_E)
+			if (f->server->server.protocol >= PROTOCOL_LANMAN2)
+			{
+				if(need_fid)
+				{
+					LOG (("opening file %s\n", f->dirent.complete_path));
+
+					result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate, &f->dirent, error_ptr);
+					if (result < 0)
+						goto out;
+				}
+			}
+			else if (need_fid || !s->supports_E_known || s->supports_E)
 			{
 				LOG (("opening file %s\n", f->dirent.complete_path));
-				result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+				result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate, &f->dirent, error_ptr);
 				if (result < 0)
 					goto out;
 
@@ -350,7 +355,7 @@ make_open (smba_file_t * f, int need_fid, int * error_ptr)
 /*****************************************************************************/
 
 int
-smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file, int * error_ptr)
+smba_open (smba_server_t * s, char *name, size_t name_size, int writable, int truncate, smba_file_t ** file, int * error_ptr)
 {
 	smba_file_t *f;
 	int result;
@@ -373,7 +378,7 @@ smba_open (smba_server_t * s, char *name, size_t name_size, smba_file_t ** file,
 	f->dirent.len = strlen (name);
 	f->server = s;
 
-	result = make_open (f, 0, error_ptr);
+	result = make_open (f, open_dont_need_fid, writable, truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -399,14 +404,25 @@ write_attr (smba_file_t * f, int * error_ptr)
 
 	LOG (("file %s\n", f->dirent.complete_path));
 
-	result = make_open (f, 0, error_ptr);
-	if (result < 0)
-		goto out;
+	if(f->server->server.protocol >= PROTOCOL_LANMAN2)
+	{
+		result = make_open (f, open_need_fid, open_writable, open_dont_truncate, error_ptr);
+		if (result < 0)
+			goto out;
 
-	if (f->dirent.opened && f->server->supports_E)
-		result = smb_proc_setattrE (&f->server->server, f->dirent.fileid, &f->dirent, error_ptr);
+		result = smb_set_file_information (&f->server->server, &f->dirent, NULL, error_ptr);
+	}
 	else
-		result = smb_proc_setattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+	{
+		result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
+		if (result < 0)
+			goto out;
+
+		if (f->dirent.opened && f->server->supports_E)
+			result = smb_proc_setattrE (&f->server->server, f->dirent.fileid, &f->dirent, error_ptr);
+		else
+			result = smb_proc_setattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+	}
 
 	if (result < 0)
 	{
@@ -414,7 +430,7 @@ write_attr (smba_file_t * f, int * error_ptr)
 		goto out;
 	}
 
-	f->attr_dirty = 0;
+	f->attr_dirty = FALSE;
 
  out:
 
@@ -460,14 +476,75 @@ smba_read (smba_file_t * f, char *data, long len, long offset, int * error_ptr)
 	int num_bytes_read = 0;
 	int result;
 
-	result = make_open (f, 1, error_ptr);
+	result = make_open (f, open_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
 	D(("read %ld bytes from offset %ld",len,offset));
 
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1)
+	{
+		int max_readx_size;
+		int count;
+
+		/* Calculate maximum number of bytes that could be transferred with
+		 * a single SMBreadX packet...
+		 *
+		 * The message header accounts for
+		 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+		 * = 32 bytes
+		 *
+		 * The parameters of a SMB_COM_READ_ANDX response account for
+		 * 1(wordcount)+1(andxcommand)+1(andxreserved)+2(andxoffset)+
+		 * 2(available)+2(datacompactionmode)+2(reserved)+2(datalength)+
+		 * 2(dataoffset)+10(reserved2)
+		 * = 25 bytes
+		 *
+		 * The data part of a SMB_COM_READ_ANDX response account for
+		 * 2(bytecount)+1(pad) = 3 bytes,
+		 * not including the actual payload
+		 *
+		 * This leaves 'max_receive' - 60 for the payload.
+		 */
+
+		max_readx_size = f->server->server.max_buffer_size - 60;
+
+		if((f->server->server.capabilities & CAP_LARGE_READX) != 0)
+			max_readx_size = 65535;
+
+		/* ZZZ SMB_COM_READ_ANDX uses the packet buffer to receive
+		 * the data, which is why there is another limit to how
+		 * much data can be received.
+		 */
+		if(max_readx_size > f->server->server.transmit_buffer_size - 62)
+			max_readx_size = f->server->server.transmit_buffer_size - 62;
+
+		LOG (("len = %ld, max_readx_size = %ld\n", len, max_readx_size));
+
+		do
+		{
+			count = min(len, max_readx_size);
+
+			result = smb_proc_readx (&f->server->server, &f->dirent, offset, count, data, error_ptr);
+			if (result < 0)
+				goto out;
+
+			num_bytes_read += result;
+			len -= result;
+			offset += result;
+			data += result;
+
+			if(result < count)
+			{
+				D(("read returned fewer characters than expected (%ld < %ld)",result,count));
+				break;
+			}
+		}
+		while (len > 0);
+	}
 	/* SMB_COM_READ_RAW and SMB_COM_WRITE_RAW supported? */
-	if ((f->server->server.capabilities & CAP_RAW_MODE) != 0 && !f->server->server.disable_read_raw)
+	else if ((f->server->server.capabilities & CAP_RAW_MODE) != 0 && !f->server->server.disable_read_raw)
 	{
 		int max_raw_size = f->server->server.max_raw_size;
 		int n;
@@ -534,14 +611,14 @@ smba_read (smba_file_t * f, char *data, long len, long offset, int * error_ptr)
 		 * This leaves 'max_buffer_size' - 48 for the payload.
 		 */
 		/*max_size_smb_com_read = f->server->server.max_buffer_size - SMB_HEADER_LEN - 5 * 2 - 5;*/
-		max_size_smb_com_read = f->server->server.max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
+		max_size_smb_com_read = f->server->server.max_buffer_size - 48;
 
 		/* ZZZ SMB_COM_READ uses the packet buffer to receive
 		 * the data, which is why there is another limit to how
 		 * much data can be received.
 		 */
-		if(max_size_smb_com_read > f->server->server.transmit_buffer_size - 48 - NETBIOS_HEADER_SIZE)
-			max_size_smb_com_read = f->server->server.transmit_buffer_size - 48 - NETBIOS_HEADER_SIZE;
+		if(max_size_smb_com_read > f->server->server.transmit_buffer_size - 48)
+			max_size_smb_com_read = f->server->server.transmit_buffer_size - 48;
 
 		do
 		{
@@ -591,7 +668,7 @@ smba_write (smba_file_t * f, const char *data, long len, long offset, int * erro
 	int max_buffer_size;
 	int result;
 
-	result = make_open (f, 1, error_ptr);
+	result = make_open (f, open_need_fid, open_writable, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -599,7 +676,68 @@ smba_write (smba_file_t * f, const char *data, long len, long offset, int * erro
 
 	max_buffer_size = f->server->server.max_buffer_size;
 
-	if ((f->server->server.capabilities & CAP_RAW_MODE) != 0 && !f->server->server.disable_write_raw)
+	/* SMB_COM_WRITE_ANDX supported? */
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1)
+	{
+		int max_writex_size;
+		int n;
+
+		/* Calculate maximum number of bytes that could be transferred with
+		 * a single SMB_COM_WRITE_ANDX packet...
+		 *
+		 * 'max_buffer_size' is the maximum size of a complete SMB message
+		 * including the message header, the parameter and data blocks.
+		 *
+		 * The message header accounts for
+		 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+		 * = 32 bytes
+		 *
+		 * The parameters of a SMB_COM_WRITE_ANDX command account for
+		 * 1(word_count)+1(and_x_command)+1(and_x_reserved)+2(and_x_offset)+
+		 * 2(fid)+4(offset)+4(timeout)+2(write_mode)+2(remaining)+2(reserved)+
+		 * 2(data_length)+2(data_offset)+4(offset_high)
+		 * = 29 bytes
+		 *
+		 * The data part of a SMB_COM_WRITE_ANDX command account for
+		 * 2(byte_count)+1(pad) = 3 bytes, not including
+		 * the actual payload
+		 *
+		 * This leaves 'max_buffer_size' - 64 for the payload.
+		 */
+
+		if(f->server->server.protocol >= PROTOCOL_NT1)
+			max_writex_size = max_buffer_size - 64;
+		else
+			max_writex_size = max_buffer_size - 60;
+
+		if((f->server->server.capabilities & CAP_LARGE_WRITEX) != 0)
+			max_writex_size = 65535;
+
+		LOG (("len = %ld, max_writex_size = %ld\n", len, max_writex_size));
+
+		do
+		{
+			n = min(len, max_writex_size);
+
+			ASSERT( n > 0 );
+
+			LOG(("writing %ld bytes; offset=%lu, len=%ld\n", n, offset, len));
+
+			result = smb_proc_writex(&f->server->server, &f->dirent, offset, n, data, error_ptr);
+			if(result < 0)
+				goto out;
+
+			LOG(("number of bytes written = %ld\n", result));
+
+			data += result;
+			offset += result;
+			len -= result;
+			num_bytes_written += result;
+		}
+		while(len > 0);
+	}
+	else if ((f->server->server.capabilities & CAP_RAW_MODE) != 0 && !f->server->server.disable_write_raw)
 	{
 		int max_raw_size = f->server->server.max_raw_size;
 		int max_size_smb_com_write_raw;
@@ -624,7 +762,7 @@ smba_write (smba_file_t * f, const char *data, long len, long offset, int * erro
 		 * This leaves 'max_buffer_size' - 59 for the payload.
 		 */
 		/*max_size_smb_com_write_raw = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
-		max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 59 - NETBIOS_HEADER_SIZE;
+		max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 59;
 
 		/* SMB_COM_WRITE_RAW cannot transmit more than 65535 bytes. */
 		if(max_size_smb_com_write_raw > 65535)
@@ -680,7 +818,7 @@ smba_write (smba_file_t * f, const char *data, long len, long offset, int * erro
 		 * This leaves 'max_buffer_size' - 48 for the payload.
 		 */
 		/*max_size_smb_com_write = f->server->server.max_buffer_size - (SMB_HEADER_LEN + 5 * sizeof (word) + 5) - 4;*/
-		max_size_smb_com_write = max_buffer_size - 48 - NETBIOS_HEADER_SIZE;
+		max_size_smb_com_write = max_buffer_size - 48;
 
 		/* SMB_COM_WRITE cannot transmit more than 65535 bytes. */
 		if(max_size_smb_com_write > 65535)
@@ -708,6 +846,8 @@ smba_write (smba_file_t * f, const char *data, long len, long offset, int * erro
 		while (len > 0);
 	}
 
+	LOG(("num_bytes_written=%ld\n", num_bytes_written));
+
 	result = num_bytes_written;
 
  out:
@@ -729,26 +869,6 @@ smba_write (smba_file_t * f, const char *data, long len, long offset, int * erro
 
 /*****************************************************************************/
 
-int
-smba_seek (smba_file_t *f, long offset, long mode, off_t * new_position_ptr, int * error_ptr)
-{
-	int result;
-
-	D(("seek %ld bytes from position %s",offset,mode > 0 ? (mode == 2 ? "SEEK_END" : "SEEK_CUR") : "SEEK_SET"));
-
-	result = make_open (f, 1, error_ptr);
-	if(result < 0)
-		goto out;
-
-	result = smb_proc_lseek (&f->server->server, &f->dirent, offset, mode, new_position_ptr, error_ptr);
-
- out:
-
-	return result;
-}
-
-/*****************************************************************************/
-
 /* perform a single record-lock */
 int
 smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, long timeout, int * error_ptr)
@@ -756,7 +876,7 @@ smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, lo
 	struct smb_lkrng *rec_lock = NULL;
 	int result;
 
-	result = make_open (f, 1, error_ptr);
+	result = make_open (f, open_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if(result < 0)
 		goto out;
 
@@ -793,7 +913,7 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 	int result;
 	ULONG now;
 
-	result = make_open (f, 0, error_ptr);
+	result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -803,10 +923,20 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 	{
 		LOG (("file %s\n", f->dirent.complete_path));
 
-		if (f->dirent.opened && f->server->supports_E)
-			result = smb_proc_getattrE (&f->server->server, &f->dirent, error_ptr);
+		if (f->server->server.protocol >= PROTOCOL_LANMAN2)
+		{
+			if (f->dirent.opened)
+				result = smb_query_path_information (&f->server->server, NULL, 0, f->dirent.fileid, &f->dirent, error_ptr);
+			else
+				result = smb_query_path_information (&f->server->server, f->dirent.complete_path, f->dirent.len, 0, &f->dirent, error_ptr);
+		}
 		else
-			result = smb_proc_getattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+		{
+			if (f->dirent.opened && f->server->supports_E)
+				result = smb_proc_getattrE (&f->server->server, &f->dirent, error_ptr);
+			else
+				result = smb_proc_getattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+		}
 
 		if (result < 0)
 			goto out;
@@ -833,51 +963,78 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 /*****************************************************************************/
 
 int
-smba_setattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
+smba_setattr (smba_file_t * f, const smba_stat_t * data, const dword * size_ptr, int * error_ptr)
 {
+	BOOL times_changed = FALSE;
+	dword attrs;
 	int result;
 
-	if (data->atime != -1)
-		f->dirent.atime = data->atime;
-
-	if (data->ctime != -1)
-		f->dirent.ctime = data->ctime;
-
-	if (data->mtime != -1)
-		f->dirent.mtime = data->mtime;
-
-	if (data->is_wp)
-		f->dirent.attr |= aRONLY;
-	else
-		f->dirent.attr &= ~aRONLY;
-
-	if (data->is_archive)
-		f->dirent.attr |= aARCH;
-	else
-		f->dirent.attr &= ~aARCH;
-
-	if (data->is_system)
-		f->dirent.attr |= aSYSTEM;
-	else
-		f->dirent.attr &= ~aSYSTEM;
-
-	f->attr_dirty = 1;
-
-	result = write_attr (f, error_ptr);
-	if (result < 0)
-		goto out;
-
-	if (data->size != -1 && data->size != (int)f->dirent.size)
+	if (data != NULL)
 	{
-		result = make_open (f, 1, error_ptr);
+		if (data->atime != -1 && f->dirent.atime != data->atime)
+		{
+			f->dirent.atime = data->atime;
+			times_changed = TRUE;
+		}
+
+		if (data->ctime != -1 && f->dirent.ctime != data->ctime)
+		{
+			f->dirent.ctime = data->ctime;
+			times_changed = TRUE;
+		}
+
+		if (data->mtime != -1 && f->dirent.mtime != data->mtime)
+		{
+			f->dirent.mtime = data->mtime;
+			times_changed = TRUE;
+		}
+
+		attrs = f->dirent.attr;
+
+		if (data->is_wp)
+			attrs |= aRONLY;
+		else
+			attrs &= ~aRONLY;
+
+		if (data->is_archive)
+			attrs |= aARCH;
+		else
+			attrs &= ~aARCH;
+
+		if (data->is_system)
+			attrs |= aSYSTEM;
+		else
+			attrs &= ~aSYSTEM;
+
+		if(f->dirent.attr != attrs)
+		{
+			f->dirent.attr = attrs;
+			f->attr_dirty = TRUE;
+		}
+
+		if(f->attr_dirty || times_changed)
+		{
+			result = write_attr (f, error_ptr);
+			if (result < 0)
+				goto out;
+		}
+	}
+
+	if (size_ptr != NULL && (*size_ptr) != f->dirent.size)
+	{
+		result = make_open (f, open_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if(result < 0)
 			goto out;
 
-		result = smb_proc_trunc (&f->server->server, f->dirent.fileid, data->size, error_ptr);
+		if(f->server->server.protocol >= PROTOCOL_LANMAN2)
+			result = smb_set_file_information (&f->server->server, &f->dirent, size_ptr, error_ptr);
+		else
+			result = smb_proc_trunc (&f->server->server, f->dirent.fileid, (*size_ptr), error_ptr);
+
 		if(result < 0)
 			goto out;
 
-		f->dirent.size = data->size;
+		f->dirent.size = (*size_ptr);
 	}
 
  out:
@@ -896,7 +1053,7 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int
 	int result;
 	ULONG now;
 
-	result = make_open (f, 0, error_ptr);
+	result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1063,7 +1220,7 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr, int * erro
 	char *path = NULL;
 	int result;
 
-	result = make_open (dir, 0, error_ptr);
+	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1093,7 +1250,11 @@ smba_create (smba_file_t * dir, const char *name, smba_stat_t * attr, int * erro
 	path[dir->dirent.len] = DOS_PATHSEP;
 	strcpy (&path[dir->dirent.len + 1], name);
 
-	result = smb_proc_create (&dir->server->server, path, strlen (path), &entry, error_ptr);
+	if (dir->server->server.protocol >= PROTOCOL_LANMAN2)
+		result = smb_proc_open (&dir->server->server, path, strlen(path), open_writable, open_truncate, &entry, error_ptr);
+	else
+		result = smb_proc_create (&dir->server->server, path, strlen (path), &entry, error_ptr);
+
 	if(result < 0)
 		goto out;
 
@@ -1115,7 +1276,7 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 	char *path = NULL;
 	int result;
 
-	result = make_open (dir, 0, error_ptr);
+	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1430,6 +1591,7 @@ smba_start(
 	int					opt_prefer_write_raw,
 	int					opt_disable_write_raw,
 	int					opt_disable_read_raw,
+	char *				opt_native_os,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,
@@ -1602,6 +1764,7 @@ smba_start(
 		opt_prefer_write_raw,
 		opt_disable_write_raw,
 		opt_disable_read_raw,
+		opt_native_os,
 		error_ptr,
 		smb_error_class_ptr,
 		smb_error_ptr,

@@ -1437,3 +1437,134 @@ smbfs 1.130 (13.5.2018)
   finally produce the kind of insights which so far have been
   denied to us during long data copying sessions which either
   stalled or stopped for no apparent reason.
+
+
+smbfs 1.131 (14.5.2018)
+
+- Hitting Ctrl+C (or using the Break shell command) no longer
+  allows smbfs to shut down and then retry to open the connection
+  to the server.
+
+- smb_proc_read(), smb_proc_read_raw(), smb_proc_write(),
+  smb_proc_write_raw(), smb_proc_create(), smb_proc_trunc(),
+  smb_proc_getattrE(), smb_proc_setattrE() and smb_proc_dskattr()
+  now try to reconnect to the server if the connection
+  was broken by the previous network access.
+
+- The reconnection attempt no longer overwrites the previously
+  recorded error code if it fails to succeed.
+
+
+smbfs 1.132 (19.5.2018)
+
+- If raw SMB mode is not used, the NetBIOS session setup now works
+  again.
+
+- Reading directories which contain long names supports only the two
+  documented entry formats now. All the other formats which might or
+  might not have been supported by OS/2, etc. are gone now. This
+  simplified the whole overly complex directory scanner code.
+
+- Directory entries whose names are too long are now skipped while
+  reading the directory, rather than getting truncated.
+
+- Replaced the deprecated commands SMB_COM_CREATE, SMB_COM_OPEN,
+  SMB_COM_QUERY_INFORMATION_DISK, SMB_COM_QUERY_INFORMATION,
+  SMB_COM_CREATE_DIRECTORY and SMB_COM_SET_INFORMATION with their
+  CIFS counterparts. The old commands are still in place, on the
+  off chance that you just might want to connect smbfs to an OS/2
+  or Windows 3 server.
+
+- If possible, SMB_COM_WRITE_ANDX and SMB_COM_READ_ANDX will now
+  be used in place of the older SMB_COM_WRITE/SMB_COM_WRITE_RAW
+  and SMB_COM_READ/SMB_COM_READ_RAW commands. This makes both
+  read/write operations much simpler than they used to be.
+
+- Just to repeat the point here: smbfs no longer uses any SMB
+  commands which the CIFS documentation describes as either
+  "deprecated" or "obsolete" (unless the server which smbfs
+  connected to does not support the LAN Manager 2.0 or
+  NT LAN Manager protocols).
+
+- Removed the use of the SMB_COM_SEEK command, which wasn't doing
+  anything useful in the first place: none of the read/write commands
+  actually required it (this is the one command which the CIFS
+  documentation labeled as "obsolete").
+
+- ACTION_SET_FILE_SIZE now actually works: you can make files both
+  shorter or longer, as needed. Previously, you could not make
+  files any shorter, only longer.
+
+- Added the NATIVEOS option, which allows you to override the
+  default of "AmigaOS", in case this should be necessary.
+
+- smbfs now reports itself ("Native LAN Manager") as "smbfs" with
+  the version number tacked on ("smbfs 1.132").
+
+- Changed the translation of the POSIX error codes EPERM (operation
+  not permitted) and EACCESS (permission denied) from
+  "object not found" to "read protected". This is less misleading,
+  but not much clearer either. Pity that we don't have an AmigaDOS
+  error code which matches the blanket "you can't do that" error.
+  Anyway, if it says "read protected" it now indicates a permission
+  problem, rather than suggesting some file or directory does not
+  exist.
+
+- Changed the translation of the POSIX error codes EADDRNOTAVAIL,
+  ENETDOWN, ENETUNREACH, ENETRESET, ECONNABORTED, ECONNRESET,
+  EHOSTDOWN and EHOSTUNREACH from "object not found" to
+  "directory not found". This is still a poor match for the
+  purpose of the error flagged, but at least you'll get an idea
+  that something isn't accessible on the network, rather than
+  file or directory might be missing.
+  
+- Open(...,MODE_NEWFILE), which translates into ACTION_FINDOUTPUT,
+  can finally truncate an existing file, or will create it if it
+  does not exist. This uses the SMB_COM_NT_CREATE_ANDX command, if
+  available (too bad for OS/2, etc.).
+
+- Simplified the Seek() handling, because the formerly underlying
+  SMB_COM_SEEK was basically only slightly worse than useless.
+
+- Added another (so far) unaccounted error code (123) to the list of
+  errors for which we have labels.
+  
+- Verified that the directory scanner built on top of the
+  SMB_COM_TRANSACTION2+TRANS2_FIND_FIRST2/TRANS2_FIND_NEXT2
+  commands actually does work. The SMB_COM_TRANSACTION2 message
+  it set up was two bytes longer than it should have been,
+  though.
+
+- All file operations (reading, writing, setting the file size,
+  obtaining the size of a file, reading directory entries) now
+  support file sizes larger than 4 Gigabytes. In theory anyway,
+  because the AmigaDOS API is currently restricted to just
+  2 Gigabytes. Should the need arise, the 64 bit integer values
+  could be made to do the job they were intended for. Note that
+  file sizes > 4 Gigabytes are currently "clipped", which means
+  that only the least significant 32 bits are used. There is
+  is currently no weird workaround in place to avoid the side-effects
+  of this policy.
+
+- Updated the 64 bit integer math operations for the SetFileDate()
+  function, which now has to deal with the SMB_COM_TRANSACTION2
+  TRANS2_SET_FILE_INFORMATION command. TRANS2_SET_FILE_INFORMATION
+  uses 64 bit date/time.
+
+- Opening a file or directory, which is something akin to the
+  AmigaDOS Lock() operation, now defaults to read access unless
+  write access is required. The previous implementation always
+  opened for read/write access, and if that didn't work, tried
+  again with read access only. The read/write access is rarely
+  needed, but is mandatory for file/directory delete operations.
+
+- Manipulating file/directory attributes (which consists of
+  flipping the "protection bits" for "read-only" and "was
+  archived" as needed) is much simplified and no longer
+  requires figuring out if the OS/2 or MS-DOS server at the
+  other end of the connection can handle extended file
+  attributes (unless you desperately want to, of course).
+  
+- Changing the attributes of a file/directory (as in: flip the
+  "read-only" and "was archived" bits) is now distinct from
+  changing the size of a file.

@@ -52,10 +52,10 @@ enum smb_conn_state
 
 struct smb_dskattr
 {
-	word total;
-	word allocblocks;
-	word blocksize;
-	word free;
+	dword total;
+	dword allocblocks;
+	dword blocksize;
+	dword free;
 };
 
 /*
@@ -65,7 +65,7 @@ struct smb_dirent
 {
 	int				opened;					/* is it open on the fileserver? */
 	word			fileid;					/* What id to handle a file with? */
-	word			attr;					/* Attribute fields, DOS value */
+	dword			attr;					/* Attribute fields, DOS value */
 
 	time_t			atime, mtime, 
 					wtime, ctime;			/* Times, as seen by the server, normalized */
@@ -73,6 +73,7 @@ struct smb_dirent
 											/* proc.c */
 
 	unsigned long	size;					/* File size. */
+
 	char *			complete_path;			/* Complete path, MS-DOS notation, with '\' */
 	size_t			complete_path_size;		/* Number of bytes allocated for name */
 	int				len;					/* Namelength. */

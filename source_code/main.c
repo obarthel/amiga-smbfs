@@ -26,7 +26,7 @@
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
- * Samba 4.6.7: smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //192.168.1.33/test
+ * Samba 4.6.7: smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //ubuntu-17-olaf/test
  * Samba 3.0.25: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 user=olsen password=... volume=olsen //192.168.1.118/olsen
  */
 
@@ -46,29 +46,6 @@
 #include <smb/smb_fs_sb.h>
 #include <smb/smb_fs.h>
 #include <smb/smb.h>
-
-/****************************************************************************/
-
-/* A quick workaround for the timeval/timerequest->TimeVal/TimeRequest
-   change in the recent OS4 header files. */
-#if defined(__NEW_TIMEVAL_DEFINITION_USED__)
-
-#define timeval		TimeVal
-#define tv_secs		Seconds
-#define tv_micro	Microseconds
-
-#define timerequest	TimeRequest
-#define tr_node		Request
-#define tr_time		Time
-
-#endif /* __NEW_TIMEVAL_DEFINITION_USED__ */
-
-/****************************************************************************/
-
-/* This is for backwards compatibility only. */
-#if defined(__amigaos4__)
-#define fib_EntryType fib_Obsolete
-#endif /* __amigaos4__ */
 
 /****************************************************************************/
 
@@ -158,7 +135,7 @@ STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 STATIC LONG CVSPrintf(STRPTR format_string, APTR args);
 STATIC VOID VSPrintf(STRPTR buffer, STRPTR formatString, APTR args);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, BOOL opt_disable_write_raw, BOOL opt_disable_read_raw, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, BOOL opt_disable_write_raw, BOOL opt_disable_read_raw, STRPTR opt_native_os, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID HandleFileSystem(STRPTR device_name, STRPTR volume_name, STRPTR service_name);
 
 /****************************************************************************/
@@ -567,6 +544,7 @@ main(VOID)
 		SWITCH	PreferWriteRaw;
 		SWITCH	DisableWriteRaw;
 		SWITCH	DisableReadRaw;
+		KEY		NativeOS;
 		SWITCH	DumpSMB;
 		NUMBER	DumpSMBLevel;
 		KEY		DumpSMBFile;
@@ -601,6 +579,7 @@ main(VOID)
 		"PREFERWRITERAW/S,"
 		"DISABLEWRITERAW/S,"
 		"DISABLEREADRAW/S,"
+		"NATIVEOS/K,"
 		"DUMPSMB/S,"
 		"DUMPSMBLEVEL/N/K,"
 		"DUMPSMBFILE/K,"
@@ -838,6 +817,10 @@ main(VOID)
 
 		if(FindToolType(Icon->do_ToolTypes,"DISABLEREADRAW") != NULL)
 			args.DisableReadRaw = TRUE;
+
+		str = FindToolType(Icon->do_ToolTypes,"NATIVEOS");
+		if(str != NULL)
+			args.NativeOS = str;
 
 		str = FindToolType(Icon->do_ToolTypes,"TRANSLATE");
 		if(str == NULL)
@@ -1123,6 +1106,7 @@ main(VOID)
 		args.PreferWriteRaw,
 		args.DisableWriteRaw,
 		args.DisableReadRaw,
+		args.NativeOS,
 		args.DeviceName,
 		args.VolumeName,
 		args.TranslationFile))
@@ -1247,9 +1231,9 @@ posix_strerror(int error)
 		SocketBaseTagList(tags);
 
 		result = (STRPTR)tags[0].ti_Data;
-
-		return(result);
 	}
+
+	return(result);
 }
 
 /****************************************************************************/
@@ -2201,7 +2185,7 @@ MapErrnoToIoErr(int error)
 	 */
 	STATIC const LONG map_posix_to_amigados[][2] =
 	{
-		{ EPERM,			ERROR_OBJECT_NOT_FOUND },		/* Operation not permitted */
+		{ EPERM,			ERROR_READ_PROTECTED },			/* Operation not permitted */
 		{ ENOENT,			ERROR_OBJECT_NOT_FOUND },		/* No such file or directory */
 		{ ESRCH,			ERROR_OBJECT_NOT_FOUND },		/* No such process */
 		{ EINTR,			ERROR_BREAK },					/* Interrupted system call */
@@ -2209,7 +2193,7 @@ MapErrnoToIoErr(int error)
 		{ E2BIG,			ERROR_TOO_MANY_ARGS },			/* Argument list too long */
 		{ EBADF,			ERROR_INVALID_LOCK },			/* Bad file descriptor */
 		{ ENOMEM,			ERROR_NO_FREE_STORE },			/* Cannot allocate memory */
-		{ EACCES,			ERROR_OBJECT_NOT_FOUND },		/* Permission denied */
+		{ EACCES,			ERROR_READ_PROTECTED },			/* Permission denied */
 		{ ENOTBLK,			ERROR_OBJECT_WRONG_TYPE },		/* Block device required */
 		{ EBUSY,			ERROR_OBJECT_IN_USE },			/* Device busy */
 		{ EEXIST,			ERROR_OBJECT_EXISTS },			/* File exists */
@@ -2233,12 +2217,12 @@ MapErrnoToIoErr(int error)
 		{ EPFNOSUPPORT,		ERROR_NOT_IMPLEMENTED },		/* Protocol family not supported */
 		{ EAFNOSUPPORT,		ERROR_NOT_IMPLEMENTED },		/* Address family not supported by protocol family */
 		{ EADDRINUSE,		ERROR_OBJECT_IN_USE },			/* Address already in use */
-		{ EADDRNOTAVAIL,	ERROR_OBJECT_NOT_FOUND },		/* Can't assign requested address */
-		{ ENETDOWN,			ERROR_OBJECT_NOT_FOUND },		/* Network is down */
-		{ ENETUNREACH,		ERROR_OBJECT_NOT_FOUND },		/* Network is unreachable */
-		{ ENETRESET,		ERROR_OBJECT_NOT_FOUND },		/* Network dropped connection on reset */
-		{ ECONNABORTED,		ERROR_OBJECT_NOT_FOUND },		/* Software caused connection abort */
-		{ ECONNRESET,		ERROR_OBJECT_NOT_FOUND },		/* Connection reset by peer */
+		{ EADDRNOTAVAIL,	ERROR_DIR_NOT_FOUND },			/* Can't assign requested address */
+		{ ENETDOWN,			ERROR_DIR_NOT_FOUND },			/* Network is down */
+		{ ENETUNREACH,		ERROR_DIR_NOT_FOUND },			/* Network is unreachable */
+		{ ENETRESET,		ERROR_DIR_NOT_FOUND },			/* Network dropped connection on reset */
+		{ ECONNABORTED,		ERROR_DIR_NOT_FOUND },			/* Software caused connection abort */
+		{ ECONNRESET,		ERROR_DIR_NOT_FOUND },			/* Connection reset by peer */
 		{ ENOBUFS,			ERROR_BUFFER_OVERFLOW },		/* No buffer space available */
 		{ EISCONN,			ERROR_OBJECT_IN_USE },			/* Socket is already connected */
 		{ ENOTCONN,			ERROR_OBJECT_WRONG_TYPE },		/* Socket is not connected */
@@ -2246,8 +2230,8 @@ MapErrnoToIoErr(int error)
 		{ ECONNREFUSED,		ERROR_OBJECT_IN_USE },			/* Connection refused */
 		{ ELOOP,			ERROR_TOO_MANY_LEVELS },		/* Too many levels of symbolic links */
 		{ ENAMETOOLONG,		ERROR_LINE_TOO_LONG },			/* File name too long */
-		{ EHOSTDOWN,		ERROR_OBJECT_NOT_FOUND },		/* Host is down */
-		{ EHOSTUNREACH,		ERROR_OBJECT_NOT_FOUND },		/* No route to host */
+		{ EHOSTDOWN,		ERROR_DIR_NOT_FOUND },			/* Host is down */
+		{ EHOSTUNREACH,		ERROR_DIR_NOT_FOUND },			/* No route to host */
 		{ ENOTEMPTY,		ERROR_DIRECTORY_NOT_EMPTY },	/* Directory not empty */
 		{ EPROCLIM,			ERROR_TASK_TABLE_FULL },		/* Too many processes */
 		{ EUSERS,			ERROR_TASK_TABLE_FULL },		/* Too many users */
@@ -2606,6 +2590,7 @@ Setup(
 	BOOL	opt_prefer_write_raw,
 	BOOL	opt_disable_write_raw,
 	BOOL	opt_disable_read_raw,
+	STRPTR	opt_native_os,
 	STRPTR	device_name,
 	STRPTR	volume_name,
 	STRPTR	translation_file)
@@ -2785,6 +2770,7 @@ Setup(
 		opt_prefer_write_raw,
 		opt_disable_write_raw,
 		opt_disable_read_raw,
+		(char *)opt_native_os,
 		&error,
 		&smb_error_class,
 		&smb_error,
@@ -3258,7 +3244,7 @@ Action_Parent(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3453,7 +3439,7 @@ Action_DeleteObject(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3658,7 +3644,7 @@ Action_CreateDir(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	if(smba_open(ServerData,dir_name,dir_name_size,&dir,&error) < 0)
+	if(smba_open(ServerData,dir_name,dir_name_size,open_read_only,open_dont_truncate,&dir,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3675,7 +3661,7 @@ Action_CreateDir(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3805,7 +3791,7 @@ Action_LocateObject(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3898,7 +3884,7 @@ Action_CopyDir(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -4091,7 +4077,7 @@ Action_SetProtect(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -4104,7 +4090,6 @@ Action_SetProtect(
 	st.atime = -1;
 	st.ctime = -1;
 	st.mtime = -1;
-	st.size = -1;
 
 	if((mask & (FIBF_WRITE|FIBF_DELETE)) != (FIBF_WRITE|FIBF_DELETE))
 	{
@@ -4124,7 +4109,7 @@ Action_SetProtect(
 	/* The 'system' attribute is associated with the 'pure' bit for now. */
 	st.is_system = ((mask & FIBF_PURE) != 0);
 
-	if(smba_setattr(file,&st,&error) < 0)
+	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5368,7 +5353,7 @@ Action_Find(
 		int ignored_error;
 		smba_stat_t st;
 
-		if(smba_open(ServerData,full_name,full_name_size,&file,&ignored_error) == OK &&
+		if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&ignored_error) == OK &&
 		   smba_getattr(file,&st,&ignored_error) == OK)
 		{
 			/* File apparently opens Ok and information on it
@@ -5441,7 +5426,7 @@ Action_Find(
 		SHOWMSG("creating a file; finding parent path first");
 		SHOWSTRING(parent_path);
 
-		if(smba_open(ServerData,parent_path,strlen(full_name)+3,&dir,&error) < 0)
+		if(smba_open(ServerData,parent_path,strlen(full_name)+3,open_read_only,open_dont_truncate,&dir,&error) < 0)
 		{
 			error = MapErrnoToIoErr(error);
 			goto out;
@@ -5472,7 +5457,7 @@ Action_Find(
 	}
 
 	/* Now for the remainder... */
-	if(smba_open(ServerData,full_name,full_name_size,&fn->fn_File,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,action != ACTION_FINDINPUT,create_new_file,&fn->fn_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5512,6 +5497,8 @@ Action_Read(
 	int error = OK;
 
 	ENTER();
+
+	SHOWVALUE(length);
 
 	if(length > 0)
 	{
@@ -5554,6 +5541,8 @@ Action_Write(
 		error = ERROR_DISK_WRITE_PROTECTED;
 		goto out;
 	}
+
+	SHOWVALUE(length);
 
 	if(length > 0)
 	{
@@ -5607,143 +5596,46 @@ Action_Seek(
 {
 	LONG previous_position = fn->fn_Offset;
 	LONG result = -1;
+	smba_stat_t st;
 	LONG offset;
 	int error;
 
 	ENTER();
 
-	/* olsen: This doesn't really work with Microsoft SMB servers, but it works with Samba. */
-	#if 0
+	switch(mode)
 	{
-		switch(mode)
-		{
-			case OFFSET_BEGINNING:
+		case OFFSET_BEGINNING:
 
-				mode = 0;
-				break;
+			offset = position;
+			break;
 
-			case OFFSET_CURRENT:
+		case OFFSET_CURRENT:
 
-				mode = 1;
-				break;
+			offset = fn->fn_Offset + position;
+			break;
 
-			case OFFSET_END:
+		case OFFSET_END:
 
-				mode = 2;
-				break;
-
-			default:
-
-				error = ERROR_ACTION_NOT_KNOWN;
+			if(smba_getattr(fn->fn_File,&st,&error) < 0)
+			{
+				error = MapErrnoToIoErr(error);
 				goto out;
-		}
+			}
 
-		error = smba_seek (fn->fn_File, position, mode, (off_t *) &offset);
-		if(error < 0)
-		{
-			error = MapErrnoToIoErr(error);
+			offset = st.size + position;
+			break;
+
+		default:
+
+			error = ERROR_ACTION_NOT_KNOWN;
 			goto out;
-		}
 	}
-	#endif
 
-	/* olsen: This is the original implementation. */
-	#if 0
+	if(offset < 0)
 	{
-		smba_stat_t st;
-
-		error = smba_getattr(fn->fn_File,&st);
-		if(error < 0)
-		{
-			error = MapErrnoToIoErr(error);
-			goto out;
-		}
-
-		offset = fn->fn_Offset;
-
-		switch(mode)
-		{
-			case OFFSET_BEGINNING:
-
-				offset = position;
-				break;
-
-			case OFFSET_CURRENT:
-
-				offset += position;
-				break;
-
-			case OFFSET_END:
-
-				offset = st.size + position;
-				break;
-
-			default:
-
-				error = ERROR_ACTION_NOT_KNOWN;
-				goto out;
-		}
-
-		if(offset < 0 || offset > st.size)
-		{
-			error = ERROR_SEEK_ERROR;
-			goto out;
-		}
+		error = ERROR_SEEK_ERROR;
+		goto out;
 	}
-	#endif
-
-	/* olsen: This is a mix of the two above. First we calculate the absolute
-	 *        position, then seek to that position. The SMB server is supposed
-	 *        to do its housekeeping before the position is changed. I wish this
-	 *        worked differently, but it seems we've got the best of both worlds
-	 *        here...
-	 */
-	#if 1
-	{
-		smba_stat_t st;
-
-		switch(mode)
-		{
-			case OFFSET_BEGINNING:
-
-				offset = position;
-				break;
-
-			case OFFSET_CURRENT:
-
-				offset = fn->fn_Offset + position;
-				break;
-
-			case OFFSET_END:
-
-				if(smba_getattr(fn->fn_File,&st,&error) < 0)
-				{
-					error = MapErrnoToIoErr(error);
-					goto out;
-				}
-
-				offset = st.size + position;
-				break;
-
-			default:
-
-				error = ERROR_ACTION_NOT_KNOWN;
-				goto out;
-		}
-
-		if(offset < 0)
-		{
-			error = ERROR_SEEK_ERROR;
-			goto out;
-		}
-
-		if(smba_seek (fn->fn_File, offset, 0, (off_t *) &offset, &error) < 0)
-		{
-			error = MapErrnoToIoErr(error);
-			goto out;
-		}
-	}
-	#endif
 
 	error = OK;
 
@@ -5768,10 +5660,11 @@ Action_SetFileSize(
 	LONG				mode,
 	LONG *				error_ptr)
 {
-	smba_stat_t st;
 	LONG result = -1;
+	smba_stat_t st;
 	int error;
 	long offset;
+	dword size;
 
 	ENTER();
 
@@ -5818,12 +5711,9 @@ Action_SetFileSize(
 		goto out;
 	}
 
-	st.atime	= -1;
-	st.ctime	= -1;
-	st.mtime	= -1;
-	st.size		= offset;
+	size = (dword)offset;
 
-	if(smba_setattr(fn->fn_File,&st,&error) < 0)
+	if(smba_setattr(fn->fn_File,NULL,&size,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5923,7 +5813,7 @@ Action_SetDate(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5937,12 +5827,13 @@ Action_SetDate(
 
 	seconds = (ds->ds_Days * 24 * 60 + ds->ds_Minute) * 60 + (ds->ds_Tick / TICKS_PER_SECOND);
 
+	memset(&st,0,sizeof(st));
+
 	st.atime = -1;
 	st.ctime = -1;
 	st.mtime = seconds + UNIX_TIME_OFFSET + GetTimeZoneDelta();
-	st.size = -1;
 
-	if(smba_setattr(file,&st,&error) < 0)
+	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6144,7 +6035,7 @@ Action_ParentFH(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6219,7 +6110,7 @@ Action_CopyDirFH(
 
 	SHOWSTRING(full_name);
 
-	if (smba_open(ServerData,full_name,full_name_size,&ln->ln_File,&error) < 0)
+	if (smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6636,7 +6527,7 @@ Action_SetComment(
 
 	SHOWSTRING(full_name);
 
-	if (smba_open(ServerData,full_name,full_name_size,&file,&error) < 0)
+	if (smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;

@@ -39,7 +39,10 @@ typedef struct
 
 /****************************************************************************/
 
+VOID multiply_32_by_32_to_64(ULONG ab,ULONG cd,QUAD * product);
+ULONG multiply_64_by_32_to_64(const QUAD * const abcd,ULONG ef,QUAD * abcdef);
 ULONG divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient);
+ULONG add_64_plus_64_to_64(const QUAD * const a,const QUAD * const b,QUAD * ab);
 ULONG subtract_64_from_64_to_64(const QUAD * const minuend,const QUAD * const subtrahend,QUAD * difference);
 
 /****************************************************************************/

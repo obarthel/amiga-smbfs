@@ -65,6 +65,12 @@ struct smb_server
 
 	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
 	int timeout;
+
+	/* olsen (2018-05-14): Don't retry establishing a server connection. */
+	int dont_retry;
+
+	/* olsen (2018-05-18): Override the "Native OS" name passed to the server. */
+	char * native_os;
 };
 
 #define NEGOTIATE_USER_SECURITY 0x01	/* If set, the server supports
@@ -82,5 +88,11 @@ struct smb_server
 
 #define CAP_RAW_MODE 0x00000001	/* The server supports SMB_COM_WRITE_RAW
 								   and SMB_COM_READ_RAW requests. */
+
+#define CAP_LARGE_READX 0x00004000	/* The server permits SMB_COM_READ_ANDX
+									   to read up to 65535 bytes. */
+
+#define CAP_LARGE_WRITEX 0x00008000	/* The server permits SMB_COM_WRITE_ANDX
+									   to write up to 65535 bytes. */
 
 #endif
