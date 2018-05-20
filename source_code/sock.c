@@ -641,8 +641,18 @@ smb_receive_trans2 (
 
 	ASSERT( error_ptr != NULL );
 
-	(*data_len_ptr) = (*param_len_ptr) = 0;
-	(*param_ptr) = (*data_ptr) = NULL;
+	/* Careful: any of the "pass by reference" parameters may be NULL. */
+	if(data_len_ptr != NULL)
+		(*data_len_ptr) = 0;
+
+	if(param_len_ptr != NULL)
+		(*param_len_ptr) = 0;
+
+	if(param_ptr != NULL)
+		(*param_ptr) = NULL;
+
+	if(data_ptr != NULL)
+		(*data_ptr) = NULL;
 
 	result = smb_receive (server, command, sock_fd, NULL, 0, error_ptr);
 	if (result < 0)
@@ -782,13 +792,19 @@ smb_receive_trans2 (
 		}
 	}
 
-	(*param_ptr) = param;
-	(*param_len_ptr) = param_len;
-	param = NULL;
+	if(param_ptr != NULL && param_len_ptr != NULL)
+	{
+		(*param_ptr) = param;
+		(*param_len_ptr) = param_len;
+		param = NULL;
+	}
 
-	(*data_ptr) = data;
-	(*data_len_ptr) = data_len;
-	data = NULL;
+	if(data_ptr != NULL && data_len_ptr != NULL)
+	{
+		(*data_ptr) = data;
+		(*data_len_ptr) = data_len;
+		data = NULL;
+	}
 
 	result = 0;
 

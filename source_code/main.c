@@ -383,9 +383,9 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 			result = swap_stack_and_call(stk,(APTR)main);
 
 			/* Testing: figure out how much stack space was used. */
-			/* Printf("stack size used = %ld\n",stack_usage_exit(stk)); */
+			/* Printf("stack size used = %lu\n",stack_usage_exit(stk)); */
 		}
-		/* Sufficient stack space is available. */
+		/* Sufficient stack space should be available. */
 		else
 		{
 			result = main();
@@ -486,16 +486,16 @@ stack_usage_init(struct StackSwapStruct * stk)
 
 /* Testing: Check how much stack space was used by looking at where
  * the test pattern previously written to the stack memory was
- * overwritten. Returns how much space was used in bytes.
+ * overwritten. Returns how much space was used (in bytes).
  */
 STATIC ULONG
 stack_usage_exit(const struct StackSwapStruct * stk)
 {
 	const UBYTE * m = (const UBYTE *)stk->stk_Lower;
 	size_t stack_size = ((ULONG)stk->stk_Upper - (ULONG)stk->stk_Lower);
-	size_t total,i;
+	size_t unused_stack_space,i;
 
-	total = 0;
+	unused_stack_space = 0;
 
 	/* Figure out how much of the stack was used by checking
 	 * if the fill pattern was overwritten.
@@ -508,10 +508,10 @@ stack_usage_exit(const struct StackSwapStruct * stk)
 		if(i > sizeof(LONG) && m[i] != STACK_FILL_COOKIE)
 			break;
 
-		total++;
+		unused_stack_space++;
 	}
 
-	return(total);
+	return(stack_size - unused_stack_space);
 }
 
 /****************************************************************************/

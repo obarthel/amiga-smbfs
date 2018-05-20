@@ -1593,3 +1593,11 @@ smbfs 1.133 (20.5.2018)
   if the protection fron writing was in effect, too. Now we have
   a functionally identical mapping which hinges only on the
   delete protection.
+
+
+smbfs 1.134 (20.5.2018)
+
+- Ouch, so smb_trans2_request() no longer has to return any transaction
+  parameter or data response information, but the code still updated the
+  respective pointer and length information passed as pointers, even
+  if these pointers were NULL...
