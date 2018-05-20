@@ -103,6 +103,13 @@
 
 /*****************************************************************************/
 
+/* This is for testing if the message exchange still works if the
+ * server claims to accept less than 65535 bytes per message.
+ */
+/*#define OVERRIDE_SERVER_MAX_BUFFER_SIZE 16644*/
+
+/*****************************************************************************/
+
 static void smb_printerr(int class, int num);
 static int smb_proc_reconnect (struct smb_server *server, int * error_ptr);
 
@@ -581,6 +588,7 @@ smb_errno (int errcls, int error)
 			{ ERRbadshare,		ETXTBSY },
 			{ ERRlock,			EDEADLK },
 			{ ERRfilexists,		EEXIST },
+			{ ERRinvalidparam,	EINVAL },
 			{ 145,				ENOTEMPTY},/* Directory is not empty; this is what Samba reports (2016-04-23) */
 			{ 183,				EEXIST },/* This next error seems to occur on an mv when the destination exists ("object name collision") */
 			{ -1,				-1 }
@@ -891,10 +899,10 @@ smb_setup_header (struct smb_server *server, byte command, int wct, int bcc)
 	ASSERT( wct >= 0 );
 	ASSERT( bcc >= 0 );
 
-	ASSERT( smb_frame_size <= (int)server->transmit_buffer_size );
+	ASSERT( smb_frame_size <= (int)server->transmit_buffer_allocation_size );
 
-	if(smb_frame_size > (int)server->transmit_buffer_size)
-		LOG (("Danger: total packet size (%ld) > transmit buffer allocation (%ld)!\n", smb_frame_size, server->transmit_buffer_size));
+	if(smb_frame_size > (int)server->transmit_buffer_allocation_size)
+		LOG (("Danger: total packet size (%ld) > transmit buffer allocation (%ld)!\n", smb_frame_size, server->transmit_buffer_allocation_size));
 
 	/* This sets up the NetBIOS session header. 'smb_frame_size'
 	 * is the amount of data that follows the header, in this case
@@ -934,7 +942,7 @@ smb_setup_header (struct smb_server *server, byte command, int wct, int bcc)
 	LOG (("total packet size=%ld, max receive size=%ld, packet buffer size=%ld\n",
 		p + sizeof(word) + bcc - server->transmit_buffer,
 		server->max_recv,
-		server->transmit_buffer_size
+		server->transmit_buffer_allocation_size
 	));
 
 	return p + sizeof(word);
@@ -957,7 +965,7 @@ smb_payload_size(const struct smb_server *server, int wct, int bcc)
  ****************************************************************************/
 
 int
-smb_proc_open (struct smb_server *server, const char *pathname, int len, int writable, int truncate, struct smb_dirent *entry,int * error_ptr)
+smb_proc_open (struct smb_server *server, const char *pathname, int len, int writable, int truncate_file, struct smb_dirent *entry,int * error_ptr)
 {
 	int result;
 	char *p;
@@ -970,9 +978,10 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 	if (server->protocol >= PROTOCOL_NT1)
 	{
-		int desired_access;
-		int share_access;
-		int create_disposition;
+		dword desired_access;
+		dword share_access;
+		dword create_disposition;
+		dword create_options;
 		dword ext_file_attributes;
 		dword end_of_file_low;
 		dword end_of_file_high;
@@ -1006,10 +1015,16 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		share_access = FILE_SHARE_READ|FILE_SHARE_WRITE;
 
-		if(writable && truncate)
-			create_disposition = FILE_OVERWRITE_IF;
+		if(writable && truncate_file)
+		{
+			create_disposition	= FILE_OVERWRITE_IF;
+			create_options		= FILE_NON_DIRECTORY_FILE | FILE_RANDOM_ACCESS;
+		}
 		else
-			create_disposition = FILE_OPEN;
+		{
+			create_disposition	= FILE_OPEN;
+			create_options		= 0;
+		}
 
 		while(TRUE)
 		{
@@ -1027,10 +1042,10 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			params = smb_encode_dword(params, desired_access);		/* DesiredAccess */
 			params = smb_encode_dword(params, 0);					/* AllocationSize (low) */
 			params = smb_encode_dword(params, 0);					/* AllocationSize (high) */
-			params = smb_encode_dword(params, o_attr);				/* ExtFileAttributes */
+			params = smb_encode_dword(params, ATTR_NORMAL);			/* ExtFileAttributes */
 			params = smb_encode_dword(params, share_access);		/* ShareAccess */
 			params = smb_encode_dword(params, create_disposition);	/* CreateDisposition */
-			params = smb_encode_dword(params, 0);					/* CreateOptions */
+			params = smb_encode_dword(params, create_options);		/* CreateOptions */
 			params = smb_encode_dword(params, SEC_ANONYMOUS);		/* ImpersonationLevel */
 			(void) smb_encode_byte(params, 0);						/* SecurityFlags */
 
@@ -1692,7 +1707,16 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 
  retry:
 
-	if (server->protocol >= PROTOCOL_LANMAN2)
+	/* olsen (2018-05-20): The TRANSACT2_MKDIR command does not seem to
+	 *                     work correctly with Samba 3.0.25, although the
+	 *                     implementation appears to be sound (it follows
+	 *                     both the SNIA and Microsoft CIFS documentation,
+	 *                     as well as the 1996 Microsoft SMB file sharing
+	 *                     protocol documentation). The extended attributes
+	 *                     are documented as being optional, and we omit
+	 *                     them here.
+	 */
+	if (FALSE && server->protocol >= PROTOCOL_LANMAN2)
 	{
 		unsigned char *outbuf = server->transmit_buffer;
 
@@ -1702,7 +1726,7 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 
 		WSET (outbuf, smb_tpscnt, 4 + len+1);								/* TotalParameterCount */
 		WSET (outbuf, smb_tdscnt, 0);										/* TotalDataCount */
-		WSET (outbuf, smb_mprcnt, 0);										/* MaxParameterCount */
+		WSET (outbuf, smb_mprcnt, 2);										/* MaxParameterCount */
 		WSET (outbuf, smb_mdrcnt, server->max_recv);						/* MaxDataCount */
 		WSET (outbuf, smb_msrcnt, 0);										/* MaxSetupCount+Reserved1 */
 		WSET (outbuf, smb_flags, 0);										/* Flags */
@@ -1891,7 +1915,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 {
 	char *p;
 	char *buf;
-	int result = 0;
+	int result;
 	int i;
 	int first, total_count;
 	struct smb_dirent *current_entry;
@@ -1900,7 +1924,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 	char status[SMB_STATUS_SIZE];
 	int entries_asked = (server->max_recv - 100) / SMB_DIRINFO_SIZE;
 	int dirlen = strlen (path);
-	char * mask = NULL;
+	char * mask;
 
 	mask = malloc(dirlen + 4 + 1);
 	if (mask == NULL)
@@ -2333,7 +2357,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	unsigned char *outbuf = server->transmit_buffer;
 
 	int dirlen = strlen (path) + 2 + 1;
-	char *mask = NULL;
+	char *mask;
 	int masklen;
 	
 	int entry_length;
@@ -3154,10 +3178,10 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 	}
 	else
 	{
-		word total;
-		word allocblocks;
-		word blocksize;
-		word free;
+		word total_units;
+		word sectors_per_unit;
+		word bytes_per_sector;
+		word free_units;
 
 		ASSERT( smb_payload_size(server, 0, 0) >= 0 );
 
@@ -3173,15 +3197,15 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 		}
 
 		p = SMB_VWV (server->transmit_buffer);
-		p = smb_decode_word (p, &total);
-		p = smb_decode_word (p, &allocblocks);
-		p = smb_decode_word (p, &blocksize);
-		(void) smb_decode_word (p, &free);
+		p = smb_decode_word (p, &total_units);
+		p = smb_decode_word (p, &sectors_per_unit);
+		p = smb_decode_word (p, &bytes_per_sector);
+		(void) smb_decode_word (p, &free_units);
 
-		attr->total			= total;
-		attr->allocblocks	= allocblocks;
-		attr->blocksize		= blocksize;
-		attr->free			= free;
+		attr->total			= total_units;
+		attr->allocblocks	= sectors_per_unit;
+		attr->blocksize		= bytes_per_sector;
+		attr->free			= free_units;
 	}
 
  out:
@@ -3276,7 +3300,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	else if (0 < server->mount_data.given_max_xmit && server->mount_data.given_max_xmit < 65536)
 		given_max_xmit = server->mount_data.given_max_xmit;
 	else
-		given_max_xmit = 65534; /* 2014/10/4 fm: use 65534 since some NASs report -1 but return max of 65534 bytes */
+		given_max_xmit = 65535;
 
 	if (server->max_recv <= 0)
 		server->max_recv = given_max_xmit;
@@ -3425,6 +3449,13 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 			p = smb_decode_dword(p, &max_buffer_size);
 			SHOWVALUE (max_buffer_size);
+
+			#if defined(OVERRIDE_SERVER_MAX_BUFFER_SIZE)
+			{
+				max_buffer_size = OVERRIDE_SERVER_MAX_BUFFER_SIZE;
+			}
+			#endif /* OVERRIDE_SERVER_MAX_BUFFER_SIZE */
+
 			p = smb_decode_dword(p, &server->max_raw_size);
 			SHOWVALUE (server->max_raw_size);
 			p = smb_decode_dword(p, &server_sesskey);
@@ -3445,6 +3476,13 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			server->security_mode = BVAL(packet, smb_vwv1);
 			max_buffer_size = WVAL (packet, smb_vwv2);
 			SHOWVALUE (max_buffer_size);
+
+			#if defined(OVERRIDE_SERVER_MAX_BUFFER_SIZE)
+			{
+				max_buffer_size = OVERRIDE_SERVER_MAX_BUFFER_SIZE;
+			}
+			#endif /* OVERRIDE_SERVER_MAX_BUFFER_SIZE */
+
 			/* Maximum raw read/write size is fixed to 65535 bytes. */
 			server->max_raw_size = 65535;
 			blkmode = WVAL (packet, smb_vwv5);
@@ -3617,6 +3655,13 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	else
 	{
 		max_buffer_size = server->max_buffer_size;
+
+		#if defined(OVERRIDE_SERVER_MAX_BUFFER_SIZE)
+		{
+			max_buffer_size = OVERRIDE_SERVER_MAX_BUFFER_SIZE;
+		}
+		#endif /* OVERRIDE_SERVER_MAX_BUFFER_SIZE */
+
 		server->capabilities = 0;
 
 		password_len = strlen(server->mount_data.password)+1;
@@ -3704,6 +3749,12 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		p = smb_decode_word (p, &decoded_max_xmit);
 
 		max_buffer_size = decoded_max_xmit;
+
+		#if defined(OVERRIDE_SERVER_MAX_BUFFER_SIZE)
+		{
+			max_buffer_size = OVERRIDE_SERVER_MAX_BUFFER_SIZE;
+		}
+		#endif /* OVERRIDE_SERVER_MAX_BUFFER_SIZE */
 
 		(void) smb_decode_word (p, &server->tid);
 	}

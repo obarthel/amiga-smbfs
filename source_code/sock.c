@@ -570,7 +570,7 @@ smb_receive (struct smb_server *server, int command, int sock_fd, void * input_p
 	int result;
 
 	ASSERT( error_ptr != NULL );
-	ASSERT( server->max_recv <= server->transmit_buffer_size );
+	ASSERT( server->max_recv <= server->transmit_buffer_allocation_size );
 
 	result = smb_receive_raw (
 		server,

@@ -46,7 +46,7 @@
 #define ERRpaused				81
 #define ERRmsgoff				82
 #define ERRnoroom				83
-#define ERRrmuns				87
+#define ERRinvalidparam			87
 #define ERRtimeout				88
 #define ERRnoresource			89
 #define ERRtoomanyuids			90
@@ -292,6 +292,20 @@
 #define TRANSACT2_FINDNOTIFYNEXT	12
 #define TRANSACT2_MKDIR				13	/* TRANS2_CREATE_DIRECTORY */
 
+/* Extended file attributes */
+#define ATTR_READONLY			0x00000001
+#define ATTR_HIDDEN				0x00000002
+#define ATTR_SYSTEM				0x00000004
+#define ATTR_DIRECTORY			0x00000010
+#define ATTR_ARCHIVE			0x00000020
+#define ATTR_NORMAL				0x00000080
+#define ATTR_TEMPORARY			0x00000100
+#define ATTR_POSIX_SEMANTICS	0x01000000
+#define ATTR_SEQUENTIAL_SCAN	0x08000000
+#define ATTR_RANDOM_ACCESS		0x10000000
+#define ATTR_NO_BUFFERING		0x20000000
+#define ATTR_WRITE_THROUGH		0x80000000
+
 /* These are used by SMBntcreateX */
 #define FILE_READ_DATA			0x00000001
 #define FILE_WRITE_DATA			0x00000002
@@ -304,7 +318,11 @@
 #define FILE_SHARE_READ			0x00000001
 #define FILE_SHARE_WRITE		0x00000002
 
+#define FILE_NON_DIRECTORY_FILE	0x00000040
+#define FILE_RANDOM_ACCESS		0x00000800
+
 #define SEC_ANONYMOUS			0x00000000
+#define SEC_IDENTIFY			0x00000001
 
 #define FILE_OPEN				0x00000001
 #define FILE_CREATE				0x00000002

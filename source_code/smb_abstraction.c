@@ -966,8 +966,8 @@ int
 smba_setattr (smba_file_t * f, const smba_stat_t * data, const dword * size_ptr, int * error_ptr)
 {
 	BOOL times_changed = FALSE;
+	int result = 0;
 	dword attrs;
-	int result;
 
 	if (data != NULL)
 	{

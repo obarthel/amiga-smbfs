@@ -1568,3 +1568,28 @@ smbfs 1.132 (19.5.2018)
 - Changing the attributes of a file/directory (as in: flip the
   "read-only" and "was archived" bits) is now distinct from
   changing the size of a file.
+
+
+smbfs 1.133 (20.5.2018)
+
+- The transmit buffer overflow check no longer warns about
+  an overflow for the SMB_COM_READ_ANDX command.
+
+- Reinstated the SMB_COM_CREATE_DIRECTORY command, since the
+  TRANS2_CREATE_DIRECTORY command (recommended) does not appear
+  to work with Samba 3.0.25.
+
+- Creating a new file (through Open(..,MODE_NEWFILE)) will no longer
+  end up creating a hidden file on the server. For good measure, I
+  also added creation options to the effect that the object to be
+  created must not be a directory, and that it is intended for
+  random access.
+
+- The "read only" attribute now maps to the Amiga "protected from
+  deletion attribute" only. Previously, a "read only" file on the
+  server would be reported as being both protected from writing
+  and from deletion. On the Amiga side, protecting a file from
+  deletion only changed the file on the server to "read only"
+  if the protection fron writing was in effect, too. Now we have
+  a functionally identical mapping which hinges only on the
+  delete protection.

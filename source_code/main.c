@@ -27,6 +27,7 @@
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
  * Samba 4.6.7: smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //ubuntu-17-olaf/test
+ * Samba 4.7.6: smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //ubuntu-18-olaf/test
  * Samba 3.0.25: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 user=olsen password=... volume=olsen //192.168.1.118/olsen
  */
 
@@ -1144,7 +1145,7 @@ main(VOID)
 
 /****************************************************************************/
 
-LONG VARARGS68K
+static LONG VARARGS68K
 LocalFPrintf(BPTR output, const UBYTE * format, ...)
 {
 	va_list args;
@@ -3498,11 +3499,7 @@ Action_DeleteObject(
 	FreeMemory(full_parent_name);
 
 	if(file != NULL)
-	{
-		int ignored_error;
-
 		smba_close(file,&ignored_error);
-	}
 
 	(*error_ptr) = error;
 
@@ -3674,11 +3671,7 @@ Action_CreateDir(
  out:
 
 	if(dir != NULL)
-	{
-		int ignored_error;
-
 		smba_close(dir,&ignored_error);
-	}
 
 	FreeMemory(dir_name);
 
@@ -4091,7 +4084,7 @@ Action_SetProtect(
 	st.ctime = -1;
 	st.mtime = -1;
 
-	if((mask & (FIBF_WRITE|FIBF_DELETE)) != (FIBF_WRITE|FIBF_DELETE))
+	if((mask & FIBF_DELETE) != 0)
 	{
 		SHOWMSG("write protection enabled");
 		st.is_wp = TRUE;
@@ -4572,7 +4565,7 @@ Action_ExamineObject(
 									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
 			if(st.is_wp)
-				fib->fib_Protection ^= (FIBF_OTR_WRITE|FIBF_OTR_DELETE|FIBF_GRP_WRITE|FIBF_GRP_DELETE|FIBF_WRITE|FIBF_DELETE);
+				fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
 
 			/* Careful: the 'archive' attribute has exactly the opposite
 			 *          meaning in the Amiga and the SMB worlds.
