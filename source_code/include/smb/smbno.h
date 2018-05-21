@@ -306,6 +306,37 @@
 #define ATTR_NO_BUFFERING		0x20000000
 #define ATTR_WRITE_THROUGH		0x80000000
 
+/* These are used by SMBsesssetupX */
+#define NEGOTIATE_USER_SECURITY 0x01	/* If set, the server supports
+										   only user level access control.
+										   If clear, the server supports
+										   only share level access
+										   control. */
+
+#define NEGOTIATE_ENCRYPT_PASSWORDS 0x02	/* If set, the server supports
+											   challenge/response
+											   authentication. If clear,
+											   the server supports only
+											   plaintext password
+											   authentication. */
+
+
+#define CAP_RAW_MODE 0x00000001	/* The server supports SMB_COM_WRITE_RAW
+								 * and SMB_COM_READ_RAW requests.
+								 */
+
+#define CAP_LARGE_READX 0x00004000	/* The server permits SMB_COM_READ_ANDX
+									 * to read up to 65535 bytes.
+									 */
+
+#define CAP_LARGE_WRITEX 0x00008000	/* The server permits SMB_COM_WRITE_ANDX
+									 * to write up to 65535 bytes.
+									 */
+
+#define CAP_LARGE_FILES			0x00000008
+#define CAP_NT_FIND				0x00000200
+#define CAP_UNIX				0x00800000
+
 /* These are used by SMBntcreateX */
 #define FILE_READ_DATA			0x00000001
 #define FILE_WRITE_DATA			0x00000002
@@ -317,7 +348,7 @@
 
 #define FILE_SHARE_READ			0x00000001
 #define FILE_SHARE_WRITE		0x00000002
-
+#define FILE_SHARE_DELETE		0x00000004
 #define FILE_NON_DIRECTORY_FILE	0x00000040
 #define FILE_RANDOM_ACCESS		0x00000800
 

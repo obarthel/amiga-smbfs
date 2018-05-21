@@ -73,26 +73,4 @@ struct smb_server
 	char * native_os;
 };
 
-#define NEGOTIATE_USER_SECURITY 0x01	/* If set, the server supports
-										   only user level access control.
-										   If clear, the server supports
-										   only share level access
-										   control. */
-
-#define NEGOTIATE_ENCRYPT_PASSWORDS 0x02	/* If set, the server supports
-											   challenge/response
-											   authentication. If clear,
-											   the server supports only
-											   plaintext password
-											   authentication. */
-
-#define CAP_RAW_MODE 0x00000001	/* The server supports SMB_COM_WRITE_RAW
-								   and SMB_COM_READ_RAW requests. */
-
-#define CAP_LARGE_READX 0x00004000	/* The server permits SMB_COM_READ_ANDX
-									   to read up to 65535 bytes. */
-
-#define CAP_LARGE_WRITEX 0x00008000	/* The server permits SMB_COM_WRITE_ANDX
-									   to write up to 65535 bytes. */
-
 #endif

@@ -841,15 +841,16 @@ smb_request_ok (struct smb_server *s, int command, int wct, int bcc, int * error
 }
 
 /* smb_retry: This function should be called when smb_request_ok has
-   indicated an error. If the error was indicated because the
-   connection was killed, we try to reconnect. If smb_retry returns 0,
-   the error was indicated for another reason, so a retry would not be
-   of any use. */
+ * indicated an error. If the error was indicated because the
+ * connection was killed, we try to reconnect. If smb_retry returns FALSE,
+ * the error was indicated for another reason, so a retry would not be
+ * of any use.
+ */
 static int
 smb_retry (struct smb_server *server)
 {
+	int success = FALSE;
 	int ignored_error;
-	int result = 0;
 
 	if (server->state == CONN_VALID)
 		goto out;
@@ -868,11 +869,11 @@ smb_retry (struct smb_server *server)
 	}
 
 	server->state = CONN_VALID;
-	result = 1;
+	success = TRUE;
 
  out:
 
-	return result;
+	return success;
 }
 
 /* smb_setup_header: We completely set up the packet. You only have to
@@ -990,12 +991,6 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		SHOWMSG("we'll try SMB_COM_NT_CREATE_ANDX");
 
-		if((*pathname) == '\\')
-		{
-			pathname++;
-			len--;
-		}
-
 		ASSERT( smb_payload_size(server, 24, len+1) >= 0 );
 
 		if(writable)
@@ -1013,7 +1008,12 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		// desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES;
 
-		share_access = FILE_SHARE_READ|FILE_SHARE_WRITE;
+		/* Allows others to read, write and delete the file just created.
+		 * This may be useful if smbfs hangs or you need to restart your
+		 * System and you need to clean up after the file you just
+		 * created.
+		 */
+		share_access = FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
 
 		if(writable && truncate_file)
 		{
@@ -1091,7 +1091,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		entry->size = end_of_file_low;
 
-		entry->opened = 1;
+		entry->opened = TRUE;
 
 		goto out;
 	}
@@ -1148,7 +1148,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 	entry->attr = WVAL (buf, smb_vwv1);
 	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
 	entry->size = DVAL (buf, smb_vwv4);
-	entry->opened = 1;
+	entry->opened = TRUE;
 
  out:
 
@@ -1659,7 +1659,7 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 			goto out;
 	}
 
-	entry->opened = 1;
+	entry->opened = TRUE;
 	entry->fileid = WVAL (buf, smb_vwv0);
 
 	smb_proc_close (server, entry->fileid, entry->mtime, error_ptr);
@@ -1945,13 +1945,13 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 
  retry:
 
-	first = 1;
+	first = TRUE;
 	total_count = 0;
 	current_entry = entry;
 
-	while (1)
+	while (TRUE)
 	{
-		if (first == 1)
+		if (first)
 		{
 			ASSERT( smb_payload_size(server, 2, 5 + strlen (mask)) >= 0 );
 
@@ -1994,7 +1994,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 		p = smb_decode_word (p, &count); /* vwv[0] = count-returned */
 		p = smb_decode_word (p, &bcc);
 
-		first = 0;
+		first = FALSE;
 
 		if (count <= 0)
 		{
@@ -2826,7 +2826,7 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	p += 2 * sizeof(dword); /* LastChangeTime */
 
 	p = smb_decode_dword(p, &ext_file_attributes);
-	entry->attr = ext_file_attributes & 0xffff;
+	entry->attr = ext_file_attributes;
 
 	p += sizeof(dword); /* Reserved */
 
@@ -3571,6 +3571,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		{
 			const char *native_os = server->native_os != NULL ? server->native_os : "AmigaOS";
 			const char *native_lanman = VERS;
+			dword capabilities;
 
 			SHOWMSG("server->protocol >= PROTOCOL_NT1");
 
@@ -3578,15 +3579,18 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 			smb_setup_header (server, SMBsesssetupX, 13, user_len + password_len + nt_password_len + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1);
 
-			WSET (packet, smb_vwv0, 0xff);
-			WSET (packet, smb_vwv2, given_max_xmit);
-			WSET (packet, smb_vwv3, 2);
-			WSET (packet, smb_vwv4, 0); /* server->pid */
-			DSET (packet, smb_vwv5, server_sesskey);
-			WSET (packet, smb_vwv7, password_len);
-			WSET (packet, smb_vwv8, nt_password_len);
-			DSET (packet, smb_vwv9, 0);	/* reserved */
-			DSET (packet, smb_vwv11, server->capabilities & 0x00800000);	/* capabilities: Unix support. */
+			capabilities = CAP_RAW_MODE|CAP_LARGE_READX|CAP_LARGE_WRITEX|CAP_NT_FIND|CAP_LARGE_FILES;
+
+			WSET (packet, smb_vwv0, 0xff);				/* AndXCommand+AndXReserved */
+			WSET (packet, smb_vwv1, 0);					/* AndXOffset */
+			WSET (packet, smb_vwv2, given_max_xmit);	/* MaxBufferSize */
+			WSET (packet, smb_vwv3, 2);					/* MaxMpxCount */
+			WSET (packet, smb_vwv4, 0);					/* VcNumber */
+			DSET (packet, smb_vwv5, server_sesskey);	/* SessionKey */
+			WSET (packet, smb_vwv7, password_len);		/* OEMPasswordLen */
+			WSET (packet, smb_vwv8, nt_password_len);	/* UnicodePasswordLen */
+			DSET (packet, smb_vwv9, 0);					/* Reserved */
+			DSET (packet, smb_vwv11, capabilities);		/* Capabilities */
 
 			p = SMB_BUF (packet);
 

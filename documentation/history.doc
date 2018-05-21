@@ -1590,7 +1590,7 @@ smbfs 1.133 (20.5.2018)
   server would be reported as being both protected from writing
   and from deletion. On the Amiga side, protecting a file from
   deletion only changed the file on the server to "read only"
-  if the protection fron writing was in effect, too. Now we have
+  if the protection from writing was in effect, too. Now we have
   a functionally identical mapping which hinges only on the
   delete protection.
 
@@ -1601,3 +1601,51 @@ smbfs 1.134 (20.5.2018)
   parameter or data response information, but the code still updated the
   respective pointer and length information passed as pointers, even
   if these pointers were NULL...
+
+
+smbfs 1.135 (21.5.2018)
+
+- Creating a new file failed to close it after having just created it.
+  Because file IDs are 16 bit integers, at some point the SMB server
+  would have run out of IDs. It was reported to me that one SMB server
+  may have refused to assign any further file IDs after 500 files were
+  created.
+
+- When creating a file using SMB_COM_CREATE, the read-only, archived and
+  system attributes are no longer set. We just create a "normal" file.
+
+- If the connection to the server is no longer reliable, it will
+  actually get closed now, to be reopened later (maybe).
+
+- Added a check to verify that prior to deleting a file or directory,
+  all currently active file handles referring to the same file can
+  be closed. This also goes for renaming files.
+
+- Added a safety check to make sure that a file/directory which has
+  already been opened is not opened again. Note that this should not
+  strictly be necessary, but the current smbfs "architecture" identifies
+  files and directories internally through their fully qualified
+  path names rather than their file IDs.
+
+- During session setup smbfs now properly reports that it supports
+  raw read/write mode, large readx/writex mode, the TRANS2_FIND_FIRST2
+  and TRANS2_FIND_NEXT2 commands and 64 bit file offsets (sort of).
+
+- The length limits of the server and client names (16 characters) are
+  now only enforced if NetBIOS session setup is used (which is disabled
+  by default). The length of the workgroup/domain name is not checked
+  any more (maximum length was 15 characters). Note that length limits
+  may still exist which the server enforces and complains about.
+
+- When creating new files the sharing permissions now include deletion,
+  too, just in case you need to remove debris after smbfs had to be
+  shut down, or your Amiga needed to be restarted.
+
+- The "pure" file protection bit is no longer associated with the
+  "system" attribute of a file or directory. This leaves only the
+  "read-only" and "archived" attributes for manipulation.
+
+- Connecting and reconnecting to the server now obeys the same timeout
+  restrictions as the read and write operations. Should the server
+  communication fail because of a timeout, reestablishing a connection
+  to the server should no longer hang indefinitely.

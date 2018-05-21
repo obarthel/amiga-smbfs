@@ -827,6 +827,8 @@ smb_release (struct smb_server *server)
 		CloseSocket (server->mount_data.fd);
 		server->mount_data.fd = -1;
 	}
+
+	server->state = CONN_INVALID;
 }
 
 int
@@ -842,6 +844,8 @@ smb_connect (struct smb_server *server, int * error_ptr)
 		result = socket (AF_INET, SOCK_STREAM, 0);
 		if (result < 0)
 		{
+			server->state = CONN_INVALID;
+
 			(*error_ptr) = errno;
 
 			goto out;
@@ -852,12 +856,117 @@ smb_connect (struct smb_server *server, int * error_ptr)
 
 	LOG(("connecting to server %s\n", Inet_NtoA(server->mount_data.addr.sin_addr.s_addr)));
 
-	result = connect (server->mount_data.fd, (struct sockaddr *)&server->mount_data.addr, sizeof(struct sockaddr_in));
-	if(result < 0)
+	/* Wait a certain time period for the connection attempt to succeed? */
+	if(server->timeout > 0)
 	{
-		(*error_ptr) = errno;
+		int non_blocking_io;
+		struct timeval tv;
+		fd_set write_fds;
 
-		goto out;
+		/* Switch the socket into non-blocking mode, so that we
+		 * may start the connection attempt and wait for it to
+		 * either succeed or fail.
+		 */
+		non_blocking_io = TRUE;
+
+		result = IoctlSocket(server->mount_data.fd, FIONBIO, &non_blocking_io);
+		if(result < 0)
+		{
+			server->state = CONN_INVALID;
+
+			(*error_ptr) = errno;
+
+			goto out;
+		}
+
+		FD_ZERO(&write_fds);
+		FD_SET(server->mount_data.fd,&write_fds);
+
+		memset(&tv,0,sizeof(tv));
+
+		tv.tv_secs = server->timeout;
+
+		/* Try to establish the connection and don't hang around until
+		 * it either succeeds or fails.
+		 */
+		connect (server->mount_data.fd, (struct sockaddr *)&server->mount_data.addr, sizeof(struct sockaddr_in));
+
+		LOG(("will wait for up to %ld seconds for connection attempt to succeed\n",server->timeout));
+
+		/* Wait for the connection status to change (success/failure), or until
+		 * the timeout has elapsed.
+		 */
+		result = WaitSelect(server->mount_data.fd+1, NULL, &write_fds, NULL, &tv, NULL);
+
+		/* Connection status is known? */
+		if (result == 1)
+		{
+			socklen_t len;
+			int error;
+
+			error = 0;
+			len = sizeof(error);
+
+			/* Check if it failed or succeeded. */
+			if(getsockopt(server->mount_data.fd,SOL_SOCKET,SO_ERROR,&error,&len) == 0)
+			{
+				/* Connection established? */
+				if(error == 0)
+				{
+					result = 0;
+				}
+				/* Connection could not be made. */
+				else
+				{
+					(*error_ptr) = errno;
+
+					result = -1;
+				}
+			}
+			/* Well, that could happen, too. */
+			else
+			{
+				(*error_ptr) = errno;
+				result = -1;
+			}
+		}
+		/* Connection attempt timed out? */
+		else if (result == 0)
+		{
+			(*error_ptr) = EWOULDBLOCK;
+			result = -1;
+		}
+		/* Well, that could happen, too. */
+		else /* if (result < 0) */
+		{
+			(*error_ptr) = errno;
+		}
+
+		/* Switch the socket back into blocking mode. */
+		non_blocking_io = FALSE;
+		IoctlSocket(server->mount_data.fd, FIONBIO, &non_blocking_io);
+
+		if(result < 0)
+		{
+			server->state = CONN_INVALID;
+
+			goto out;
+		}
+	}
+	/* Wait almost indefinitely for the connection to
+	 * be made.
+	 */
+	else
+	{
+		result = connect (server->mount_data.fd, (struct sockaddr *)&server->mount_data.addr, sizeof(struct sockaddr_in));
+		if(result < 0)
+		{
+			server->state = CONN_INVALID;
+
+			(*error_ptr) = errno;
+
+			goto out;
+		}
 	}
 
 	/* Configure the send/receive timeout (in seconds)? */
@@ -920,8 +1029,10 @@ smb_check_server_connection(struct smb_server *server, int error)
 			if(error == EINTR)
 				server->dont_retry = TRUE;
 
-			server->state = CONN_INVALID;
 			smb_invalidate_all_inodes (server);
+
+			SHOWMSG("closing the server connection.");
+			smb_release(server);
 		}
 	}
 }

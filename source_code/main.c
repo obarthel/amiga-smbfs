@@ -26,8 +26,8 @@
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
- * Samba 4.6.7: smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //ubuntu-17-olaf/test
- * Samba 4.7.6: smbfs debuglevel=2 dumpsmb dumpsmblevel=2 volume=ubuntu-test //ubuntu-18-olaf/test
+ * Samba 4.6.7: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 volume=ubuntu-test //ubuntu-17-olaf/test
+ * Samba 4.7.6: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 volume=ubuntu-test //ubuntu-18-olaf/test
  * Samba 3.0.25: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 user=olsen password=... volume=olsen //192.168.1.118/olsen
  */
 
@@ -4086,21 +4086,23 @@ Action_SetProtect(
 
 	if((mask & FIBF_DELETE) != 0)
 	{
-		SHOWMSG("write protection enabled");
-		st.is_wp = TRUE;
+		SHOWMSG("write/delete protection enabled");
+		st.is_read_only = TRUE;
 	}
 	else
 	{
-		SHOWMSG("write protection disabled");
+		SHOWMSG("write/delete protection disabled");
 	}
 
 	/* Careful: the 'archive' attribute has exactly the opposite
 	 *          meaning in the Amiga and the SMB worlds.
 	 */
-	st.is_archive = ((mask & FIBF_ARCHIVE) == 0);
+	st.is_changed_since_last_archive = ((mask & FIBF_ARCHIVE) == 0);
 
 	/* The 'system' attribute is associated with the 'pure' bit for now. */
+	/*
 	st.is_system = ((mask & FIBF_PURE) != 0);
+	*/
 
 	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
@@ -4564,17 +4566,19 @@ Action_ExamineObject(
 			fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
-			if(st.is_wp)
+			if(st.is_read_only)
 				fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
 
 			/* Careful: the 'archive' attribute has exactly the opposite
 			 *          meaning in the Amiga and the SMB worlds.
 			 */
-			if(NOT st.is_archive)
+			if(NOT st.is_changed_since_last_archive)
 				fib->fib_Protection |= FIBF_ARCHIVE;
 
+			/*
 			if(st.is_system)
 				fib->fib_Protection |= FIBF_PURE;
+			*/
 
 			if(NOT st.is_dir)
 				fib->fib_DiskKey = -1;
@@ -4647,8 +4651,8 @@ dir_scan_callback_func_exnext(
 	ENTER();
 
 	D((" '%s'",name));
-	D(("   is_dir=%ld is_wp=%ld is_hidden=%ld size=%ld",
-		st->is_dir,st->is_wp,st->is_hidden,st->size));
+	D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%ld",
+		st->is_dir,st->is_read_only,st->is_hidden,st->size));
 	D(("   nextpos=%ld eof=%ld",nextpos,eof));
 
 	/* Skip file and drawer names that we wouldn't be
@@ -4697,17 +4701,19 @@ dir_scan_callback_func_exnext(
 	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 							  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
-	if(st->is_wp)
-		fib->fib_Protection ^= (FIBF_OTR_WRITE|FIBF_OTR_DELETE|FIBF_GRP_WRITE|FIBF_GRP_DELETE|FIBF_WRITE|FIBF_DELETE);
+	if(st->is_read_only)
+		fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
 
 	/* Careful: the 'archive' attribute has exactly the opposite
 	 *          meaning in the Amiga and the SMB worlds.
 	 */
-	if(NOT st->is_archive)
+	if(NOT st->is_changed_since_last_archive)
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
+	/*
 	if(st->is_system)
 		fib->fib_Protection |= FIBF_PURE;
+	*/
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
 	seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
@@ -4840,8 +4846,8 @@ dir_scan_callback_func_exall(
 	ENTER();
 
 	D((" '%s'",name));
-	D(("   is_dir=%ld is_wp=%ld is_hidden=%ld size=%ld",
-		st->is_dir,st->is_wp,st->is_hidden,st->size));
+	D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%ld",
+		st->is_dir,st->is_read_only,st->is_hidden,st->size));
 	D(("   nextpos=%ld eof=%ld",nextpos,eof));
 
 	/* If necessary, translate the name of the file first, so that we
@@ -4928,17 +4934,19 @@ dir_scan_callback_func_exall(
 			ed->ed_Prot = FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 			              FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
-			if(st->is_wp)
-				ed->ed_Prot ^= (FIBF_OTR_WRITE|FIBF_OTR_DELETE|FIBF_GRP_WRITE|FIBF_GRP_DELETE|FIBF_WRITE|FIBF_DELETE);
+			if(st->is_read_only)
+				ed->ed_Prot ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
 
 			/* Careful: the 'archive' attribute has exactly the opposite
 			 *          meaning in the Amiga and the SMB worlds.
 			 */
-			if(NOT st->is_archive)
+			if(NOT st->is_changed_since_last_archive)
 				ed->ed_Prot |= FIBF_ARCHIVE;
 
+			/*
 			if(st->is_system)
 				ed->ed_Prot |= FIBF_PURE;
+			*/
 		}
 
 		if(type >= ED_DATE)
@@ -5937,17 +5945,19 @@ Action_ExamineFH(
 	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 							  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
-	if(st.is_wp)
-		fib->fib_Protection ^= (FIBF_OTR_WRITE|FIBF_OTR_DELETE|FIBF_GRP_WRITE|FIBF_GRP_DELETE|FIBF_WRITE|FIBF_DELETE);
+	if(st.is_read_only)
+		fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
 
 	/* Careful: the 'archive' attribute has exactly the opposite
 	 *          meaning in the Amiga and the SMB worlds.
 	 */
-	if(NOT st.is_archive)
+	if(NOT st.is_changed_since_last_archive)
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
+	/*
 	if(st.is_system)
 		fib->fib_Protection |= FIBF_PURE;
+	*/
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
 	seconds = (st.mtime == 0 ? st.ctime : st.mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();

@@ -51,10 +51,10 @@ typedef struct smba_connect_parameters
 typedef struct smba_stat
 {
 	unsigned is_dir:1;
-	unsigned is_wp:1;
+	unsigned is_read_only:1;
 	unsigned is_hidden:1;
 	unsigned is_system:1;
-	unsigned is_archive:1;
+	unsigned is_changed_since_last_archive:1;
 	int size;
 	long atime;
 	long ctime;
