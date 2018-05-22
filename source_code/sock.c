@@ -834,6 +834,7 @@ smb_release (struct smb_server *server)
 int
 smb_connect (struct smb_server *server, int * error_ptr)
 {
+	int enabled = TRUE;
 	int result;
 
 	ASSERT( server != NULL );
@@ -968,6 +969,9 @@ smb_connect (struct smb_server *server, int * error_ptr)
 			goto out;
 		}
 	}
+
+	/* Enable socket keepalives, for good measure. */
+	setsockopt(server->mount_data.fd, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled));
 
 	/* Configure the send/receive timeout (in seconds)? */
 	if(server->timeout > 0)

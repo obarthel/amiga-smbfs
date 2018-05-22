@@ -63,7 +63,6 @@ struct smb_dskattr
  */
 struct smb_dirent
 {
-	int				opened;					/* is it open on the fileserver? */
 	word			fileid;					/* What id to handle a file with? */
 	dword			attr;					/* Attribute fields, DOS value */
 
@@ -77,6 +76,9 @@ struct smb_dirent
 	char *			complete_path;			/* Complete path, MS-DOS notation, with '\' */
 	size_t			complete_path_size;		/* Number of bytes allocated for name */
 	int				len;					/* Namelength. */
+
+	unsigned		opened:1;				/* is it open on the fileserver? */
+	unsigned		writable:1;				/* was opened for read/write access? */
 };
 
 #endif /* _LINUX_SMB_H */

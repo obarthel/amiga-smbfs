@@ -840,6 +840,32 @@ smb_request_ok (struct smb_server *s, int command, int wct, int bcc, int * error
 	return(smb_request_ok_with_payload (s, command, wct, bcc, NULL, NULL, 0, error_ptr));
 }
 
+/* Try to reopen a file after the server has dropped the connection, or
+ * was disconnected.
+ */
+static int
+reopen_entry(struct smb_server *server, struct smb_dirent *entry,int * error_ptr)
+{
+	int result;
+
+	ASSERT( server != NULL && entry != NULL );
+
+	if(!entry->opened)
+	{
+		int ignored_error;
+
+		LOG (("trying to reopen file %s\n", entry->complete_path));
+
+		result = smb_proc_open (server, entry->complete_path, entry->len, entry->writable, FALSE, entry, error_ptr != NULL ? error_ptr : &ignored_error);
+	}
+	else
+	{
+		result = 0;
+	}
+
+	return(result);
+}
+
 /* smb_retry: This function should be called when smb_request_ok has
  * indicated an error. If the error was indicated because the
  * connection was killed, we try to reconnect. If smb_retry returns FALSE,
@@ -1092,6 +1118,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 		entry->size = end_of_file_low;
 
 		entry->opened = TRUE;
+		entry->writable = writable;
 
 		goto out;
 	}
@@ -1149,6 +1176,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
 	entry->size = DVAL (buf, smb_vwv4);
 	entry->opened = TRUE;
+	entry->writable = writable;
 
  out:
 
@@ -1210,9 +1238,21 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,finfo,NULL) < 0)
+			{
+				LOG(("that didn't work.\n"));
+				goto out;
+			}
+			else
+			{
+				goto retry;
+			}
+		}
 		else
+		{
 			goto out;
+		}
 	}
 
 	/* The buffer format must be 1; smb_request_ok_with_payload() already checked this. */
@@ -1255,7 +1295,12 @@ smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t of
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,finfo,NULL) < 0)
+				LOG(("that didn't work.\n"));
+			else
+				goto retry;
+		}
 	}
 
 	return result;
@@ -1285,7 +1330,12 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,finfo,NULL) < 0)
+				LOG(("that didn't work.\n"));
+			else
+				goto retry;
+		}
 	}
 	else
 	{
@@ -1388,9 +1438,21 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,finfo,NULL) < 0)
+			{
+				LOG(("that didn't work.\n"));
+				goto out;
+			}
+			else
+			{
+				goto retry;
+			}
+		}
 		else
+		{
 			goto out;
+		}
 	}
 
 	num_bytes_written += len;
@@ -1416,9 +1478,21 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t o
 			count += len;
 
 			if (smb_retry (server))
-				goto retry;
+			{
+				if(reopen_entry(server,finfo,NULL) < 0)
+				{
+					LOG(("that didn't work.\n"));
+					goto out;
+				}
+				else
+				{
+					goto retry;
+				}
+			}
 			else
+			{
 				goto out;
+			}
 		}
 
 		if(server->write_behind)
@@ -1511,7 +1585,12 @@ smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, off_t offs
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,finfo,NULL) < 0)
+				LOG(("that didn't work.\n"));
+			else
+				goto retry;
+		}
 	}
 	else
 	{
@@ -1565,7 +1644,12 @@ smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,finfo,NULL) < 0)
+				LOG(("that didn't work.\n"));
+			else
+				goto retry;
+		}
 	}
 	else
 	{
@@ -1625,7 +1709,12 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct s
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,finfo,NULL) < 0)
+				LOG(("that didn't work.\n"));
+			else
+				goto retry;
+		}
 	}
 
 	return result;
@@ -2995,7 +3084,17 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 		if((*error_ptr) != error_check_smb_error)
 		{
 			if (smb_retry (server))
-				goto retry;
+			{
+				if(reopen_entry(server,entry,NULL) < 0)
+				{
+					LOG(("that didn't work.\n"));
+					goto out;
+				}
+				else
+				{
+					goto retry;
+				}
+			}
 		}
 
 		goto out;
@@ -3077,7 +3176,12 @@ smb_proc_setattrE (struct smb_server *server, word fid, struct smb_dirent *new_e
 	if (result < 0)
 	{
 		if (smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,new_entry,NULL) < 0)
+				LOG(("that didn't work.\n"));
+			else
+				goto retry;
+		}
 	}
 
 	return result;

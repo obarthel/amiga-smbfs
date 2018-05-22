@@ -1649,3 +1649,14 @@ smbfs 1.135 (21.5.2018)
   restrictions as the read and write operations. Should the server
   communication fail because of a timeout, reestablishing a connection
   to the server should no longer hang indefinitely.
+
+
+smbfs 1.136 (22.5.2018)
+
+- The network connection opened for the server now has the
+  "keepalive" option enabled, just in case...
+
+- Looks like reconnecting to the server after that connection
+  broke down or was severed never actually worked for read, write,
+  record locking and file attribute operations. Now it might
+  just work...

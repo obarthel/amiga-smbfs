@@ -56,8 +56,8 @@ struct smba_file
 	struct smb_dirent		dirent;
 	ULONG					attr_time;		/* time when dirent was read */
 	dircache_t *			dircache;		/* content cache for directories */
-	unsigned				attr_dirty:1;	/* attribute cache is dirty */
 	unsigned				is_valid:1;		/* server was down, entry removed, ... */
+	unsigned				attr_dirty:1;	/* attribute cache is dirty */
 };
 
 /*****************************************************************************/
@@ -1461,8 +1461,8 @@ smb_invalidate_all_inodes (struct smb_server *server)
 	     f->node.mln_Succ != NULL;
 	     f = (smba_file_t *)f->node.mln_Succ)
 	{
-		f->dirent.opened = FALSE;
-		f->is_valid = FALSE;
+		f->dirent.opened	= FALSE;
+		f->is_valid			= FALSE;
 	}
 }
 
