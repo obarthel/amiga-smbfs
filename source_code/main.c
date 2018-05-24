@@ -209,6 +209,8 @@ STATIC struct MinList		FileList;
 STATIC struct MinList		LockList;
 
 STATIC APTR					MemoryPool;
+STATIC ULONG				total_memory_allocated;
+STATIC ULONG				max_memory_allocated;
 
 STATIC struct RDArgs *		Parameters;
 STATIC struct DiskObject *	Icon;
@@ -1128,6 +1130,13 @@ main(VOID)
 
  out:
 
+	#if DEBUG
+	{
+		D(("total amount of memory allocated = %lu", total_memory_allocated));
+		D(("maximum amount of memory allocated = %lu", max_memory_allocated));
+	}
+	#endif /* DEBUG */
+
 	#if defined(DUMP_SMB)
 	{
 		if(args.DumpSMB && WBStartup == NULL)
@@ -1501,15 +1510,18 @@ FreeMemory(APTR address)
 	if(address != NULL)
 	{
 		ULONG * mem = address;
+		ULONG size = mem[-1];
 
 		#if DEBUG
 		{
+			total_memory_allocated -= size;
+			
 			if(GETDEBUGLEVEL() > 0)
-				memset(address,0xA3,mem[-1] - sizeof(*mem));
+				memset(address,0xA3,size - sizeof(*mem));
 		}
 		#endif /* DEBUG */
 
-		FreePooled(MemoryPool,&mem[-1],mem[-1]);
+		FreePooled(MemoryPool,&mem[-1],size);
 	}
 }
 
@@ -1534,6 +1546,10 @@ AllocateMemory(ULONG size)
 			{
 				if(GETDEBUGLEVEL() > 0)
 					memset(mem,0xA5,mem[-1] - sizeof(*mem));
+
+				total_memory_allocated += size;
+				if(max_memory_allocated < total_memory_allocated)
+					max_memory_allocated = total_memory_allocated;
 			}
 			#endif /* DEBUG */
 
@@ -1837,14 +1853,14 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 	if(sock_fd < 0)
 	{
 		SHOWMSG("couldn't get the socket");
-		result = (-errno);
+		result = errno;
 		goto out;
 	}
 
 	if(setsockopt(sock_fd, SOL_SOCKET, SO_BROADCAST, &option_true, sizeof(option_true)) < 0)
 	{
 		SHOWMSG("couldn't enable the broadcast option");
-		result = (-errno);
+		result = errno;
 		goto out;
 	}
 
@@ -1863,7 +1879,7 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 	if(n < 0)
 	{
 		SHOWMSG("name encoding failed");
-		result = (-EINVAL);
+		result = EINVAL;
 		goto out;
 	}
 
@@ -1871,7 +1887,7 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 	memcpy(&buffer[total_len], query_tail, sizeof(query_tail));
 	total_len += sizeof(query_tail);
 
-	result = (-ENOENT);
+	result = ENOENT;
 	n = 0;
 
 	/* Send the query packet; retry five times with a one second
@@ -1882,7 +1898,7 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 		if(sendto(sock_fd, (void *) buffer, total_len, 0, (struct sockaddr *)&sox, sizeof(struct sockaddr_in)) < 0)
 		{
 			SHOWMSG("could not send the packet");
-			result = (-errno);
+			result = errno;
 			goto out;
 		}
 
@@ -1899,7 +1915,7 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 			if(n < 0)
 			{
 				SHOWMSG("could not pick up the response packet");
-				result = (-errno);
+				result = errno;
 				goto out;
 			}
 			else if (n > 0)
@@ -2186,58 +2202,85 @@ MapErrnoToIoErr(int error)
 	 */
 	STATIC const LONG map_posix_to_amigados[][2] =
 	{
-		{ EPERM,			ERROR_READ_PROTECTED },			/* Operation not permitted */
-		{ ENOENT,			ERROR_OBJECT_NOT_FOUND },		/* No such file or directory */
-		{ ESRCH,			ERROR_OBJECT_NOT_FOUND },		/* No such process */
-		{ EINTR,			ERROR_BREAK },					/* Interrupted system call */
-		{ EIO,				ERROR_OBJECT_IN_USE },			/* Input/output error */
 		{ E2BIG,			ERROR_TOO_MANY_ARGS },			/* Argument list too long */
-		{ EBADF,			ERROR_INVALID_LOCK },			/* Bad file descriptor */
-		{ ENOMEM,			ERROR_NO_FREE_STORE },			/* Cannot allocate memory */
 		{ EACCES,			ERROR_READ_PROTECTED },			/* Permission denied */
-		{ ENOTBLK,			ERROR_OBJECT_WRONG_TYPE },		/* Block device required */
-		{ EBUSY,			ERROR_OBJECT_IN_USE },			/* Device busy */
-		{ EEXIST,			ERROR_OBJECT_EXISTS },			/* File exists */
-		{ EXDEV,			ERROR_NOT_IMPLEMENTED },		/* Cross-device link */
-		{ ENOTDIR,			ERROR_OBJECT_WRONG_TYPE },		/* Not a directory */
-		{ EISDIR,			ERROR_OBJECT_WRONG_TYPE },		/* Is a directory */
-		{ EINVAL,			ERROR_BAD_NUMBER },				/* Invalid argument */
-		{ EFBIG,			ERROR_OBJECT_IN_USE },			/* File too large */
-		{ ENOSPC,			ERROR_DISK_FULL },				/* No space left on device */
-		{ ESPIPE,			ERROR_SEEK_ERROR },				/* Illegal seek */
-		{ EROFS,			ERROR_WRITE_PROTECTED },		/* Read-only file system */
-		{ EMLINK,			ERROR_TOO_MANY_LEVELS },		/* Too many links */
-		{ ENOTSOCK,			ERROR_OBJECT_WRONG_TYPE },		/* Socket operation on non-socket */
-		{ EDESTADDRREQ,		ERROR_REQUIRED_ARG_MISSING },	/* Destination address required */
-		{ EMSGSIZE,			ERROR_LINE_TOO_LONG },			/* Message too long */
-		{ EPROTOTYPE,		ERROR_BAD_TEMPLATE },			/* Protocol wrong type for socket */
-		{ ENOPROTOOPT,		ERROR_NOT_IMPLEMENTED },		/* Protocol not available */
-		{ EPROTONOSUPPORT,	ERROR_NOT_IMPLEMENTED },		/* Protocol not supported */
-		{ ESOCKTNOSUPPORT,	ERROR_NOT_IMPLEMENTED },		/* Socket type not supported */
-		{ EOPNOTSUPP,		ERROR_NOT_IMPLEMENTED },		/* Operation not supported */
-		{ EPFNOSUPPORT,		ERROR_NOT_IMPLEMENTED },		/* Protocol family not supported */
-		{ EAFNOSUPPORT,		ERROR_NOT_IMPLEMENTED },		/* Address family not supported by protocol family */
 		{ EADDRINUSE,		ERROR_OBJECT_IN_USE },			/* Address already in use */
 		{ EADDRNOTAVAIL,	ERROR_DIR_NOT_FOUND },			/* Can't assign requested address */
-		{ ENETDOWN,			ERROR_DIR_NOT_FOUND },			/* Network is down */
-		{ ENETUNREACH,		ERROR_DIR_NOT_FOUND },			/* Network is unreachable */
-		{ ENETRESET,		ERROR_DIR_NOT_FOUND },			/* Network dropped connection on reset */
+		{ EAFNOSUPPORT,		ERROR_NOT_IMPLEMENTED },		/* Address family not supported by protocol family */
+		{ EAGAIN, 			ERROR_LOCK_TIMEOUT },			/* Resource temporarily unavailable */
+		{ EBADF,			ERROR_INVALID_LOCK },			/* Bad file descriptor */
+		{ EBUSY,			ERROR_OBJECT_IN_USE },			/* Device busy */
 		{ ECONNABORTED,		ERROR_DIR_NOT_FOUND },			/* Software caused connection abort */
-		{ ECONNRESET,		ERROR_DIR_NOT_FOUND },			/* Connection reset by peer */
-		{ ENOBUFS,			ERROR_BUFFER_OVERFLOW },		/* No buffer space available */
-		{ EISCONN,			ERROR_OBJECT_IN_USE },			/* Socket is already connected */
-		{ ENOTCONN,			ERROR_OBJECT_WRONG_TYPE },		/* Socket is not connected */
-		{ ESHUTDOWN,		ERROR_INVALID_LOCK },			/* Can't send after socket shutdown */
 		{ ECONNREFUSED,		ERROR_OBJECT_IN_USE },			/* Connection refused */
-		{ ELOOP,			ERROR_TOO_MANY_LEVELS },		/* Too many levels of symbolic links */
-		{ ENAMETOOLONG,		ERROR_LINE_TOO_LONG },			/* File name too long */
+		{ ECONNRESET,		ERROR_DIR_NOT_FOUND },			/* Connection reset by peer */
+		{ EDEADLK,			ERROR_READ_PROTECTED },			/* Resource deadlock avoided */
+		{ EDESTADDRREQ,		ERROR_REQUIRED_ARG_MISSING },	/* Destination address required */
+		{ EDQUOT,			ERROR_DISK_FULL },				/* Disc quota exceeded */
+		{ EEXIST,			ERROR_OBJECT_EXISTS },			/* File exists */
+		{ EFAULT,			ERROR_BAD_NUMBER },				/* Bad address */
+		{ EFBIG,			ERROR_OBJECT_IN_USE },			/* File too large */
 		{ EHOSTDOWN,		ERROR_DIR_NOT_FOUND },			/* Host is down */
 		{ EHOSTUNREACH,		ERROR_DIR_NOT_FOUND },			/* No route to host */
-		{ ENOTEMPTY,		ERROR_DIRECTORY_NOT_EMPTY },	/* Directory not empty */
-		{ EPROCLIM,			ERROR_TASK_TABLE_FULL },		/* Too many processes */
-		{ EUSERS,			ERROR_TASK_TABLE_FULL },		/* Too many users */
-		{ EDQUOT,			ERROR_DISK_FULL },				/* Disc quota exceeded */
+		{ EINTR,			ERROR_BREAK },					/* Interrupted system call */
+		{ EINVAL,			ERROR_BAD_NUMBER },				/* Invalid argument */
+		{ EIO,				ERROR_OBJECT_IN_USE },			/* Input/output error */
+		{ EISCONN,			ERROR_OBJECT_IN_USE },			/* Socket is already connected */
+		{ EISDIR,			ERROR_OBJECT_WRONG_TYPE },		/* Is a directory */
+		{ ELOOP,			ERROR_TOO_MANY_LEVELS },		/* Too many levels of symbolic links */
+		{ EMFILE,			ERROR_NO_FREE_STORE },			/* Too many open files */
+		{ EMLINK,			ERROR_TOO_MANY_LEVELS },		/* Too many links */
+		{ EMSGSIZE,			ERROR_LINE_TOO_LONG },			/* Message too long */
+		{ ENAMETOOLONG,		ERROR_LINE_TOO_LONG },			/* File name too long */
+		{ ENETDOWN,			ERROR_DIR_NOT_FOUND },			/* Network is down */
+		{ ENETRESET,		ERROR_DIR_NOT_FOUND },			/* Network dropped connection on reset */
+		{ ENETUNREACH,		ERROR_DIR_NOT_FOUND },			/* Network is unreachable */
+		{ ENFILE,			ERROR_NO_FREE_STORE },			/* Too many open files in system */
+		{ ENOBUFS,			ERROR_BUFFER_OVERFLOW },		/* No buffer space available */
+		{ ENODEV,			ERROR_OBJECT_WRONG_TYPE },		/* Operation not supported by device */
+		{ ENOENT,			ERROR_OBJECT_NOT_FOUND },		/* No such file or directory */
 		{ ENOLCK,			ERROR_NOT_IMPLEMENTED },		/* no locks available */
+		{ ENOMEM,			ERROR_NO_FREE_STORE },			/* Cannot allocate memory */
+		{ ENOPROTOOPT,		ERROR_NOT_IMPLEMENTED },		/* Protocol not available */
+		{ ENOSPC,			ERROR_DISK_FULL },				/* No space left on device */
+		{ ENOTBLK,			ERROR_OBJECT_WRONG_TYPE },		/* Block device required */
+		{ ENOTCONN,			ERROR_OBJECT_WRONG_TYPE },		/* Socket is not connected */
+		{ ENOTDIR,			ERROR_OBJECT_WRONG_TYPE },		/* Not a directory */
+		{ ENOTEMPTY,		ERROR_DIRECTORY_NOT_EMPTY },	/* Directory not empty */
+		{ ENOTSOCK,			ERROR_OBJECT_WRONG_TYPE },		/* Socket operation on non-socket */
+		{ ENXIO,			ERROR_OBJECT_NOT_FOUND },		/* No such device or address */
+		{ EOPNOTSUPP,		ERROR_NOT_IMPLEMENTED },		/* Operation not supported */
+		{ EPERM,			ERROR_READ_PROTECTED },			/* Operation not permitted */
+		{ EPFNOSUPPORT,		ERROR_NOT_IMPLEMENTED },		/* Protocol family not supported */
+		{ EPROCLIM,			ERROR_TASK_TABLE_FULL },		/* Too many processes */
+		{ EPROTONOSUPPORT,	ERROR_NOT_IMPLEMENTED },		/* Protocol not supported */
+		{ EPROTOTYPE,		ERROR_BAD_TEMPLATE },			/* Protocol wrong type for socket */
+		{ ERANGE,			ERROR_BAD_NUMBER },				/* Numerical result out of range */
+		{ EROFS,			ERROR_WRITE_PROTECTED },		/* Read-only file system */
+		{ ESHUTDOWN,		ERROR_INVALID_LOCK },			/* Can't send after socket shutdown */
+		{ ESOCKTNOSUPPORT,	ERROR_NOT_IMPLEMENTED },		/* Socket type not supported */
+		{ ESPIPE,			ERROR_SEEK_ERROR },				/* Illegal seek */
+		{ ESRCH,			ERROR_OBJECT_NOT_FOUND },		/* No such process */
+		{ ETXTBSY,			ERROR_OBJECT_IN_USE },			/* Text file busy */
+		{ EUSERS,			ERROR_TASK_TABLE_FULL },		/* Too many users */
+		{ EXDEV,			ERROR_NOT_IMPLEMENTED },		/* Cross-device link */
+
+		{ error_invalid_netbios_session,			ERROR_BUFFER_OVERFLOW },
+		{ error_message_exceeds_buffer_size,		ERROR_BUFFER_OVERFLOW },
+		{ error_invalid_buffer_format,				ERROR_BAD_NUMBER },
+		{ error_data_exceeds_buffer_size,			ERROR_BUFFER_OVERFLOW },
+		{ error_invalid_parameter_size,				ERROR_BAD_NUMBER },
+		{ error_server_setup_incomplete,			ERROR_INVALID_COMPONENT_NAME },
+		{ error_server_connection_invalid,			ERROR_INVALID_COMPONENT_NAME },
+		{ error_smb_message_signature_missing,		ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_too_short,				ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_invalid_command,		ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_invalid_word_count,		ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_invalid_byte_count,		ERROR_BAD_STREAM_NAME },
+		{ error_looping_in_find_next,				ERROR_TOO_MANY_LEVELS },
+		{ error_invalid_directory_size,				ERROR_BAD_NUMBER },
+		{ error_session_request_failed,				ERROR_INVALID_COMPONENT_NAME },
+		{ error_unsupported_dialect,				ERROR_BAD_NUMBER },
+
 		{ -1,				-1 }
 	};
 
@@ -3390,10 +3433,22 @@ Action_DeleteObject(
 	/* Trying to delete the root directory, are you kidding? */
 	if(full_name == NULL)
 	{
-		error = ERROR_OBJECT_WRONG_TYPE;
+		LOG(("cannot delete the root directory\n"));
+		
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
+	/* Is there a file handle or file lock attached to this
+	 * object? If so, we'll exit right away.
+	 */
+	error = CheckAccessModeCollision(full_name,EXCLUSIVE_LOCK);
+	if(error != OK)
+	{
+		LOG(("there is still a lock or file attached to %s\n", full_name));
+		goto out;
+	}
+	
 	/* We need to find this file's parent directory, so that
 	 * in case the directory contents are currently being
 	 * examined, that process is restarted.
@@ -3413,7 +3468,7 @@ Action_DeleteObject(
 		int i;
 
 		i = strlen(full_parent_name) - 1;
-		if (full_parent_name[i] == SMB_PATH_SEPARATOR)
+		if (i >= 0 && full_parent_name[i] == SMB_PATH_SEPARATOR)
 			i--;
 
 		for ( ; i >= 0 ; i--)
@@ -3461,17 +3516,39 @@ Action_DeleteObject(
 
 		if(smba_rmdir(ServerData,full_name,&error) < 0)
 		{
-			SHOWVALUE(error);
+			int translated_error;
+			
+			if(error == error_check_smb_error)
+				translated_error = smb_errno(((struct smb_server *)ServerData)->rcls,((struct smb_server *)ServerData)->err);
+			else
+				translated_error = error;
+			
+			D(("that didn't work (error=%ld)", translated_error));
 
 			/* This is a little bit difficult to justify since
 			 * the error code may indicate a different cause,
 			 * but in practice 'EACCES' seems to be returned
 			 * if the directory to remove is not empty.
+			 *
+			 * Except when it isn't: the CIFS documentation
+			 * mentions that ERRDOS/ERRnoaccess can mean
+			 * "access denied", "directory is in use" or
+			 * "directory is not empty". All of these may
+			 * map to either EACCESS or EPERM (we don't use
+			 * the third alternative ENOENT).
 			 */
-			if(error == EACCES || (error == error_check_smb_error && smb_errno(((struct smb_server *)ServerData)->rcls,((struct smb_server *)ServerData)->err) == EACCES))
+			if(translated_error == EACCES || translated_error == EPERM)
+			{
+				SHOWMSG("that directory might not be empty");
+				
 				error = ERROR_DIRECTORY_NOT_EMPTY;
+			}
 			else
+			{
+				SHOWMSG("could be some other problem");
+				
 				error = MapErrnoToIoErr(error);
+			}
 
 			goto out;
 		}
@@ -4070,7 +4147,7 @@ Action_SetProtect(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5583,6 +5660,7 @@ Action_End(
 	FreeMemory(fn);
 
 	(*error_ptr) = OK;
+
 	return(DOSTRUE);
 }
 
@@ -5814,7 +5892,7 @@ Action_SetDate(
 
 	SHOWSTRING(full_name);
 
-	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6530,7 +6608,7 @@ Action_SetComment(
 
 	SHOWSTRING(full_name);
 
-	if (smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&error) < 0)
+	if (smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;

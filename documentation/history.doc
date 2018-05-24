@@ -1660,3 +1660,46 @@ smbfs 1.136 (22.5.2018)
   broke down or was severed never actually worked for read, write,
   record locking and file attribute operations. Now it might
   just work...
+
+
+smbfs 1.137 (24.5.2018)
+
+- Updated the table of error codes which eventually get translated
+  into AmigaDOS error codes. Quite a number of error codes were 
+  still not properly covered.
+
+- We now show how much memory smbfs has used (in debug mode), and
+  how much memory has not been released yet.
+
+- Trying to delete a file or directory now first checks if there is
+  still a file handle or file lock attached to it. That test has
+  been missing for the past 18 years...
+  
+- When trying to delete a file or directory, smbfs now asks the
+  server for write access permission first. The server might want
+  to object to this request before everything gets really serious.
+
+- Added more debug output to show when a file/directory is being
+  opened, and in which mode, and when it is closed. We also show
+  how much of these file/directory references are currently in use.
+
+- When performing SetDate(), SetProtect() and SetFileSize(), the
+  respective file/directory is now opened in write access mode.
+
+- SetProtect() now only permits you to change the "archived" and
+  "delete protected" attributes. These are the only attributes which
+  the SMB server really cares about on the file system level.
+
+- Extended the "safety margin" for the SMB receive buffer to 1024
+  bytes (used to be half that much, but Samba uses double).
+
+- smbfs now only sends a NetBIOS broadcast name query for the server
+  name that's part of the share if the server name is shorter than
+  15 characters. If it's longer, the DNS lookup better work instead.
+
+- If a file to be deleted has the "hidden" or "system" attributes set
+  the SMB_COM_DELETE command is no longer ignored.
+
+- Added further tests to figure out if a directory could not be deleted
+  because it was not empty. However, it's difficult to tell all three
+  cases apart which share the same error code. We'll try anyway...

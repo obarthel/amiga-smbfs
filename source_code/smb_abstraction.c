@@ -44,6 +44,7 @@ struct smba_server
 {
 	struct smb_server	server;
 	struct MinList		open_files;
+	ULONG				num_open_files;
 	dircache_t *		dircache;
 	unsigned			supports_E:1;
 	unsigned			supports_E_known:1;
@@ -393,11 +394,19 @@ smba_open (smba_server_t * s, char *name, size_t name_size, int writable, int tr
 	f->dirent.len = strlen (name);
 	f->server = s;
 
+	LOG(("open '%s' (writable=%s, truncate=%s)\n", name, writable ? "yes" : "no", truncate ? "yes" : "no"));
+
 	result = make_open (f, open_dont_need_fid, writable, truncate, error_ptr);
 	if (result < 0)
+	{
+		LOG(("open failed\n"));
 		goto out;
-
+	}
+	
 	AddTail ((struct List *)&s->open_files, (struct Node *)f);
+	s->num_open_files++;
+
+	LOG(("open succeeded, number of open files = %ld\n",s->num_open_files));
 
 	(*file) = f;
 	f = NULL;
@@ -459,6 +468,8 @@ smba_close (smba_file_t * f, int * error_ptr)
 {
 	if(f != NULL)
 	{
+		LOG (("closing file '%s'\n", f->dirent.complete_path));
+
 		if(f->node.mln_Succ != NULL || f->node.mln_Pred != NULL)
 			Remove((struct Node *)f);
 
@@ -467,7 +478,7 @@ smba_close (smba_file_t * f, int * error_ptr)
 
 		if (f->dirent.opened)
 		{
-			LOG (("closing file %s\n", f->dirent.complete_path));
+			LOG(("notifying the server that the file was closed"));
 			smb_proc_close (&f->server->server, f->dirent.fileid, f->dirent.mtime, error_ptr);
 		}
 
@@ -477,6 +488,10 @@ smba_close (smba_file_t * f, int * error_ptr)
 			f->dircache->len = 0;
 			f->dircache = NULL;
 		}
+
+		f->server->num_open_files--;
+		
+		LOG(("file closed, number of open files = %ld\n",f->server->num_open_files));
 
 		free (f);
 	}
@@ -1668,7 +1683,7 @@ smba_start(
 		{
 			ipAddr = ((struct in_addr *)(h->h_addr))->s_addr;
 		}
-		else if (BroadcastNameQuery(server,"",(UBYTE *)&ipAddr) != 0)
+		else if (strlen(server) >= 16 || BroadcastNameQuery(server,"",(UBYTE *)&ipAddr) != 0)
 		{
 			ReportError("Unknown host '%s' (%ld, %s).",server,lookup_error,host_strerror(lookup_error));
 

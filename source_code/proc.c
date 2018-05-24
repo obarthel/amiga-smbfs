@@ -1917,7 +1917,10 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 
 	p = smb_setup_header (server, SMBunlink, 1, 2 + len);
 
-	WSET (buf, smb_vwv0, 0);
+	/* Allow for system and hidden files to be deleted, too. After
+	 * all, we show these in the directory lists.
+	 */
+	WSET (buf, smb_vwv0, aSYSTEM | aHIDDEN);
 
 	smb_encode_ascii (p, path, len);
 
@@ -3362,9 +3365,9 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	 * What follows the 4 byte NetBIOS session header must not be
 	 * larger than that an unsigned 17 bit integer can hold. It should
 	 * not be much larger than 65535 bytes, though, since the transmission
-	 * buffer only has some extra 512 bytes of room at the end.
+	 * buffer only has some extra 1024 bytes of room at the end.
 	 */
-	const int packet_fudge_size = 512;
+	const int safety_margin = 1024;
 	const int num_prots = sizeof(prots) / sizeof(prots[0]);
 	const char dev[] = "A:";
 	int i, plength;
@@ -3432,7 +3435,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	/* Add a bit of fudge to account for the NetBIOS session
 	 * header and whatever else might show up...
 	 */
-	server->transmit_buffer_allocation_size = server->transmit_buffer_size + packet_fudge_size;
+	server->transmit_buffer_allocation_size = server->transmit_buffer_size + safety_margin;
 
 	server->transmit_buffer = malloc (server->transmit_buffer_allocation_size);
 	if (server->transmit_buffer == NULL)
@@ -3889,7 +3892,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		/* Add a bit of fudge to account for the NetBIOS session
 		 * header and whatever else might show up...
 		 */
-		server->transmit_buffer_allocation_size = server->transmit_buffer_size + packet_fudge_size;
+		server->transmit_buffer_allocation_size = server->transmit_buffer_size + safety_margin;
 
 		server->transmit_buffer = malloc (server->transmit_buffer_allocation_size);
 		if (server->transmit_buffer == NULL)
