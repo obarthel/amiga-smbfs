@@ -801,7 +801,7 @@ smb_request_ok_with_payload (
 	else if ((error = smb_valid_packet (server->transmit_buffer)) != 0)
 	{
 		LOG (("not a valid packet!\n"));
-		
+
 		(*error_ptr) = error;
 		result = -1;
 	}
@@ -854,7 +854,7 @@ reopen_entry(struct smb_server *server, struct smb_dirent *entry,int * error_ptr
 	{
 		int ignored_error;
 
-		LOG (("trying to reopen file %s\n", entry->complete_path));
+		LOG (("trying to reopen file '%s'\n", escape_name(entry->complete_path)));
 
 		result = smb_proc_open (server, entry->complete_path, entry->len, entry->writable, FALSE, entry, error_ptr != NULL ? error_ptr : &ignored_error);
 	}
@@ -1001,7 +1001,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 	ENTER();
 
-	SHOWSTRING(pathname);
+	D(("pathname = '%s'", escape_name(pathname)));
 
 	if (server->protocol >= PROTOCOL_NT1)
 	{
@@ -1115,7 +1115,8 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 		params = smb_decode_dword(params, &end_of_file_low);
 		(void) smb_decode_dword(params, &end_of_file_high);
 
-		entry->size = end_of_file_low;
+		entry->size_low = end_of_file_low;
+		entry->size_high = end_of_file_high;
 
 		entry->opened = TRUE;
 		entry->writable = writable;
@@ -1174,7 +1175,8 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 	entry->fileid = WVAL (buf, smb_vwv0);
 	entry->attr = WVAL (buf, smb_vwv1);
 	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
-	entry->size = DVAL (buf, smb_vwv4);
+	entry->size_low = DVAL (buf, smb_vwv4);
+	entry->size_high = 0;
 	entry->opened = TRUE;
 	entry->writable = writable;
 
@@ -1269,43 +1271,6 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 	return result;
 }
 
-/* count must be <= 65535. No error number is returned. A result of 0
-   indicates an error, which has to be investigated by a normal read
-   call. */
-int
-smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr)
-{
-	char *buf = server->transmit_buffer;
-	int result;
-
-	ASSERT( count <= 65535 );
-
- retry:
-
-	smb_setup_header (server, SMBreadbraw, 8, 0);
-
-	WSET (buf, smb_vwv0, finfo->fileid);
-	DSET (buf, smb_vwv1, offset);
-	WSET (buf, smb_vwv3, count); /* maxcnt */
-	WSET (buf, smb_vwv4, 0); /* mincnt */
-	DSET (buf, smb_vwv5, 0); /* timeout */
-	WSET (buf, smb_vwv7, 0); /* reserved */
-
-	result = smb_request_read_raw (server, data, count, error_ptr);
-	if (result < 0)
-	{
-		if (smb_retry (server))
-		{
-			if(reopen_entry(server,finfo,NULL) < 0)
-				LOG(("that didn't work.\n"));
-			else
-				goto retry;
-		}
-	}
-
-	return result;
-}
-
 int
 smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr)
 {
@@ -1346,201 +1311,7 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 }
 
 int
-smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr)
-{
-	char *buf = server->transmit_buffer;
-	int num_bytes_written = 0;
-	int result;
-	long max_len;
-	long len;
-	byte *p;
-
-	ASSERT( count <= 65535 );
-
-	LOG (("number of bytes to send = %ld\n", count));
-
-	/* Calculate maximum number of bytes that could be transferred with
-	 * a single SMB_COM_WRITE_RAW packet...
-	 *
-	 * 'max_buffer_size' is the maximum size of a complete SMB message
-	 * including the message header, the parameter and data blocks.
-	 *
-	 * The message header accounts for
-	 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
-	 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
-	 * = 32 bytes
-	 *
-	 * The parameters of a SMB_COM_WRITE_RAW command account for
-	 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
-	 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+2(dataoffset)
-	 * = 25 bytes
-	 *
-	 * The data part of a SMB_COM_WRITE_RAW command account for
-	 * 2(bytecount)+0(pad) = 2 bytes, not including
-	 * the actual payload
-	 *
-	 * This leaves 'max_buffer_size' - 59 for the payload.
-	 */
-	max_len = server->max_buffer_size;
-	if(max_len > 65535)
-		max_len = 65535;
-
-	max_len -= 59;
-
-	LOG(("maximum length for payload = %ld bytes\n", max_len));
-
-	/* Number of bytes to write is smaller than the maximum
-	 * number of bytes which may be sent in a single SMB
-	 * message, including parameter and data fields?
-	 */
-	if (count <= max_len)
-	{
-		LOG(("count (%ld) <= max_len (%ld) -- send no data with the message.\n",count,max_len));
-
-		len = 0; /* Send a zero length SMB_COM_WRITE_RAW message, followed by the raw data. */
-	}
-	else
-	{
-		len = count - max_len; /* Send some of the data as part of the SMB_COM_WRITE_RAW message, followed by the remaining raw data. */
-
-		LOG(("count (%ld) > max_len (%ld) -- send %ld bytes with the message.\n",count,max_len,len));
-	}
-
- retry:
-
-	p = smb_setup_header (server, SMBwritebraw, server->protocol > PROTOCOL_COREPLUS ? 12 : 11, len);
-
-	WSET (buf, smb_vwv0, finfo->fileid);
-	DSET (buf, smb_vwv1, count);
-	DSET (buf, smb_vwv3, offset);
-	DSET (buf, smb_vwv5, 0); /* timeout */
-
-	if(server->write_behind)
-		WSET (buf, smb_vwv7, 0); /* do not send a final result response. */
-	else
-		WSET (buf, smb_vwv7, 1); /* send final result response */
-
-	DSET (buf, smb_vwv8, 0); /* reserved */
-
-	if (server->protocol > PROTOCOL_COREPLUS)
-	{
-		WSET (buf, smb_vwv10, len);
-		WSET (buf, smb_vwv11, p - smb_base(buf));
-	}
-	else
-	{
-		WSET (buf, smb_vwv10, 0);
-	}
-
-	LOG(("requesting SMBwritebraw\n"));
-
-	result = smb_request_ok_with_payload (server, SMBwritebraw, 1, 0, NULL, data, len, error_ptr);
-	if (result < 0)
-	{
-		if (smb_retry (server))
-		{
-			if(reopen_entry(server,finfo,NULL) < 0)
-			{
-				LOG(("that didn't work.\n"));
-				goto out;
-			}
-			else
-			{
-				goto retry;
-			}
-		}
-		else
-		{
-			goto out;
-		}
-	}
-
-	num_bytes_written += len;
-
-	data += len;
-	count -= len;
-
-	LOG (("bytes sent so far = %ld\n", num_bytes_written));
-
-	if(count > 0)
-	{
-		LOG(("sending %ld bytes of data (raw)\n",count));
-
-		ASSERT( count <= 65535 );
-
-		result = smb_request_write_raw (server, data, count, error_ptr);
-		if (result < 0)
-		{
-			/* Roll back the counters */
-			num_bytes_written -= len;
-
-			data -= len;
-			count += len;
-
-			if (smb_retry (server))
-			{
-				if(reopen_entry(server,finfo,NULL) < 0)
-				{
-					LOG(("that didn't work.\n"));
-					goto out;
-				}
-				else
-				{
-					goto retry;
-				}
-			}
-			else
-			{
-				goto out;
-			}
-		}
-
-		if(server->write_behind)
-		{
-			/* We just assume success; the next file operation to follow
-			 * will set an error status if something went wrong.
-			 */
-			result = num_bytes_written + count;
-		}
-		else
-		{
-			int error;
-
-			/* We have to do the checks of smb_request_ok here as well */
-			if ((error = smb_valid_packet (server->transmit_buffer)) != 0)
-			{
-				LOG (("not a valid packet!\n"));
-
-				(*error_ptr) = error;
-				result = -1;
-
-				goto out;
-			}
-			else if (server->rcls != 0)
-			{
-				LOG (("server error %ld/%ld\n", server->rcls, server->err));
-
-				smb_printerr (server->rcls, server->err);
-
-				(*error_ptr) = error_check_smb_error;
-				result = -1;
-
-				goto out;
-			}
-
-			result = num_bytes_written + count;
-		}
-
-		LOG (("bytes sent so far = %ld\n", result));
-	}
-
- out:
-
-	return result;
-}
-
-int
-smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr)
+smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, const char *data, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -1557,17 +1328,17 @@ smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, off_t offs
 	BSET (buf, smb_vwv0, 0xFF);	/* AndXCommand/AndXReserved - no additional SMB commands provided */
 	WSET (buf, smb_vwv1, 0); /* AndXOffset */
 	WSET (buf, smb_vwv2, finfo->fileid); /* fid */
-	DSET (buf, smb_vwv3, offset); /* offset */
+	DSET (buf, smb_vwv3, offset_quad->Low); /* offset */
 	DSET (buf, smb_vwv5, 0); /* timeout */
 	WSET (buf, smb_vwv7, 0); /* write mode */
 	WSET (buf, smb_vwv8, 0); /* remaining */
 	WSET (buf, smb_vwv9, 0); /* reserved */
 	WSET (buf, smb_vwv10, count); /* data length */
-	
+
 	if(server->protocol >= PROTOCOL_NT1)
 	{
 		WSET (buf, smb_vwv11, 64+2); /* data offset */
-		DSET (buf, smb_vwv12, 0); /* high offset */
+		DSET (buf, smb_vwv12, offset_quad->High); /* high offset */
 	}
 	else
 	{
@@ -1579,7 +1350,8 @@ smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, off_t offs
 	WSET (p, 0, 1+count); p += 2; /* Byte count (1 pad byte + data bytes)  */
 	(*p) = 0; /* Padding byte that must be ignored */
 
-	LOG(("requesting SMBwriteX\n"));
+
+	LOG(("requesting SMBwriteX: offset=%s, count=%ld\n", convert_quad_to_string(offset_quad), count));
 
 	result = smb_request_ok_with_payload (server, SMBwriteX, 6, 0, NULL, data, count, error_ptr);
 	if (result < 0)
@@ -1608,7 +1380,7 @@ smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, off_t offs
 }
 
 int
-smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr)
+smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, char *data, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -1625,20 +1397,20 @@ smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	BSET (buf, smb_vwv0, 0xFF);	/* AndXCommand/AndXReserved - no additional SMB commands provided */
 	WSET (buf, smb_vwv1, 0); /* AndXOffset */
 	WSET (buf, smb_vwv2, finfo->fileid); /* fid */
-	DSET (buf, smb_vwv3, offset); /* offset */
+	DSET (buf, smb_vwv3, offset_quad->Low); /* offset */
 	WSET (buf, smb_vwv5, count); /* MaxCountOfBytesToReturn */
 	WSET (buf, smb_vwv6, 0); /* MinCountOfBytesToReturn */
 	DSET (buf, smb_vwv7, 0); /* timeout */
 	WSET (buf, smb_vwv9, 0); /* remaining */
 
 	if(server->protocol >= PROTOCOL_NT1)
-		DSET (buf, smb_vwv10, 0); /* OffsetHigh */
+		DSET (buf, smb_vwv10, offset_quad->High); /* OffsetHigh */
 
 	/* Now for the data portion of the message */
 
 	WSET (p, 0, 0); /* Byte count */
 
-	LOG(("requesting SMBreadX: offset=%ld, count=%ld\n", offset, count));
+	LOG(("requesting SMBreadX: offset=%s, count=%ld\n", convert_quad_to_string(offset_quad), count));
 
 	result = smb_request_ok_with_payload (server, SMBreadX, 7, 0, data, NULL, count, error_ptr);
 	if (result < 0)
@@ -1654,12 +1426,12 @@ smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	else
 	{
 		word data_length;
-		
+
 		p = SMB_VWV (server->transmit_buffer);
 		smb_decode_word (p + 10, &data_length);
-	
+
 		LOG(("number of bytes read = %ld\n", data_length));
-		
+
 		result = data_length;
 	}
 
@@ -1820,7 +1592,7 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 		WSET (outbuf, smb_msrcnt, 0);										/* MaxSetupCount+Reserved1 */
 		WSET (outbuf, smb_flags, 0);										/* Flags */
 		DSET (outbuf, smb_timeout, 0);										/* Timeout */
-																			/* Reserved2 */ 
+																			/* Reserved2 */
 		WSET (outbuf, smb_pscnt, WVAL (outbuf, smb_tpscnt));				/* ParameterCount */
 		WSET (outbuf, smb_psoff, ((SMB_BUF (outbuf) + 3) - outbuf) - NETBIOS_HEADER_SIZE);	/* ParameterOffset */
 		WSET (outbuf, smb_dscnt, 0);										/* DataCount */
@@ -1975,7 +1747,8 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 
 	entry->attr = BVAL (p, 0);
 	entry->mtime = entry->atime = entry->ctime = entry->wtime = date_dos2unix (WVAL (p, 1), WVAL (p, 3));
-	entry->size = DVAL (p, 5);
+	entry->size_low = DVAL (p, 5);
+	entry->size_high = 0;
 
 	name_size = 13;
 
@@ -1986,7 +1759,7 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 
 	entry->complete_path[name_size] = '\0';
 
-	LOG (("path = %s\n", entry->complete_path));
+	LOG (("path = '%s'\n", escape_name(entry->complete_path)));
 
 	#if DEBUG
 	{
@@ -2031,7 +1804,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 	strcat (mask, "\\*.*");
 
 	LOG (("SMB call readdir %ld @ %ld\n", cache_size, fpos));
-	LOG (("                 mask = %s\n", mask));
+	LOG (("                 mask = '%s'\n", escape_name(mask)));
 
 	buf = server->transmit_buffer;
 
@@ -2265,8 +2038,10 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 
 			if (finfo != NULL)
 			{
+				const char * name;
 				int name_len;
-				
+
+				name = &p[27];
 				name_len = BVAL (p, 26);
 
 				SHOWVALUE(name_len);
@@ -2280,24 +2055,24 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 					break;
 				}
 
-				finfo->ctime	= date_dos2unix (WVAL (p, 6), WVAL (p, 4));
-				finfo->atime	= date_dos2unix (WVAL (p, 10), WVAL (p, 8));
-				finfo->mtime	= date_dos2unix (WVAL (p, 14), WVAL (p, 12));
-				finfo->wtime	= finfo->mtime;
-				finfo->size		= DVAL (p, 16);
-				finfo->attr		= WVAL (p, 24);
-				finfo->len		= name_len;
-
-				/* Don't return names with NUL bytes. */
-				if(memchr(&p[27], '\0', name_len) != NULL)
+				if(name_len == 0)
 				{
-					SHOWMSG("name contains NUL bytes (skipping it)");
+					D(("name length == 0 (skipping it)"));
 
 					success = FALSE;
 					break;
 				}
 
-				memcpy(finfo->complete_path, &p[27], name_len);
+				finfo->ctime		= date_dos2unix (WVAL (p, 6), WVAL (p, 4));
+				finfo->atime		= date_dos2unix (WVAL (p, 10), WVAL (p, 8));
+				finfo->mtime		= date_dos2unix (WVAL (p, 14), WVAL (p, 12));
+				finfo->wtime		= finfo->mtime;
+				finfo->size_low		= DVAL (p, 16);
+				finfo->size_high	= DVAL (p, 16);
+				finfo->attr			= WVAL (p, 24);
+				finfo->len			= name_len;
+
+				memcpy(finfo->complete_path, name, name_len);
 				finfo->complete_path[name_len] = '\0';
 			}
 
@@ -2311,51 +2086,51 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 
 			if (finfo != NULL)
 			{
+				dword size_low,size_high;
 				int name_len;
-				time_t swap;
 
 				p += 4; /* next entry offset */
-				
+
 				p += 4; /* fileindex */
-				
+
 				finfo->ctime = convert_long_date_to_time_t(p);
 				p += 8;
-				
+
 				finfo->atime = convert_long_date_to_time_t(p);
 				p += 8;
-				
+
 				finfo->wtime = convert_long_date_to_time_t(p);
 				p += 8;
-				
+
 				finfo->mtime = convert_long_date_to_time_t(p);
 				p += 8;
-				
+
 				/* If the modification time is not set, try to
 				 * substitute the write time for it.
 				 */
 				if(finfo->mtime == 0)
 					finfo->mtime = finfo->wtime;
 
-				/* Swap last modification time and last write time. */
-				swap			= finfo->mtime;
-				finfo->mtime	= finfo->wtime;
-				finfo->wtime	= swap;
-
-				/* Note: size is a 64 bit integer, we only use the least significant 32 bits. */
-				finfo->size = DVAL (p, 0);
+				size_low	= DVAL (p, 0);
+				size_high	= DVAL (p, 4);
 				p += 8;
-				
+
+				finfo->size_low = size_low;
+				finfo->size_high = size_high;
+
 				p += 8; /* alloc size */
-				
+
 				finfo->attr = DVAL (p, 0);
 				p += 4;
-				
+
 				name_len = DVAL (p, 0);
 				p += 4;
 
 				/* Skip directory entries whose names we cannot store. */
 				if(name_len == 0)
 				{
+					SHOWMSG("name is empty");
+
 					success = FALSE;
 					break;
 				}
@@ -2363,35 +2138,37 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 				SHOWVALUE(name_len);
 
 				p += 4; /* EA size */
-				
+
 				p += 1; /* short name length */
 				p += 1; /* reserved */
-				
+
 				p += 12*2; /* short name (12 WCHAR characters) */
 
-				/* Skip directory entries whose names we cannot store. */
-				if(name_len == 0)
+				/* Just in case, try to remove any trailing NUL bytes from the name. */
+				if(p[name_len - 1] == '\0')
 				{
-					success = FALSE;
-					break;
-				}
+					SHOWMSG("removing trailing NUL bytes from name");
 
-				if(p[name_len-1] == '\0')				
-					name_len--;
+					do
+					{
+						name_len--;
+					}
+					while(name_len > 0 && p[name_len - 1] == '\0');
+
+					/* This shouldn't become an empty name. */
+					if(name_len == 0)
+					{
+						SHOWMSG("name is empty");
+
+						success = FALSE;
+						break;
+					}
+				}
 
 				/* Skip directory entries whose names we cannot store. */
 				if(name_len >= (int)finfo->complete_path_size)
 				{
 					D(("name length >= %ld (skipping it)", finfo->complete_path_size));
-
-					success = FALSE;
-					break;
-				}
-
-				/* Don't return names with NUL bytes. */
-				if(memchr(p, '\0', name_len) != NULL)
-				{
-					SHOWMSG("name contains NUL bytes (skipping it)");
 
 					success = FALSE;
 					break;
@@ -2408,7 +2185,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 		default:
 
 			(*entry_length_ptr) = 0;
-			
+
 			success = FALSE;
 			break;
 	}
@@ -2441,7 +2218,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	int result = 0;
 
 	int ff_searchcount;
-	int ff_eos = 0;
+	int ff_end_of_search = 0;
 	int ff_dir_handle = 0;
 	int ff_resume_key = 0;
 	int loop_count = 0;
@@ -2451,9 +2228,9 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	int dirlen = strlen (path) + 2 + 1;
 	char *mask;
 	int masklen;
-	
+
 	int entry_length;
-	
+
 	ENTER();
 
 	/* ZZZ experimental 'max_matches' adjustment */
@@ -2483,7 +2260,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	masklen = strlen (mask);
 
 	LOG (("SMB call lreaddir %ld @ %ld\n", cache_size, fpos));
-	LOG (("                  mask = %s\n", mask));
+	LOG (("                  mask = '%s'\n", escape_name(mask)));
 
 	resp_param = NULL;
 	resp_data = NULL;
@@ -2494,7 +2271,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	total_count = 0;
 	current_entry = entry;
 
-	while (ff_eos == 0)
+	while (ff_end_of_search == 0)
 	{
 		loop_count++;
 		if (loop_count > 200)
@@ -2520,7 +2297,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 		WSET (outbuf, smb_msrcnt, 0);										/* MaxSetupCount+Reserved1 */
 		WSET (outbuf, smb_flags, 0);										/* Flags */
 		DSET (outbuf, smb_timeout, 0);										/* Timeout */
-																			/* Reserved2 */ 
+																			/* Reserved2 */
 		WSET (outbuf, smb_pscnt, WVAL (outbuf, smb_tpscnt));				/* ParameterCount */
 		WSET (outbuf, smb_psoff, ((SMB_BUF (outbuf) + 3) - outbuf) - NETBIOS_HEADER_SIZE);	/* ParameterOffset */
 		WSET (outbuf, smb_dscnt, 0);										/* DataCount */
@@ -2540,18 +2317,18 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 			LOG (("first match\n"));
 			WSET (p, 0, attribute); /* attribute */
 			WSET (p, 2, max_matches); /* max count */
-			WSET (p, 4, 8 + 4 + 2); /* resume required + close on end + continue */
+			WSET (p, 4, SMB_FIND_CLOSE_AT_EOS|SMB_FIND_RETURN_RESUME_KEYS|SMB_FIND_CONTINUE_FROM_LAST);
 			WSET (p, 6, info_level);
-			DSET (p, 8, 0);
+			DSET (p, 8, 0); /* return every entry there is */
 		}
 		else
 		{
-			LOG (("next match; ff_dir_handle=0x%lx ff_resume_key=%ld mask='%s'\n", ff_dir_handle, ff_resume_key, mask));
+			LOG (("next match; ff_dir_handle=0x%lx ff_resume_key=%ld mask='%s'\n", ff_dir_handle, ff_resume_key, escape_name(mask)));
 			WSET (p, 0, ff_dir_handle);
 			WSET (p, 2, max_matches); /* max count */
 			WSET (p, 4, info_level);
 			DSET (p, 6, ff_resume_key);
-			WSET (p, 10, 8 + 4 + 2); /* resume required + close on end + continue */
+			WSET (p, 10, SMB_FIND_CLOSE_AT_EOS|SMB_FIND_RETURN_RESUME_KEYS|SMB_FIND_CONTINUE_FROM_LAST);
 		}
 
 		p += 12;
@@ -2615,15 +2392,15 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 			ff_dir_handle = WVAL (p, 0);
 
 			ff_searchcount = WVAL (p, 2);
-			ff_eos = WVAL (p, 4);
+			ff_end_of_search = WVAL (p, 4);
 		}
 		else
 		{
 			ff_searchcount = WVAL (p, 0);
-			ff_eos = WVAL (p, 2);
+			ff_end_of_search = WVAL (p, 2);
 		}
 
-		LOG (("received %ld entries (eos=%ld)\n",ff_searchcount, ff_eos));
+		LOG (("received %ld entries (end_of_search=%ld)\n",ff_searchcount, ff_end_of_search));
 		if (ff_searchcount == 0)
 			break;
 
@@ -2785,7 +2562,7 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	char *p;
 	char *buf = server->transmit_buffer;
 
-	LOG (("path=%s\n", path));
+	LOG (("path='%s'\n", escape_name(path)));
 
 	ASSERT( smb_payload_size(server, 0, 2 + len) >= 0 );
 
@@ -2808,7 +2585,8 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	/* The server only tells us 1 time */
 	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv1));
 
-	entry->size = DVAL (buf, smb_vwv3);
+	entry->size_low = DVAL (buf, smb_vwv3);
+	entry->size_high = 0;
 
 	#if DEBUG
 	{
@@ -2855,7 +2633,7 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	WSET (outbuf, smb_msrcnt, 0);										/* MaxSetupCount+Reserved1 */
 	WSET (outbuf, smb_flags, 0);										/* Flags */
 	DSET (outbuf, smb_timeout, 0);										/* Timeout */
-																		/* Reserved2 */ 
+																		/* Reserved2 */
 	WSET (outbuf, smb_pscnt, WVAL (outbuf, smb_tpscnt));				/* ParameterCount */
 	WSET (outbuf, smb_psoff, ((SMB_BUF (outbuf) + 3) - outbuf) - NETBIOS_HEADER_SIZE);	/* ParameterOffset */
 	WSET (outbuf, smb_dscnt, 0);										/* DataCount */
@@ -2927,15 +2705,20 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	p = smb_decode_dword(p, &end_of_file_low);
 	(void) smb_decode_dword(p, &end_of_file_high);
 
-	entry->size = end_of_file_low;
+	entry->size_low = end_of_file_low;
+	entry->size_high = end_of_file_high;
 
 	#if DEBUG
 	{
 		struct tm tm;
+		QUAD entry_size_quad;
+
+		entry_size_quad.Low		= entry->size_low;
+		entry_size_quad.High	= entry->size_high;
 
 		GMTime(entry->mtime,&tm);
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-		LOG(("size = %lu (0x%08lx)\n",entry->size,entry->size));
+		LOG(("size = %s (0x%08lx:0x%08lx)\n",convert_quad_to_string(&entry_size_quad),entry->size_high,entry->size_low));
 		LOG(("attr = 0x%08lx\n",entry->attr));
 	}
 	#endif /* DEBUG */
@@ -2969,12 +2752,13 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry, int * er
 			goto out;
 	}
 
-	entry->ctime	= date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
-	entry->atime	= date_dos2unix (WVAL (buf, smb_vwv3), WVAL (buf, smb_vwv2));
-	entry->mtime	= date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
-	entry->wtime	= entry->mtime;
-	entry->size		= DVAL (buf, smb_vwv6);
-	entry->attr		= WVAL (buf, smb_vwv10);
+	entry->ctime		= date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
+	entry->atime		= date_dos2unix (WVAL (buf, smb_vwv3), WVAL (buf, smb_vwv2));
+	entry->mtime		= date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
+	entry->wtime		= entry->mtime;
+	entry->size_low		= DVAL (buf, smb_vwv6);
+	entry->size_high	= 0;
+	entry->attr			= WVAL (buf, smb_vwv10);
 
 	#if DEBUG
 	{
@@ -3000,17 +2784,17 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry, int * er
 }
 
 int
-smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, const dword * size_ptr, int * error_ptr)
+smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, const QUAD * const size_quad, int * error_ptr)
 {
 	unsigned char *outbuf = server->transmit_buffer;
 	int data_size;
 	char * p;
 	int result;
-	QUAD change_time;
+	QUAD change_time_quad;
 
  retry:
 
-	data_size = (size_ptr == NULL) ? 40 : 8;
+	data_size = (size_quad == NULL) ? 40 : 8;
 
 	ASSERT( smb_payload_size(server, 15, 3 + 6 + 2 + data_size) >= 0 );
 
@@ -3023,7 +2807,7 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 	WSET (outbuf, smb_msrcnt, 0);										/* MaxSetupCount+Reserved1 */
 	WSET (outbuf, smb_flags, 0);										/* Flags */
 	DSET (outbuf, smb_timeout, 0);										/* Timeout */
-																		/* Reserved2 */ 
+																		/* Reserved2 */
 	WSET (outbuf, smb_pscnt, WVAL (outbuf, smb_tpscnt));				/* ParameterCount */
 	WSET (outbuf, smb_psoff, ((SMB_BUF (outbuf) + 3) - outbuf) - NETBIOS_HEADER_SIZE);	/* ParameterOffset */
 	WSET (outbuf, smb_dscnt, WVAL (outbuf, smb_tdscnt));				/* DataCount */
@@ -3039,7 +2823,7 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 	(*p++) = '\0';
 
 	WSET (p, 0, entry->fileid);
-	WSET (p, 2, size_ptr == NULL ? SMB_SET_FILE_BASIC_INFO : SMB_SET_FILE_END_OF_FILE_INFO);
+	WSET (p, 2, size_quad == NULL ? SMB_SET_FILE_BASIC_INFO : SMB_SET_FILE_END_OF_FILE_INFO);
 	WSET (p, 4, 0);
 
 	p += 6;
@@ -3048,7 +2832,7 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 	(*p++) = '\0';
 	(*p++) = '\0';
 
-	if(size_ptr == NULL)
+	if(size_quad == NULL)
 	{
 		/* Creation time (no change) */
 		DSET(p, 0, 0);
@@ -3058,15 +2842,15 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 		DSET(p, 8, 0);
 		DSET(p, 12, 0);
 
-		convert_time_t_to_long_date(entry->mtime,&change_time);
+		convert_time_t_to_long_date(entry->mtime,&change_time_quad);
 
 		/* Last write time */
-		DSET(p, 16, change_time.Low);
-		DSET(p, 20, change_time.High);
+		DSET(p, 16, change_time_quad.Low);
+		DSET(p, 20, change_time_quad.High);
 
 		/* Change time */
-		DSET(p, 24, change_time.Low);
-		DSET(p, 28, change_time.High);
+		DSET(p, 24, change_time_quad.Low);
+		DSET(p, 28, change_time_quad.High);
 
 		/* Extended file attributes */
 		DSET(p, 32, entry->attr);
@@ -3077,8 +2861,8 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 	else
 	{
 		/* End of file */
-		DSET(p, 0, (*size_ptr));
-		DSET(p, 4, 0);
+		DSET(p, 0, size_quad->Low);
+		DSET(p, 4, size_quad->High);
 	}
 
 	result = smb_trans2_request (server, SMBtrans2, NULL, NULL, NULL, NULL, error_ptr);
@@ -3220,7 +3004,7 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 		WSET (outbuf, smb_msrcnt, 0);										/* MaxSetupCount+Reserved1 */
 		WSET (outbuf, smb_flags, 0);										/* Flags */
 		DSET (outbuf, smb_timeout, 0);										/* Timeout */
-																			/* Reserved2 */ 
+																			/* Reserved2 */
 		WSET (outbuf, smb_pscnt, WVAL (outbuf, smb_tpscnt));				/* ParameterCount */
 		WSET (outbuf, smb_psoff, ((SMB_BUF (outbuf) + 3) - outbuf) - NETBIOS_HEADER_SIZE);	/* ParameterOffset */
 		WSET (outbuf, smb_dscnt, 0);										/* DataCount */
@@ -3686,7 +3470,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 			smb_setup_header (server, SMBsesssetupX, 13, user_len + password_len + nt_password_len + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1);
 
-			capabilities = CAP_RAW_MODE|CAP_LARGE_READX|CAP_LARGE_WRITEX|CAP_NT_FIND|CAP_LARGE_FILES;
+			capabilities = CAP_LARGE_READX|CAP_LARGE_WRITEX|CAP_NT_FIND|CAP_LARGE_FILES;
 
 			WSET (packet, smb_vwv0, 0xff);				/* AndXCommand+AndXReserved */
 			WSET (packet, smb_vwv1, 0);					/* AndXOffset */
@@ -3797,7 +3581,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 		StringToUpper(full_share);
 
-		SHOWSTRING(full_share);
+		D(("full_share = '%s'", escape_name(full_share)));
 
 		ASSERT( smb_payload_size(server, 4, password_len + full_share_len+1 + strlen(dev)+1) >= 0 );
 

@@ -40,10 +40,6 @@
 
 /*****************************************************************************/
 
-extern VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString,...);
-
-/*****************************************************************************/
-
 /* This can be used to enable or disable the SMB packet dump output. */
 static int dump_smb_enabled;
 

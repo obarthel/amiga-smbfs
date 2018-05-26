@@ -365,6 +365,13 @@
 #define SMB_INFO_STANDARD				0x0001	/* LAN Manager 2.0 */
 #define SMB_FILE_BOTH_DIRECTORY_INFO	0x0104	/* NT LAN Manager */
 
+/* Flags used by TRANSACT2_FINDFIRST */
+#define SMB_FIND_CLOSE_AFTER_REQUEST	0x0001	/* Close the request after this search */
+#define SMB_FIND_CLOSE_AT_EOS			0x0002	/* Close search when end of search is reached */
+#define SMB_FIND_RETURN_RESUME_KEYS		0x0004	/* Return resume keys for each entry found */
+#define SMB_FIND_CONTINUE_FROM_LAST		0x0008	/* Continue search from previous ending place */
+#define SMB_FIND_WITH_BACKUP_INTENT		0x0010	/* Find with backup intent */
+
 /* File system information formats supported by TRANSACT2_QFSINFO (actually,
  * we only need this one).
  */

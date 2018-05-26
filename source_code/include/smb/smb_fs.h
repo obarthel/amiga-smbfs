@@ -18,6 +18,10 @@
 
 #include <netinet/in.h>
 
+#ifndef _QUAD_MATH_H
+#include "quad_math.h"
+#endif /* _QUAD_MATH_H */
+
 /* This structure is used to pass the arguments to smb_proc_lockingX
  */
 struct smb_lkrng
@@ -50,11 +54,9 @@ int smb_payload_size(const struct smb_server *server, int wct, int bcc);
 int smb_proc_open(struct smb_server *server, const char *pathname, int len, int writable, int truncate, struct smb_dirent *entry, int * error_ptr);
 int smb_proc_close(struct smb_server *server, word fileid, dword mtime, int * error_ptr);
 int smb_proc_read(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr);
-int smb_proc_read_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr);
 int smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr);
-int smb_proc_write_raw(struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr);
-int smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr);
-int smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr);
+int smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset, long count, const char *data, int * error_ptr);
+int smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset, long count, char *data, int * error_ptr);
 int smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct smb_lkrng *locks, int num_entries, int mode, long timeout, int * error_ptr);
 int smb_proc_create(struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr);
 int smb_proc_mv(struct smb_server *server, const char *opath, const int olen, const char *npath, const int nlen, int * error_ptr);
@@ -66,7 +68,7 @@ int smb_proc_readdir(struct smb_server *server, char *path, int fpos, int cache_
 int smb_proc_getattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr);
 int smb_proc_getattrE(struct smb_server *server, struct smb_dirent *entry, int * error_ptr);
 int smb_query_path_information(struct smb_server *server, const char *path, int len, int fid, struct smb_dirent *entry, int * error_ptr);
-int smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, const dword * size_ptr, int * error_ptr);
+int smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, const QUAD * const size, int * error_ptr);
 int smb_proc_setattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *new_finfo, int * error_ptr);
 int smb_proc_setattrE(struct smb_server *server, word fid, struct smb_dirent *new_entry, int * error_ptr);
 int smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * error_ptr);
@@ -78,7 +80,5 @@ void smb_release(struct smb_server *server);
 int smb_connect(struct smb_server *server, int * error_ptr);
 int smb_request(struct smb_server *server, int command, void * input_payload,const void * output_payload,int payload_size, int * error_ptr);
 int smb_trans2_request(struct smb_server *server, int command, int *data_len, int *param_len, char **data, char **param, int * error_ptr);
-int smb_request_read_raw(struct smb_server *server, unsigned char *target, int max_len, int * error_ptr);
-int smb_request_write_raw(struct smb_server *server, unsigned const char *source, int length, int * error_ptr);
 
 #endif /* _LINUX_SMB_FS_H */

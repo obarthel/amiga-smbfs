@@ -40,6 +40,7 @@
 #include "cp437.h"
 #include "cp850.h"
 #include "errors.h"
+#include "quad_math.h"
 #include "dump_smb.h"
 
 /****************************************************************************/
@@ -56,7 +57,7 @@ STRPTR Version = VERSTAG;
 /****************************************************************************/
 
 #define UNIX_TIME_OFFSET 252460800
-#define MAX_FILENAME_LEN 256
+#define MAX_FILENAME_LEN 255
 
 /****************************************************************************/
 
@@ -75,7 +76,7 @@ struct FileNode
 {
 	struct MinNode		fn_MinNode;
 	struct FileHandle *	fn_Handle;
-	LONG				fn_Offset;
+	QUAD				fn_OffsetQuad;
 	LONG				fn_Mode;
 	smba_file_t *		fn_File;
 	STRPTR				fn_FullName;
@@ -133,10 +134,10 @@ STATIC LONG main(VOID);
 STATIC ULONG get_stack_size(VOID);
 STATIC VOID stack_usage_init(struct StackSwapStruct * stk);
 STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
-STATIC LONG CVSPrintf(STRPTR format_string, APTR args);
-STATIC VOID VSPrintf(STRPTR buffer, STRPTR formatString, APTR args);
+STATIC LONG CVSPrintf(const TEXT * format_string, APTR args);
+STATIC VOID VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(STRPTR program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_write_behind, BOOL opt_prefer_write_raw, BOOL opt_disable_write_raw, BOOL opt_disable_read_raw, STRPTR opt_native_os, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
+STATIC BOOL Setup(const TEXT * program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, STRPTR opt_native_os, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
 STATIC VOID HandleFileSystem(STRPTR device_name, STRPTR volume_name, STRPTR service_name);
 
 /****************************************************************************/
@@ -222,8 +223,8 @@ STATIC struct MinList		ErrorList;
 STATIC STRPTR				NewProgramName;
 
 STATIC BOOL					TranslateNames;
-STATIC UBYTE				A2M[256];
-STATIC UBYTE				M2A[256];
+STATIC TEXT					A2M[256];
+STATIC TEXT					M2A[256];
 
 /****************************************************************************/
 
@@ -543,10 +544,6 @@ main(VOID)
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
 		SWITCH	NetBIOSTransport;
-		SWITCH	WriteBehind;
-		SWITCH	PreferWriteRaw;
-		SWITCH	DisableWriteRaw;
-		SWITCH	DisableReadRaw;
 		KEY		NativeOS;
 		SWITCH	DumpSMB;
 		NUMBER	DumpSMBLevel;
@@ -578,10 +575,6 @@ main(VOID)
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
 		"NETBIOS/S,"
-		"WRITEBEHIND/S,"
-		"PREFERWRITERAW/S,"
-		"DISABLEWRITERAW/S,"
-		"DISABLEREADRAW/S,"
 		"NATIVEOS/K,"
 		"DUMPSMB/S,"
 		"DUMPSMBLEVEL/N/K,"
@@ -594,7 +587,7 @@ main(VOID)
 
 	BPTR debug_file = (BPTR)NULL;
 	BOOL close_debug_file = FALSE;
-	UBYTE program_name[MAX_FILENAME_LEN];
+	TEXT program_name[MAX_FILENAME_LEN+1];
 	LONG result = RETURN_FAIL;
 	LONG number;
 	LONG other_number;
@@ -808,18 +801,6 @@ main(VOID)
 
 		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
 			args.NetBIOSTransport = TRUE;
-
-		if(FindToolType(Icon->do_ToolTypes,"WRITEBEHIND") != NULL)
-			args.WriteBehind = TRUE;
-
-		if(FindToolType(Icon->do_ToolTypes,"PREFERWRITERAW") != NULL)
-			args.PreferWriteRaw = TRUE;
-
-		if(FindToolType(Icon->do_ToolTypes,"DISABLEWRITERAW") != NULL)
-			args.DisableWriteRaw = TRUE;
-
-		if(FindToolType(Icon->do_ToolTypes,"DISABLEREADRAW") != NULL)
-			args.DisableReadRaw = TRUE;
 
 		str = FindToolType(Icon->do_ToolTypes,"NATIVEOS");
 		if(str != NULL)
@@ -1056,7 +1037,7 @@ main(VOID)
 
 	if(args.DebugLevel != NULL)
 	{
-		#if !defined(DEBUG)
+		#if !DEBUG
 		{
 			if(WBStartup == NULL)
 				ReportError("This version of smbfs cannot create debug output.");
@@ -1105,10 +1086,6 @@ main(VOID)
 		args.TimeZoneOffset,
 		args.DSTOffset,
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
-		args.WriteBehind,
-		args.PreferWriteRaw,
-		args.DisableWriteRaw,
-		args.DisableReadRaw,
 		args.NativeOS,
 		args.DeviceName,
 		args.VolumeName,
@@ -1155,7 +1132,7 @@ main(VOID)
 /****************************************************************************/
 
 static LONG VARARGS68K
-LocalFPrintf(BPTR output, const UBYTE * format, ...)
+LocalFPrintf(BPTR output, const TEXT * format, ...)
 {
 	va_list args;
 	LONG result;
@@ -1275,7 +1252,7 @@ host_strerror(int error)
  * to be compared.
  */
 LONG
-CompareNames(STRPTR a,STRPTR b)
+CompareNames(const TEXT * a,const TEXT * b)
 {
 	LONG result;
 
@@ -1293,7 +1270,7 @@ CompareNames(STRPTR a,STRPTR b)
 VOID
 StringToUpper(STRPTR s)
 {
-	UBYTE c;
+	TEXT c;
 
 	while((c = (*s)) != '\0')
 		(*s++) = ToUpper(c);
@@ -1309,15 +1286,15 @@ DisplayErrorList(VOID)
 {
 	struct MinNode * last = NULL;
 	struct MinNode * mn;
-	STRPTR str = NULL;
-	STRPTR msg;
-	LONG len;
+	TEXT * message = NULL;
+	const TEXT * str;
+	int size;
 
 	/* Determine how much memory will have to be
 	 * allocated to hold all the accumulated
 	 * error messages.
 	 */
-	len = 0;
+	size = 0;
 
 	for(mn = ErrorList.mlh_Head ;
 	    mn->mln_Succ != NULL ;
@@ -1325,31 +1302,39 @@ DisplayErrorList(VOID)
 	{
 		last = mn;
 
-		msg = (STRPTR)(mn + 1);
+		str = (TEXT *)(mn + 1);
 
-		len += strlen(msg)+1;
+		size += strlen(str)+1;
 	}
 
 	/* Allocate the memory for the messages, then
 	 * copy them there.
 	 */
-	if(len > 0)
+	if(size > 0)
 	{
-		str = AllocVec(len,MEMF_ANY);
-		if(str != NULL)
+		message = AllocVec(size,MEMF_ANY);
+		if(message != NULL)
 		{
-			str[0] = '\0';
+			int message_len;
+			int len;
+
+			message_len = 0;
 
 			for(mn = ErrorList.mlh_Head ;
 			    mn->mln_Succ != NULL ;
 			    mn = mn->mln_Succ)
 			{
-				msg = (STRPTR)(mn + 1);
+				str = (TEXT *)(mn + 1);
+				len = strlen(str);
 
-				strcat(str,msg);
+				memcpy(&message[message_len], str, len);
+				message_len += len;
+
 				if(mn != last)
-					strcat(str,"\n");
+					message[message_len++] = '\n';
 			}
+
+			message[message_len] = '\0';
 		}
 	}
 
@@ -1358,7 +1343,7 @@ DisplayErrorList(VOID)
 		FreeVec(mn);
 
 	/* Display the error messages. */
-	if(str != NULL)
+	if(message != NULL)
 	{
 		IntuitionBase = OpenLibrary("intuition.library",37);
 
@@ -1390,13 +1375,13 @@ DisplayErrorList(VOID)
 
 			es.es_StructSize	= sizeof(es);
 			es.es_Title			= title;
-			es.es_TextFormat	= str;
-			es.es_GadgetFormat	= "Ok";
+			es.es_TextFormat	= message;
+			es.es_GadgetFormat	= "OK";
 
 			EasyRequestArgs(NULL,&es,NULL,NULL);
 		}
 
-		FreeVec(str);
+		FreeVec(message);
 	}
 
 	#if defined(__amigaos4__)
@@ -1418,16 +1403,16 @@ DisplayErrorList(VOID)
  * necessary.
  */
 STATIC VOID
-AddError(STRPTR fmt,APTR args)
+AddError(const TEXT * fmt,APTR args)
 {
-	LONG len;
+	int size;
 
-	len = CVSPrintf(fmt,args);
-	if(len > 0)
+	size = CVSPrintf(fmt,args);
+	if(size > 0)
 	{
 		struct MinNode * mn;
 
-		mn = AllocVec(sizeof(*mn) + len,MEMF_ANY|MEMF_PUBLIC);
+		mn = AllocVec(sizeof(*mn) + size,MEMF_ANY|MEMF_PUBLIC);
 		if(mn != NULL)
 		{
 			STRPTR msg = (STRPTR)(mn + 1);
@@ -1445,7 +1430,7 @@ AddError(STRPTR fmt,APTR args)
  * from Shell, error messages will be accumulated for later display.
  */
 VOID VARARGS68K
-ReportError(STRPTR fmt,...)
+ReportError(const TEXT * fmt,...)
 {
 	if(NOT Quiet)
 	{
@@ -1470,7 +1455,7 @@ ReportError(STRPTR fmt,...)
 		else
 		{
 			struct Process * this_process = (struct Process *)FindTask(NULL);
-			UBYTE program_name[MAX_FILENAME_LEN];
+			TEXT program_name[MAX_FILENAME_LEN+1];
 			BPTR output;
 
 			GetProgramName(program_name,sizeof(program_name));
@@ -1662,8 +1647,8 @@ MakeTime(const struct tm * const tm)
 
 struct FormatContext
 {
-	UBYTE *	fc_Buffer;
-	LONG	fc_Size;
+	TEXT *	fc_Buffer;
+	int		fc_Size;
 };
 
 /****************************************************************************/
@@ -1676,7 +1661,7 @@ CountChar(REG(a3,struct FormatContext * fc))
 
 /* Count the number of characters SPrintf() would put into a string. */
 STATIC LONG
-CVSPrintf(STRPTR format_string,APTR args)
+CVSPrintf(const TEXT * format_string,APTR args)
 {
 	struct FormatContext fc;
 
@@ -1690,13 +1675,13 @@ CVSPrintf(STRPTR format_string,APTR args)
 /****************************************************************************/
 
 STATIC VOID ASM
-StuffChar(REG(d0,UBYTE c),REG(a3,struct FormatContext * fc))
+StuffChar(REG(d0,TEXT c),REG(a3,struct FormatContext * fc))
 {
 	(*fc->fc_Buffer++) = c;
 }
 
 STATIC VOID
-VSPrintf(STRPTR buffer, STRPTR formatString, APTR args)
+VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args)
 {
 	struct FormatContext fc;
 
@@ -1709,7 +1694,7 @@ VSPrintf(STRPTR buffer, STRPTR formatString, APTR args)
 
 /* Format a string for output. */
 VOID VARARGS68K
-SPrintf(STRPTR buffer, STRPTR formatString,...)
+SPrintf(STRPTR buffer, const TEXT * formatString,...)
 {
 	va_list varArgs;
 
@@ -2101,7 +2086,8 @@ CheckAccessModeCollision(STRPTR name,LONG mode)
 	int error = OK;
 
 	ENTER();
-	SHOWSTRING(name);
+
+	D(("name = '%s'", escape_name(name)));
 
 	fn = FindFileNode(name,NULL);
 	if(fn != NULL)
@@ -2163,29 +2149,25 @@ NameAlreadyInUse(STRPTR name)
  * should be avoided when used with the SMB file sharing protocol.
  */
 STATIC BOOL
-IsReservedName(STRPTR name)
+is_reserved_name(const TEXT * name)
 {
-	BOOL result = FALSE;
+	BOOL result = TRUE;
+	TEXT c;
 
 	/* Disallow "." and "..". */
 	if(name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0')))
-	{
-		result = TRUE;
-	}
-	else
-	{
-		UBYTE c;
+		goto out;
 
-		/* Disallow the use of the backslash in file names. */
-		while((c = (*name++)) != '\0')
-		{
-			if(c == SMB_PATH_SEPARATOR)
-			{
-				result = TRUE;
-				break;
-			}
-		}
+	/* Disallow the use of the backslash in file names. */
+	while((c = (*name++)) != '\0')
+	{
+		if(c == SMB_PATH_SEPARATOR)
+			goto out;
 	}
+
+	result = FALSE;
+
+ out:
 
 	return(result);
 }
@@ -2200,7 +2182,7 @@ MapErrnoToIoErr(int error)
 	 * POSIX covers more than a hundred different error codes
 	 * whereas with AmigaDOS we're stranded with a measly 48...
 	 */
-	STATIC const LONG map_posix_to_amigados[][2] =
+	STATIC const int map_posix_to_amigados[][2] =
 	{
 		{ E2BIG,			ERROR_TOO_MANY_ARGS },			/* Argument list too long */
 		{ EACCES,			ERROR_READ_PROTECTED },			/* Permission denied */
@@ -2312,7 +2294,7 @@ MapErrnoToIoErr(int error)
 
 	#if DEBUG
 	{
-		UBYTE amigados_error_text[256];
+		TEXT amigados_error_text[256];
 
 		Fault(result,NULL,amigados_error_text,sizeof(amigados_error_text));
 
@@ -2345,10 +2327,10 @@ MapErrnoToIoErr(int error)
  * and FALSE if at least one character cannot be translated.
  */
 STATIC BOOL
-TranslateBName(UBYTE * name,const UBYTE * map)
+TranslateBName(TEXT * name,const TEXT * map)
 {
 	BOOL success = TRUE;
-	UBYTE c;
+	TEXT c;
 	int len;
 
 	len = (*name++);
@@ -2377,10 +2359,10 @@ TranslateBName(UBYTE * name,const UBYTE * map)
  * cannot be translated.
  */
 STATIC BOOL
-TranslateCName(UBYTE * name,const UBYTE * map)
+TranslateCName(TEXT * name,const TEXT * map)
 {
 	BOOL success = TRUE;
-	UBYTE c;
+	TEXT c;
 
 	while((c = (*name)) != '\0')
 	{
@@ -2413,7 +2395,7 @@ ReallyRemoveDosEntry(struct DosList * entry)
 	struct MsgPort * port;
 	struct DosList * dl;
 	BOOL result = FALSE;
-	LONG kind,i;
+	int kind,i;
 
 	if(entry->dol_Type == DLT_DEVICE)
 		kind = LDF_DEVICES;
@@ -2616,38 +2598,34 @@ Cleanup(VOID)
 /* Allocate all the necessary resources to get going. */
 STATIC BOOL
 Setup(
-	STRPTR	program_name,
-	STRPTR	service,
-	STRPTR	workgroup,
-	STRPTR	username,
-	STRPTR	opt_password,
-	BOOL	opt_changecase,
-	STRPTR	opt_clientname,
-	STRPTR	opt_servername,
-	int		opt_cachesize,
-	int		opt_max_transmit,
-	int		opt_timeout,
-	LONG *	opt_time_zone_offset,
-	LONG *	opt_dst_offset,
-	BOOL	opt_raw_smb,
-	BOOL	opt_write_behind,
-	BOOL	opt_prefer_write_raw,
-	BOOL	opt_disable_write_raw,
-	BOOL	opt_disable_read_raw,
-	STRPTR	opt_native_os,
-	STRPTR	device_name,
-	STRPTR	volume_name,
-	STRPTR	translation_file)
+	const TEXT *	program_name,
+	STRPTR			service,
+	STRPTR			workgroup,
+	STRPTR			username,
+	STRPTR			opt_password,
+	BOOL			opt_changecase,
+	STRPTR			opt_clientname,
+	STRPTR			opt_servername,
+	int				opt_cachesize,
+	int				opt_max_transmit,
+	int				opt_timeout,
+	LONG *			opt_time_zone_offset,
+	LONG *			opt_dst_offset,
+	BOOL			opt_raw_smb,
+	STRPTR			opt_native_os,
+	STRPTR			device_name,
+	STRPTR			volume_name,
+	STRPTR			translation_file)
 {
 	BOOL result = FALSE;
 	struct DosList * dl;
 	int error = 0;
 	int smb_error_class = 0, smb_error = 0;
 	STRPTR actual_volume_name;
-	LONG actual_volume_name_len;
-	UBYTE name[MAX_FILENAME_LEN];
+	int actual_volume_name_len;
+	TEXT name[MAX_FILENAME_LEN+1];
 	BOOL device_exists = FALSE;
-	LONG len,i;
+	int len,i;
 
 	ENTER();
 
@@ -2749,7 +2727,7 @@ Setup(
 
 	if(opt_changecase)
 	{
-		for(i = 0 ; i < (LONG)strlen(opt_password) ; i++)
+		for(i = 0 ; i < (int)strlen(opt_password) ; i++)
 			opt_password[i] = ToUpper(opt_password[i]);
 	}
 
@@ -2785,7 +2763,7 @@ Setup(
 		}
 		else
 		{
-			UBYTE description[100];
+			TEXT description[100];
 
 			Fault(error,NULL,description,sizeof(description));
 			for(i = ((int)strlen(description)) - 1 ; i >= 0 ; i--)
@@ -2810,10 +2788,6 @@ Setup(
 		opt_max_transmit,
 		opt_timeout,
 		opt_raw_smb,
-		opt_write_behind,
-		opt_prefer_write_raw,
-		opt_disable_write_raw,
-		opt_disable_read_raw,
 		(char *)opt_native_os,
 		&error,
 		&smb_error_class,
@@ -3005,12 +2979,168 @@ Setup(
 
 /****************************************************************************/
 
+/* Truncate an file size or position which cannot be represented by a
+ * single 32 bit integer and substitute it with something vaguely more
+ * sensible (which probably isn't so sensible in the first place, but
+ * we keep trying).
+ */
+static ULONG
+truncate_64_bit_position(const QUAD * position_quad)
+{
+	ULONG result;
+
+	if(position_quad->High == 0)
+		result = position_quad->Low;
+	else
+		result = 0xFFFFFFFFUL;
+
+	return(result);
+}
+
+/****************************************************************************/
+
+#if DEBUG
+
+/* Create a form of the given file/directory name which shows unprintable
+ * characters through the use of 'C' style escape sequences. Returns a
+ * pointer to a local static buffer which contains the escaped string.
+ * If the escape form of the name is too long to fit into the buffer,
+ * the text " [...]" will be appended to contents of the buffer, to indicate
+ * that the name was truncated.
+ */
+TEXT *
+escape_name(const TEXT * name)
+{
+	static const TEXT truncated_suffix[] = " [...]";
+	static TEXT buffer[4 * 256 + sizeof(truncated_suffix)];
+
+	const int buffer_size = (int)sizeof(buffer) - sizeof(truncated_suffix);
+	BOOL truncated = FALSE;
+	TEXT hex_code[6];
+	TEXT * str;
+	int len;
+	TEXT c;
+
+	len = 0;
+
+	while((c = (*name++)) != '\0')
+	{
+		if (c < ' ')
+		{
+			int l = 2;
+
+			switch(c)
+			{
+				case '\a':
+
+					str = "\\a";
+					break;
+
+				case '\b':
+
+					str = "\\b";
+					break;
+
+				case '\f':
+
+					str = "\\f";
+					break;
+
+				case '\n':
+
+					str = "\\n";
+					break;
+
+				case '\r':
+
+					str = "\\r";
+					break;
+
+				case '\t':
+
+					str = "\\t";
+					break;
+
+				case '\v':
+
+					str = "\\v";
+					break;
+
+				default:
+
+					SPrintf(hex_code,"\\x%02lx",c);
+					str = hex_code;
+
+					l = 4;
+					break;
+			}
+
+			if(len + l >= buffer_size)
+			{
+				truncated = TRUE;
+				break;
+			}
+
+			memcpy(&buffer[len],str,l);
+			len += l;
+		}
+		else if (127 <= c && c <= 160)
+		{
+			if(len + 4 >= buffer_size)
+			{
+				truncated = TRUE;
+				break;
+			}
+
+			SPrintf(hex_code,"\\x%02lx",c);
+
+			memcpy(&buffer[len],hex_code,4);
+			len += 4;
+		}
+		else if (c == '\\')
+		{
+			if(len + 2 >= buffer_size)
+			{
+				truncated = TRUE;
+				break;
+			}
+
+			buffer[len++] = c;
+			buffer[len++] = c;
+		}
+		else
+		{
+			if(len + 1 >= buffer_size)
+			{
+				truncated = TRUE;
+				break;
+			}
+
+			buffer[len++] = c;
+		}
+	}
+
+	if(truncated)
+	{
+		memcpy(&buffer[len],truncated_suffix,sizeof(truncated_suffix)-1);
+		len += sizeof(truncated_suffix)-1;
+	}
+
+	buffer[len] = '\0';
+
+	return(buffer);
+}
+
+#endif /* DEBUG */
+
+/****************************************************************************/
+
 /* Convert a BCPL string into a standard NUL terminated 'C' string. */
 STATIC VOID
-ConvertBString(LONG max_len,STRPTR cstring,const void * bstring)
+ConvertBString(int max_len,STRPTR cstring,const void * bstring)
 {
-	const UBYTE * from = bstring;
-	LONG len = from[0];
+	const TEXT * from = bstring;
+	int len = from[0];
 
 	if(len > max_len-1)
 		len = max_len-1;
@@ -3023,9 +3153,9 @@ ConvertBString(LONG max_len,STRPTR cstring,const void * bstring)
 
 /* Convert a NUL terminated 'C' string into a BCPL string. */
 STATIC VOID
-ConvertCString(void * bstring,LONG max_len,const UBYTE * cstring,LONG len)
+ConvertCString(void * bstring,int max_len,const TEXT * cstring,int len)
 {
-	UBYTE * to = bstring;
+	TEXT * to = bstring;
 
 	if(len > max_len-1)
 		len = max_len-1;
@@ -3043,27 +3173,31 @@ ConvertCString(void * bstring,LONG max_len,const UBYTE * cstring,LONG len)
  */
 STATIC LONG
 BuildFullName(
-	const UBYTE *	parent_name,
+	const TEXT *	parent_name,
 	STRPTR			name,
 	STRPTR *		result_ptr,
-	LONG *			result_size_ptr)
+	int *			result_size_ptr)
 {
 	int error = OK;
 	STRPTR buffer;
-	LONG len,size;
-	LONG i;
+	int len,size;
+	int i;
 
 	ENTER();
 
-	SHOWSTRING(parent_name);
-	SHOWSTRING(name);
+	if(parent_name == NULL)
+		D(("parent_name = NULL"));
+	else
+		D(("parent_name = '%s'",escape_name(parent_name)));
+
+	D(("name = '%s'",escape_name(name)));
 
 	(*result_ptr) = NULL;
 
 	/* Throw everything left of the colon away. */
 	if(name != NULL)
 	{
-		for(i = 0 ; i < (LONG)strlen(name) ; i++)
+		for(i = 0 ; i < (int)strlen(name) ; i++)
 		{
 			if(name[i] == ':')
 			{
@@ -3114,10 +3248,10 @@ BuildFullName(
 	/* If there's a name to add, do just that. */
 	if(name != NULL)
 	{
-		LONG segment_start;
-		LONG segment_len;
-		LONG buffer_len;
-		LONG name_len;
+		int segment_start;
+		int segment_len;
+		int buffer_len;
+		int name_len;
 
 		buffer_len = strlen(buffer);
 		name_len = strlen(name);
@@ -3219,7 +3353,7 @@ BuildFullName(
 	(*result_ptr) = buffer;
 	(*result_size_ptr) = size;
 
-	SHOWSTRING(buffer);
+	D(("buffer = '%s'",escape_name(buffer)));
 
  out:
 
@@ -3239,7 +3373,7 @@ Action_Parent(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	STRPTR parent_name;
 	BOOL cleanup = TRUE;
 	struct LockNode * ln = NULL;
@@ -3286,7 +3420,7 @@ Action_Parent(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
@@ -3354,11 +3488,11 @@ Action_DeleteObject(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
 	STRPTR full_parent_name = NULL;
-	UBYTE name[MAX_FILENAME_LEN];
+	TEXT name[MAX_FILENAME_LEN+1];
 	struct LockNode * ln;
 	int ignored_error;
 	smba_stat_t st;
@@ -3394,15 +3528,15 @@ Action_DeleteObject(
 	/* Translate the Amiga file name into UTF-8 encoded form? */
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		/* Figure out how long the UTF-8 version will become. */
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
 
 		/* Encoding error occured, or the resulting name is longer than the buffer will hold? */
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -3493,7 +3627,7 @@ Action_DeleteObject(
 	FreeMemory(full_parent_name);
 	full_parent_name = NULL;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
@@ -3594,17 +3728,17 @@ Action_CreateDir(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	struct LockNode * ln = NULL;
 	STRPTR parent_name;
 	STRPTR dir_name = NULL;
 	size_t dir_name_size;
 	smba_file_t * dir = NULL;
 	STRPTR base_name;
-	UBYTE name[MAX_FILENAME_LEN];
+	TEXT name[MAX_FILENAME_LEN+1];
 	int ignored_error;
 	int error;
-	LONG i;
+	int i;
 
 	ENTER();
 
@@ -3631,12 +3765,12 @@ Action_CreateDir(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -3666,7 +3800,7 @@ Action_CreateDir(
 		goto out;
 	}
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	dir_name_size = strlen(full_name)+3;
 
@@ -3733,7 +3867,7 @@ Action_CreateDir(
 	smba_close(dir,&ignored_error);
 	dir = NULL;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
@@ -3775,10 +3909,10 @@ Action_LocateObject(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	struct LockNode * ln = NULL;
 	STRPTR parent_name;
-	UBYTE name[MAX_FILENAME_LEN];
+	TEXT name[MAX_FILENAME_LEN+1];
 	int error;
 
 	ENTER();
@@ -3800,12 +3934,12 @@ Action_LocateObject(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -3824,7 +3958,7 @@ Action_LocateObject(
 		}
 	}
 
-	if(IsReservedName(FilePart(name)))
+	if(is_reserved_name(FilePart(name)))
 	{
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
@@ -3859,7 +3993,7 @@ Action_LocateObject(
 	if(error != OK)
 		goto out;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
@@ -3894,7 +4028,7 @@ Action_CopyDir(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	struct LockNode * ln = NULL;
 	STRPTR source_name;
 	LONG source_mode;
@@ -3952,7 +4086,7 @@ Action_CopyDir(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
@@ -4053,8 +4187,8 @@ Action_SameLock(
 		name2 = SMB_ROOT_DIR_NAME;
 	}
 
-	SHOWSTRING(name1);
-	SHOWSTRING(name2);
+	D(("name1 = '%s'",escape_name(name1)));
+	D(("name2 = '%s'",escape_name(name2)));
 
 	if(Stricmp(name1,name2) == SAME)
 		result = DOSTRUE;
@@ -4076,10 +4210,10 @@ Action_SetProtect(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
-	UBYTE name[MAX_FILENAME_LEN];
+	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
 	int error;
 
@@ -4108,12 +4242,12 @@ Action_SetProtect(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -4145,7 +4279,7 @@ Action_SetProtect(
 		goto out;
 	}
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
@@ -4175,11 +4309,6 @@ Action_SetProtect(
 	 *          meaning in the Amiga and the SMB worlds.
 	 */
 	st.is_changed_since_last_archive = ((mask & FIBF_ARCHIVE) == 0);
-
-	/* The 'system' attribute is associated with the 'pure' bit for now. */
-	/*
-	st.is_system = ((mask & FIBF_PURE) != 0);
-	*/
 
 	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
@@ -4219,10 +4348,10 @@ Action_RenameObject(
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
 	STRPTR full_source_name = NULL;
-	LONG full_source_name_size;
+	int full_source_name_size;
 	STRPTR full_destination_name = NULL;
-	LONG full_destination_name_size;
-	UBYTE name[MAX_FILENAME_LEN];
+	int full_destination_name_size;
+	TEXT name[MAX_FILENAME_LEN+1];
 	STRPTR parent_name;
 	int error;
 
@@ -4252,12 +4381,12 @@ Action_RenameObject(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -4302,12 +4431,12 @@ Action_RenameObject(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -4345,8 +4474,8 @@ Action_RenameObject(
 	if(error != OK)
 		goto out;
 
-	SHOWSTRING(full_source_name);
-	SHOWSTRING(full_destination_name);
+	D(("full_source_name = '%s'",escape_name(full_source_name)));
+	D(("full_destination_name = '%s'",escape_name(full_destination_name)));
 
 	if(smba_rename(ServerData,full_source_name,full_destination_name,&error) < 0)
 	{
@@ -4500,12 +4629,12 @@ Action_ExamineObject(
 
 	if(lock == NULL)
 	{
-		const UBYTE * volume_name = BADDR(VolumeNode->dol_Name);
-		LONG len = volume_name[0];
+		const TEXT * volume_name = BADDR(VolumeNode->dol_Name);
+		int len = volume_name[0];
 
 		SHOWMSG("ZERO root lock");
 
-		ASSERT( len < sizeof(fib->fib_FileName) );
+		ASSERT( len < (int)sizeof(fib->fib_FileName) );
 
 		memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 		fib->fib_FileName[0] = len;
@@ -4514,7 +4643,7 @@ Action_ExamineObject(
 		fib->fib_EntryType		= ST_ROOT;
 		fib->fib_NumBlocks		= 1;
 		fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
-		fib->fib_DiskKey		= -1;
+		fib->fib_DiskKey		= -1; /* The ZERO lock cannot be used for directory scanning... */
 		fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 								  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 	}
@@ -4540,16 +4669,16 @@ Action_ExamineObject(
 		fib->fib_Date.ds_Minute	= (seconds % (24 * 60 * 60)) / 60;
 		fib->fib_Date.ds_Tick	= (seconds % 60) * TICKS_PER_SECOND;
 
-		SHOWSTRING(ln->ln_FullName);
+		D(("ln->ln_FullName = '%s'",escape_name(ln->ln_FullName)));
 
 		if(strcmp(ln->ln_FullName,SMB_ROOT_DIR_NAME) == SAME)
 		{
-			const UBYTE * volume_name = BADDR(VolumeNode->dol_Name);
-			LONG len = volume_name[0];
+			const TEXT * volume_name = BADDR(VolumeNode->dol_Name);
+			int len = volume_name[0];
 
 			SHOWMSG("root lock");
 
-			ASSERT( len < sizeof(fib->fib_FileName) );
+			ASSERT( len < (int)sizeof(fib->fib_FileName) );
 
 			memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 			fib->fib_FileName[0] = len;
@@ -4562,7 +4691,11 @@ Action_ExamineObject(
 		}
 		else
 		{
-			const UBYTE * name;
+			QUAD size_quad;
+			QUAD num_blocks_quad;
+			const TEXT * name;
+			const TEXT * final_name;
+			TEXT c;
 			int name_len;
 			int i;
 
@@ -4587,7 +4720,7 @@ Action_ExamineObject(
 			 */
 			if(TranslateUTF8)
 			{
-				UBYTE decoded_name[MAX_FILENAME_LEN];
+				TEXT decoded_name[MAX_FILENAME_LEN+1];
 				int decoded_name_len;
 
 				/* Try to decode the file name, translating it into ISO 8859-1 format. */
@@ -4596,7 +4729,7 @@ Action_ExamineObject(
 				/* Decoding error occured, or the decoded name would be longer than
 				 * buffer would allow?
 				 */
-				if(decoded_name_len < 0 || decoded_name_len >= sizeof(fib->fib_FileName))
+				if(decoded_name_len < 0 || decoded_name_len >= (int)sizeof(fib->fib_FileName))
 				{
 					error = ERROR_INVALID_COMPONENT_NAME;
 					goto out;
@@ -4614,7 +4747,7 @@ Action_ExamineObject(
 			else
 			{
 				/* Will the name fit? */
-				if(name_len >= sizeof(fib->fib_FileName))
+				if(name_len >= (int)sizeof(fib->fib_FileName))
 				{
 					error = ERROR_INVALID_COMPONENT_NAME;
 					goto out;
@@ -4630,16 +4763,48 @@ Action_ExamineObject(
 				{
 					if(!TranslateBName(fib->fib_FileName,M2A))
 					{
+						D(("name contains unacceptable characters"));
+
 						error = ERROR_INVALID_COMPONENT_NAME;
 						goto out;
 					}
 				}
 			}
 
+			/* Check if this is a usable Amiga file or directory name. */
+			for(i = 0, final_name = &fib->fib_FileName[1] ; i < name_len ; i++)
+			{
+				c = final_name[i];
+
+				/* This should be a printable character and none of
+				 * the characters reserved by the file system which
+				 * should not appear in a file/directory name.
+				 */
+				if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
+				{
+					D(("name contains unacceptable characters"));
+
+					error = ERROR_INVALID_COMPONENT_NAME;
+					goto out;
+				}
+			}
+
+			/* We pretend that the volume uses 512 bytes per
+			 * block (or in SMB terms: the sector size is
+			 * 512 bytes). The conversion is a bit elaborate
+			 * here...
+			 */
+			size_quad.Low	= st.size_low;
+			size_quad.High	= st.size_high;
+
+			/* Round up when dividing by 512. */
+			add_64_plus_32_to_64(&size_quad,511,&num_blocks_quad);
+			divide_64_by_32(&num_blocks_quad,512,&num_blocks_quad);
+
 			fib->fib_DirEntryType	= st.is_dir ? ST_USERDIR : ST_FILE;
 			fib->fib_EntryType		= fib->fib_DirEntryType;
-			fib->fib_NumBlocks		= (st.size + 511) / 512;
-			fib->fib_Size			= st.size;
+			fib->fib_NumBlocks		= num_blocks_quad.Low;
+			fib->fib_Size			= truncate_64_bit_position(&size_quad);
 			fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
@@ -4651,11 +4816,6 @@ Action_ExamineObject(
 			 */
 			if(NOT st.is_changed_since_last_archive)
 				fib->fib_Protection |= FIBF_ARCHIVE;
-
-			/*
-			if(st.is_system)
-				fib->fib_Protection |= FIBF_PURE;
-			*/
 
 			if(NOT st.is_dir)
 				fib->fib_DiskKey = -1;
@@ -4683,23 +4843,27 @@ Action_ExamineObject(
 
 /****************************************************************************/
 
+/* Check if the name is acceptable as an Amiga file name. */
 STATIC BOOL
-NameIsAcceptable(const UBYTE * name,LONG max_len)
+name_is_acceptable(const TEXT * name)
 {
 	BOOL result = FALSE;
-	UBYTE c;
+	TEXT c;
 
-	/* This takes care of "." and "..". */
-	if(name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0')))
+	c = name[0];
+
+	/* Empty names are not acceptable. */
+	if(c == '\0')
 		goto out;
 
-	/* Now for embedded '/', ':' and '\' characters and
-	 * names that just don't want to fit.
-	 */
+	/* This takes care of "." and "..". */
+	if(c == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0')))
+		goto out;
+
+	/* Now for embedded '/', ':' and '\' characters. */
 	while((c = (*name++)) != '\0')
 	{
-		max_len--;
-		if(max_len == 0 || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
+		if(c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
 			goto out;
 	}
 
@@ -4717,64 +4881,129 @@ dir_scan_callback_func_exnext(
 	struct FileInfoBlock *	fib,
 	int						unused_fpos,
 	int						nextpos,
-	const UBYTE *			name,
+	const TEXT *			name,
 	int						eof,
 	smba_stat_t *			st)
 {
+	TEXT * final_file_name;
 	int result = 0;
-	LONG name_len;
+	int name_len;
+	int i;
 	LONG seconds;
+	TEXT c;
+	QUAD size_quad;
+	QUAD num_blocks_quad;
 
 	ENTER();
 
-	D((" '%s'",name));
-	D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%ld",
-		st->is_dir,st->is_read_only,st->is_hidden,st->size));
-	D(("   nextpos=%ld eof=%ld",nextpos,eof));
+	#if DEBUG
+	{
+		QUAD st_size_quad;
+
+		st_size_quad.Low	= st->size_low;
+		st_size_quad.High	= st->size_high;
+
+		D((" '%s'",escape_name(name)));
+		D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%s", st->is_dir,st->is_read_only,st->is_hidden,convert_quad_to_string(&st_size_quad)));
+		D(("   nextpos=%ld eof=%ld",nextpos,eof));
+	}
+	#endif /* DEBUG */
 
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if(!NameIsAcceptable(name,sizeof(fib->fib_FileName)) || (st->is_hidden && OmitHidden))
+	if(!name_is_acceptable(name))
+	{
+		D(("   name is not acceptable"));
 		goto out;
+	}
+
+	if(st->is_hidden && OmitHidden)
+	{
+		D(("   ignoring hidden directory entry"));
+		goto out;
+	}
 
 	name_len = strlen(name);
 
 	if(TranslateUTF8)
 	{
-		UBYTE decoded_name[MAX_FILENAME_LEN];
+		TEXT decoded_name[MAX_FILENAME_LEN+1];
 		int decoded_name_len;
 
 		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
 
 		/* Skip file names which we could not represent. */
-		if(decoded_name_len < 0 || decoded_name_len >= (int)sizeof(fib->fib_FileName))
+		if(decoded_name_len < 0)
+		{
+			D(("   name cannot be decoded"));
 			goto out;
+		}
+
+		if(decoded_name_len >= (int)sizeof(fib->fib_FileName))
+		{
+			D(("   decoded name is too long (%ld >= %ld)",decoded_name_len, sizeof(fib->fib_FileName)));
+			goto out;
+		}
 
 		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
 
 		fib->fib_FileName[0] = decoded_name_len;
 		memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
+
+		name_len = decoded_name_len;
 	}
 	else
 	{
 		/* Skip file names which we could not represent. */
 		if(name_len >= (int)sizeof(fib->fib_FileName))
+		{
+			D(("   name is too long (%ld >= %ld)",name_len, sizeof(fib->fib_FileName)));
 			goto out;
+		}
 
 		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 		if(TranslateNames)
 		{
 			if(!TranslateBName(fib->fib_FileName,M2A))
+			{
+				D(("   name cannot be translated"));
 				goto out;
+			}
 		}
 	}
 
+	/* Check if this is a usable Amiga file or directory name. */
+	for(i = 0, final_file_name = &fib->fib_FileName[1] ; i < name_len ; i++)
+	{
+		c = final_file_name[i];
+
+		/* This should be a printable character and none of
+		 * the characters reserved by the file system which
+		 * should not appear in a file/directory name.
+		 */
+		if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
+		{
+			D(("   final name contains unacceptable characters"));
+			goto out;
+		}
+	}
+
+	D(("   final name = '%b'", MKBADDR(fib->fib_FileName)));
+
+	/* Convert the size of the file into blocks, with 512 bytes per block. */
+	size_quad.Low	= st->size_low;
+	size_quad.High	= st->size_high;
+
+	/* Round up when dividing by 512. */
+	add_64_plus_32_to_64(&size_quad,511,&num_blocks_quad);
+	divide_64_by_32(&num_blocks_quad,512,&num_blocks_quad);
+
 	fib->fib_DirEntryType	= st->is_dir ? ST_USERDIR : ST_FILE;
 	fib->fib_EntryType		= fib->fib_DirEntryType;
-	fib->fib_NumBlocks		= (st->size + 511) / 512;
-	fib->fib_Size			= st->size;
+	fib->fib_NumBlocks		= num_blocks_quad.Low;
+	fib->fib_Size			= truncate_64_bit_position(&size_quad);
 	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 							  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
@@ -4782,15 +5011,11 @@ dir_scan_callback_func_exnext(
 		fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
 
 	/* Careful: the 'archive' attribute has exactly the opposite
-	 *          meaning in the Amiga and the SMB worlds.
+	 *          meaning in the Amiga (= was archived) and the SMB
+	 *          worlds (= needs to be archived), respectively.
 	 */
 	if(NOT st->is_changed_since_last_archive)
 		fib->fib_Protection |= FIBF_ARCHIVE;
-
-	/*
-	if(st->is_system)
-		fib->fib_Protection |= FIBF_PURE;
-	*/
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
 	seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
@@ -4899,8 +5124,8 @@ struct ExAllContext
 {
 	struct ExAllData *		ec_Last;
 	struct ExAllData *		ec_Next;
-	ULONG					ec_BytesLeft;
-	ULONG					ec_MinSize;
+	int						ec_BytesLeft;
+	int						ec_MinSize;
 	struct ExAllControl *	ec_Control;
 	ULONG					ec_Type;
 	LONG					ec_Error;
@@ -4912,61 +5137,156 @@ dir_scan_callback_func_exall(
 	struct ExAllContext *	ec,
 	int						unused_fpos,
 	int						nextpos,
-	const UBYTE *			name,
+	const TEXT *			name,
 	int						eof,
 	smba_stat_t *			st)
 {
-	UBYTE decoded_name[MAX_FILENAME_LEN];
+	TEXT decoded_name[MAX_FILENAME_LEN+1];
 	BOOL ignore_this_entry = FALSE;
+	int name_len = -1;
 	int result = 0;
 
 	ENTER();
 
-	D((" '%s'",name));
-	D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%ld",
-		st->is_dir,st->is_read_only,st->is_hidden,st->size));
-	D(("   nextpos=%ld eof=%ld",nextpos,eof));
-
-	/* If necessary, translate the name of the file first, so that we
-	 * can decide early on whether or not it should show up in a
-	 * directory listing. This filters out, for example, files using
-	 * characters which are not usable on the Amiga because they fall
-	 * outside the 8 bit character set used.
-	 */
-	if(TranslateUTF8)
+	#if DEBUG
 	{
-		LONG name_len = strlen(name);
-		int decoded_name_len;
+		QUAD st_size_quad;
 
-		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-		if(decoded_name_len < 0 || decoded_name_len >= MAX_FILENAME_LEN)
+		st_size_quad.Low	= st->size_low;
+		st_size_quad.High	= st->size_high;
+
+		D((" '%s'",escape_name(name)));
+		D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%s", st->is_dir,st->is_read_only,st->is_hidden,convert_quad_to_string(&st_size_quad)));
+		D(("   nextpos=%ld eof=%ld",nextpos,eof));
+	}
+	#endif /* DEBUG */
+
+	/* Skip file and drawer names that we wouldn't be
+	 * able to handle in the first place.
+	 */
+	if (!name_is_acceptable(name))
+	{
+		D(("   name is not acceptable"));
+		ignore_this_entry = TRUE;
+	}
+	else if (st->is_hidden && OmitHidden)
+	{
+		D(("   ignoring hidden directory entry"));
+		ignore_this_entry = TRUE;
+	}
+	else
+	{
+		/* If necessary, translate the name of the file first, so that we
+		 * can decide early on whether or not it should show up in a
+		 * directory listing. This filters out, for example, files using
+		 * characters which are not usable on the Amiga because they fall
+		 * outside the 8 bit character set used.
+		 */
+		if(TranslateUTF8)
 		{
-			ignore_this_entry = TRUE;
+			int decoded_name_len;
+
+			name_len = strlen(name);
+
+			decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
+
+			/* Skip file names which we could not represent. */
+			if(decoded_name_len < 0)
+			{
+				D(("   name cannot be decoded"));
+				ignore_this_entry = TRUE;
+			}
+			else if (decoded_name_len > MAX_FILENAME_LEN)
+			{
+				D(("   decoded name is too long (%ld > %ld)",decoded_name_len, MAX_FILENAME_LEN));
+				ignore_this_entry = TRUE;
+			}
+			else
+			{
+				decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+
+				/* Use the decoded replacement name. */
+				name = decoded_name;
+				name_len = decoded_name_len;
+			}
 		}
-		else
+		else if (TranslateNames)
 		{
-			decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+			name_len = strlen(name);
+			if (name_len > MAX_FILENAME_LEN)
+			{
+				D(("   name is too long (%ld > %ld)",name_len, MAX_FILENAME_LEN));
+				ignore_this_entry = TRUE;
+			}
+			else
+			{
+				/* We need to make a copy of the original name, because
+				 * the translation will modify what is passed to it.
+				 */
+				memcpy(decoded_name,name,name_len+1);
 
-			/* Use the decoded replacement name. */
-			name = decoded_name;
+				if(TranslateCName(decoded_name,M2A))
+				{
+					/* Use the translated replacement name. */
+					name = decoded_name;
+				}
+				else
+				{
+					D(("   name cannot be translated"));
+					ignore_this_entry = TRUE;
+				}
+			}
+		}
+	}
+
+	/* Check if this is a usable Amiga file or directory name. */
+	if(!ignore_this_entry)
+	{
+		TEXT c;
+		int i;
+
+		if(name_len == -1)
+			name_len = strlen(name);
+
+		for(i = 0 ; i < name_len ; i++)
+		{
+			c = name[i];
+
+			/* This should be a printable character and none of
+			 * the characters reserved by the file system which
+			 * should not appear in a file/directory name.
+			 */
+			if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
+			{
+				D(("   final name contains unacceptable characters"));
+
+				ignore_this_entry = TRUE;
+				break;
+			}
 		}
 	}
 
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if(!ignore_this_entry && NameIsAcceptable((STRPTR)name,MAX_FILENAME_LEN) && NOT (st->is_hidden && OmitHidden))
+	if(!ignore_this_entry)
 	{
 		ULONG type = ec->ec_Type;
 		struct ExAllData * ed;
-		BOOL take_it = TRUE;
-		ULONG size;
+		int ed_size;
 
-		size = (ec->ec_MinSize + strlen(name)+1 + 3) & ~3UL;
-		SHOWVALUE(size);
-		if(size > ec->ec_BytesLeft)
+		if(name_len == -1)
+			name_len = strlen(name);
+
+		/* Figure out how large this entry needs to be, and
+		 * if necessary stop processing if there is not enough
+		 * room left to store it.
+		 */
+		ed_size = ec->ec_MinSize + name_len+1;
+
+		if(ec->ec_Next == NULL || ed_size > ec->ec_BytesLeft)
 		{
-			D(("size %ld > ec->ec_BytesLeft %ld",size,ec->ec_BytesLeft));
+			D(("Not enough room to return this entry: size %ld > ec->ec_BytesLeft %ld",ed_size,ec->ec_BytesLeft));
 
 			/* If this is the first directory entry,
 			 * stop the entire process before it has
@@ -4974,13 +5294,13 @@ dir_scan_callback_func_exall(
 			 */
 			if(ec->ec_FirstAttempt)
 			{
-				SHOWMSG("this was the first read attempt.");
+				SHOWMSG("this was the first read attempt -- aborting");
 				ec->ec_Control->eac_Entries = 0;
 				ec->ec_Error = ERROR_NO_FREE_STORE;
 			}
 			else
 			{
-				SHOWMSG("try again");
+				SHOWMSG("the caller should try again");
 				ec->ec_Error = 0;
 			}
 
@@ -4988,23 +5308,31 @@ dir_scan_callback_func_exall(
 			goto out;
 		}
 
+		/* Fill in this entry. */
 		ed = ec->ec_Next;
 
+		/* Until we know better, assume that this will be
+		 * the last list entry.
+		 */
 		ed->ed_Next = NULL;
+
+		/* Copy the name, including the terminating NUL byte. */
 		ed->ed_Name = (STRPTR)(((ULONG)ed) + ec->ec_MinSize);
-		strcpy(ed->ed_Name,name);
+		memcpy(ed->ed_Name,name,name_len+1);
 
-		if(!TranslateUTF8 && TranslateNames)
-		{
-			if(!TranslateCName(ed->ed_Name,M2A))
-				take_it = FALSE;
-		}
-
+		/* Fill in as many records as were requested. */
 		if(type >= ED_TYPE)
 			ed->ed_Type = st->is_dir ? ST_USERDIR : ST_FILE;
 
 		if(type >= ED_SIZE)
-			ed->ed_Size = st->size;
+		{
+			QUAD size_quad;
+
+			size_quad.Low	= st->size_low;
+			size_quad.High	= st->size_high;
+
+			ed->ed_Size = truncate_64_bit_position(&size_quad);
+		}
 
 		if(type >= ED_PROTECTION)
 		{
@@ -5019,11 +5347,6 @@ dir_scan_callback_func_exall(
 			 */
 			if(NOT st->is_changed_since_last_archive)
 				ed->ed_Prot |= FIBF_ARCHIVE;
-
-			/*
-			if(st->is_system)
-				ed->ed_Prot |= FIBF_PURE;
-			*/
 		}
 
 		if(type >= ED_DATE)
@@ -5048,17 +5371,18 @@ dir_scan_callback_func_exall(
 
 		if(ec->ec_Control->eac_MatchString != NULL)
 		{
-			SHOWMSG("checking against match string");
+			D(("checking name against match string '%s'", ec->ec_Control->eac_MatchString));
+
 			if(NOT MatchPatternNoCase(ec->ec_Control->eac_MatchString,ed->ed_Name))
 			{
-				SHOWMSG("does not match");
-				take_it = FALSE;
+				SHOWMSG("name does not match");
+				ignore_this_entry = TRUE;
 			}
 		}
 
-		if(take_it && ec->ec_Control->eac_MatchFunc != NULL)
+		if(!ignore_this_entry && ec->ec_Control->eac_MatchFunc != NULL)
 		{
-			SHOWMSG("calling match func");
+			SHOWMSG("checking if match function accepts the entry");
 
 			/* NOTE: the order of the parameters passed to the match hook
 			 *       function can be somewhat confusing. For standard
@@ -5071,26 +5395,39 @@ dir_scan_callback_func_exall(
 			 */
 			if(NOT CallHookPkt(ec->ec_Control->eac_MatchFunc,&type,ed))
 			{
-				SHOWMSG("does not match");
-				take_it = FALSE;
+				SHOWMSG("match function rejected the entry");
+
+				ignore_this_entry = TRUE;
 			}
 		}
 
-		if(take_it)
+		if(!ignore_this_entry)
 		{
 			SHOWMSG("registering new entry");
 
+			/* Link the previous entry to the current one. */
 			if(ec->ec_Last != NULL)
 				ec->ec_Last->ed_Next = ed;
 
+			/* All entries need to begin on a word-aligned address,
+			 * which means that we need to pad the entry size to
+			 * a multiple of 2.
+			 */
+			if((ed_size % 2) > 0)
+				ed_size++;
+
+			/* Note: due to the padding byte the number of bytes
+			 *       left may become negative.
+			 */
+			ec->ec_BytesLeft -= ed_size;
+
+			ec->ec_Next = ec->ec_BytesLeft > 0 ? (struct ExAllData *)(((ULONG)ed) + ed_size) : NULL;
 			ec->ec_Last = ed;
-			ec->ec_Next = (struct ExAllData *)(((ULONG)ed) + size);
-			ec->ec_BytesLeft -= size;
+
 			ec->ec_Control->eac_Entries++;
 
 			SHOWVALUE(ec->ec_Last->ed_Next);
-			SHOWVALUE(ed->ed_Name);
-			SHOWVALUE(ed->ed_Comment);
+			D(("ed->ed_Name = '%s'", ed->ed_Name));
 		}
 	}
 
@@ -5108,7 +5445,7 @@ STATIC LONG
 Action_ExamineAll(
 	struct FileLock *		lock,
 	struct ExAllData *		ed,
-	ULONG					size,
+	LONG					size,
 	ULONG					type,
 	struct ExAllControl *	eac,
 	LONG *					error_ptr)
@@ -5128,7 +5465,7 @@ Action_ExamineAll(
 
 	eac->eac_Entries = 0;
 
-	if(size < sizeof(ed->ed_Next))
+	if(size < (LONG)sizeof(ed->ed_Next))
 	{
 		SHOWMSG("buffer is far too short.");
 		error = ERROR_NO_FREE_STORE;
@@ -5314,10 +5651,10 @@ Action_Find(
 	LONG result = DOSFALSE;
 	STRPTR parent_path = NULL;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	struct FileNode * fn = NULL;
 	STRPTR parent_name;
-	UBYTE name[MAX_FILENAME_LEN];
+	TEXT name[MAX_FILENAME_LEN+1];
 	BOOL create_new_file;
 	int error;
 
@@ -5355,12 +5692,12 @@ Action_Find(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -5379,7 +5716,7 @@ Action_Find(
 		}
 	}
 
-	if(IsReservedName(FilePart(name)))
+	if(is_reserved_name(FilePart(name)))
 	{
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
@@ -5413,7 +5750,7 @@ Action_Find(
 	if(error != OK)
 		goto out;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(action == ACTION_FINDOUTPUT)
 	{
@@ -5464,10 +5801,9 @@ Action_Find(
 	if(create_new_file)
 	{
 		int ignored_error;
-		smba_stat_t st;
 		smba_file_t * dir;
 		STRPTR base_name;
-		LONG i;
+		int i;
 
 		if(WriteProtected)
 		{
@@ -5502,7 +5838,7 @@ Action_Find(
 		}
 
 		SHOWMSG("creating a file; finding parent path first");
-		SHOWSTRING(parent_path);
+		D(("parent_path = '%s'",escape_name(parent_path)));
 
 		if(smba_open(ServerData,parent_path,strlen(full_name)+3,open_read_only,open_dont_truncate,&dir,&error) < 0)
 		{
@@ -5510,13 +5846,10 @@ Action_Find(
 			goto out;
 		}
 
-		/* Only one attribute counts: the file should not be write protected. */
-		memset(&st,0,sizeof(st));
-
 		SHOWMSG("now trying to create the file");
-		SHOWSTRING(base_name);
+		D(("base_name = '%s'",escape_name(base_name)));
 
-		if(smba_create(dir,base_name,&st,&error) < 0)
+		if(smba_create(dir,base_name,&error) < 0)
 		{
 			SHOWMSG("didn't work.");
 			SHOWVALUE(error);
@@ -5580,7 +5913,7 @@ Action_Read(
 
 	if(length > 0)
 	{
-		result = smba_read(fn->fn_File,mem,length,fn->fn_Offset,&error);
+		result = smba_read(fn->fn_File,mem,length,&fn->fn_OffsetQuad,&error);
 		if(result < 0)
 		{
 			error = MapErrnoToIoErr(result);
@@ -5589,7 +5922,7 @@ Action_Read(
 			goto out;
 		}
 
-		fn->fn_Offset += result;
+		add_64_plus_32_to_64(&fn->fn_OffsetQuad, result, &fn->fn_OffsetQuad);
 	}
 
  out:
@@ -5624,7 +5957,7 @@ Action_Write(
 
 	if(length > 0)
 	{
-		result = smba_write(fn->fn_File,mem,length,fn->fn_Offset,&error);
+		result = smba_write(fn->fn_File,mem,length,&fn->fn_OffsetQuad,&error);
 		if(result < 0)
 		{
 			error = MapErrnoToIoErr(error);
@@ -5633,7 +5966,7 @@ Action_Write(
 			goto out;
 		}
 
-		fn->fn_Offset += result;
+		add_64_plus_32_to_64(&fn->fn_OffsetQuad, result, &fn->fn_OffsetQuad);
 	}
 
  out:
@@ -5673,10 +6006,11 @@ Action_Seek(
 	LONG				mode,
 	LONG *				error_ptr)
 {
-	LONG previous_position = fn->fn_Offset;
+	QUAD previous_position_quad = fn->fn_OffsetQuad;
+	QUAD reference_position_quad;
+	QUAD new_position_quad;
 	LONG result = -1;
 	smba_stat_t st;
-	LONG offset;
 	int error;
 
 	ENTER();
@@ -5685,12 +6019,15 @@ Action_Seek(
 	{
 		case OFFSET_BEGINNING:
 
-			offset = position;
+			reference_position_quad.Low		= 0;
+			reference_position_quad.High	= 0;
+
 			break;
 
 		case OFFSET_CURRENT:
 
-			offset = fn->fn_Offset + position;
+			reference_position_quad = fn->fn_OffsetQuad;
+
 			break;
 
 		case OFFSET_END:
@@ -5701,7 +6038,9 @@ Action_Seek(
 				goto out;
 			}
 
-			offset = st.size + position;
+			reference_position_quad.Low		= st.size_low;
+			reference_position_quad.High	= st.size_high;
+
 			break;
 
 		default:
@@ -5710,17 +6049,37 @@ Action_Seek(
 			goto out;
 	}
 
-	if(offset < 0)
+	if(position < 0)
 	{
-		error = ERROR_SEEK_ERROR;
-		goto out;
+		QUAD position_quad;
+
+		position_quad.Low	= -position;
+		position_quad.High	= 0;
+
+		/* We cannot seek back beyond the beginning of the file. */
+		if(compare_64_to_64(&reference_position_quad,&position_quad) < 0)
+		{
+			error = ERROR_SEEK_ERROR;
+			goto out;
+		}
+
+		subtract_64_from_64_to_64(&reference_position_quad,&position_quad,&new_position_quad);
+	}
+	else
+	{
+		/* Careful, we need to check for overflow, too. */
+		if(add_64_plus_32_to_64(&reference_position_quad,position,&new_position_quad) > 0)
+		{
+			error = ERROR_SEEK_ERROR;
+			goto out;
+		}
 	}
 
 	error = OK;
 
-	fn->fn_Offset = offset;
+	fn->fn_OffsetQuad = new_position_quad;
 
-	result = previous_position;
+	result = truncate_64_bit_position(&previous_position_quad);
 
  out:
 
@@ -5739,43 +6098,41 @@ Action_SetFileSize(
 	LONG				mode,
 	LONG *				error_ptr)
 {
+	QUAD previous_position_quad = fn->fn_OffsetQuad;
+	QUAD reference_position_quad;
+	QUAD new_position_quad;
 	LONG result = -1;
 	smba_stat_t st;
 	int error;
-	long offset;
-	dword size;
 
 	ENTER();
-
-	if(WriteProtected)
-	{
-		error = ERROR_DISK_WRITE_PROTECTED;
-		goto out;
-	}
-
-	if(smba_getattr(fn->fn_File,&st,&error) < 0)
-	{
-		error = MapErrnoToIoErr(error);
-		goto out;
-	}
-
-	offset = fn->fn_Offset;
 
 	switch(mode)
 	{
 		case OFFSET_BEGINNING:
 
-			offset = position;
+			reference_position_quad.Low		= 0;
+			reference_position_quad.High	= 0;
+
 			break;
 
 		case OFFSET_CURRENT:
 
-			offset += position;
+			reference_position_quad = fn->fn_OffsetQuad;
+
 			break;
 
 		case OFFSET_END:
 
-			offset = st.size + position;
+			if(smba_getattr(fn->fn_File,&st,&error) < 0)
+			{
+				error = MapErrnoToIoErr(error);
+				goto out;
+			}
+
+			reference_position_quad.Low		= st.size_low;
+			reference_position_quad.High	= st.size_high;
+
 			break;
 
 		default:
@@ -5784,24 +6141,47 @@ Action_SetFileSize(
 			goto out;
 	}
 
-	if(offset < 0)
+	if(position < 0)
 	{
-		error = ERROR_SEEK_ERROR;
-		goto out;
+		QUAD position_quad;
+
+		position_quad.Low	= -position;
+		position_quad.High	= 0;
+
+		/* We cannot seek back beyond the beginning of the file. */
+		if(compare_64_to_64(&reference_position_quad,&position_quad) < 0)
+		{
+			error = ERROR_SEEK_ERROR;
+			goto out;
+		}
+
+		subtract_64_from_64_to_64(&reference_position_quad,&position_quad,&new_position_quad);
+	}
+	else
+	{
+		/* Careful, we need to check for overflow, too. */
+		if(add_64_plus_32_to_64(&reference_position_quad,position,&new_position_quad) > 0)
+		{
+			error = ERROR_SEEK_ERROR;
+			goto out;
+		}
 	}
 
-	size = (dword)offset;
-
-	if(smba_setattr(fn->fn_File,NULL,&size,&error) < 0)
+	if(smba_setattr(fn->fn_File,NULL,&new_position_quad,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
-	if(fn->fn_Offset > offset)
-		fn->fn_Offset = offset;
+	error = OK;
 
-	result = offset;
+	/* If the current seek position reaches beyond the new
+	 * size of the file, move it to the end of the file.
+	 */
+	if(compare_64_to_64(&fn->fn_OffsetQuad,&new_position_quad) > 0)
+		fn->fn_OffsetQuad = new_position_quad;
+
+	result = truncate_64_bit_position(&previous_position_quad);
 
  out:
 
@@ -5822,10 +6202,10 @@ Action_SetDate(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
-	UBYTE name[MAX_FILENAME_LEN];
+	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
 	LONG seconds;
 	int error;
@@ -5855,12 +6235,12 @@ Action_SetDate(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -5890,7 +6270,7 @@ Action_SetDate(
 		goto out;
 	}
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
@@ -5945,13 +6325,17 @@ Action_ExamineFH(
 	struct FileInfoBlock *	fib,
 	LONG *					error_ptr)
 {
+	QUAD size_quad;
+	QUAD num_blocks_quad;
 	LONG result = DOSFALSE;
+	const TEXT * final_name;
+	TEXT c;
 	smba_stat_t st;
 	int error;
 	LONG seconds;
 	STRPTR name;
-	LONG name_len;
-	LONG i;
+	int name_len;
+	int i;
 
 	ENTER();
 
@@ -5978,11 +6362,11 @@ Action_ExamineFH(
 
 	if(TranslateUTF8)
 	{
-		UBYTE decoded_name[MAX_FILENAME_LEN];
+		TEXT decoded_name[MAX_FILENAME_LEN+1];
 		int decoded_name_len;
 
 		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-		if(decoded_name_len < 0 || decoded_name_len >= sizeof(fib->fib_FileName))
+		if(decoded_name_len < 0 || decoded_name_len >= (int)sizeof(fib->fib_FileName))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -5992,12 +6376,16 @@ Action_ExamineFH(
 
 		fib->fib_FileName[0] = decoded_name_len;
 		memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
+
+		name_len = decoded_name_len;
 	}
 	else
 	{
 		/* Will the name fit? */
-		if(name_len >= sizeof(fib->fib_FileName))
+		if(name_len >= (int)sizeof(fib->fib_FileName))
 		{
+			D(("name contains unacceptable characters"));
+
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
 		}
@@ -6008,16 +6396,44 @@ Action_ExamineFH(
 		{
 			if(!TranslateBName(fib->fib_FileName,M2A))
 			{
+				D(("name contains unacceptable characters"));
+
 				error = ERROR_INVALID_COMPONENT_NAME;
 				goto out;
 			}
 		}
 	}
 
+	/* Check if this is a usable Amiga file or directory name. */
+	for(i = 0, final_name = &fib->fib_FileName[1] ; i < name_len ; i++)
+	{
+		c = final_name[i];
+
+		/* This should be a printable character and none of
+		 * the characters reserved by the file system which
+		 * should not appear in a file/directory name.
+		 */
+		if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
+		{
+			D(("name contains unacceptable characters"));
+
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+	}
+
+	/* Convert the size of the file into blocks, with 512 bytes per block. */
+	size_quad.Low	= st.size_low;
+	size_quad.High	= st.size_high;
+
+	/* Round up when dividing by 512. */
+	add_64_plus_32_to_64(&size_quad,511,&num_blocks_quad);
+	divide_64_by_32(&num_blocks_quad,512,&num_blocks_quad);
+
 	fib->fib_DirEntryType	= ST_FILE;
 	fib->fib_EntryType		= ST_FILE;
-	fib->fib_NumBlocks		= (st.size + 511) / 512;
-	fib->fib_Size			= st.size;
+	fib->fib_NumBlocks		= num_blocks_quad.Low;
+	fib->fib_Size			= truncate_64_bit_position(&size_quad);
 	fib->fib_DiskKey		= -1;
 
 	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
@@ -6031,11 +6447,6 @@ Action_ExamineFH(
 	 */
 	if(NOT st.is_changed_since_last_archive)
 		fib->fib_Protection |= FIBF_ARCHIVE;
-
-	/*
-	if(st.is_system)
-		fib->fib_Protection |= FIBF_PURE;
-	*/
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
 	seconds = (st.mtime == 0 ? st.ctime : st.mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
@@ -6067,8 +6478,8 @@ Action_ParentFH(
 	struct LockNode * ln = NULL;
 	int error;
 	STRPTR full_name;
-	LONG full_name_size;
-	LONG i;
+	int full_name_size;
+	int i;
 
 	ENTER();
 
@@ -6114,7 +6525,7 @@ Action_ParentFH(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
@@ -6150,7 +6561,7 @@ Action_CopyDirFH(
 	BPTR result = ZERO;
 	struct LockNode * ln = NULL;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	int error;
 
 	ENTER();
@@ -6189,7 +6600,7 @@ Action_CopyDirFH(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if (smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
@@ -6275,8 +6686,8 @@ Action_RenameDisk(
 	int error = OK;
 	STRPTR old_name;
 	STRPTR new_name;
-	const UBYTE * name;
-	LONG len;
+	const TEXT * name;
+	int len;
 
 	ENTER();
 
@@ -6539,11 +6950,11 @@ Action_SetComment(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	LONG full_name_size;
+	int full_name_size;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
-	UBYTE name[MAX_FILENAME_LEN];
-	UBYTE comment[80];
+	TEXT name[MAX_FILENAME_LEN+1];
+	TEXT comment[80];
 	int error;
 
 	ENTER();
@@ -6571,12 +6982,12 @@ Action_SetComment(
 
 	if (TranslateUTF8)
 	{
-		UBYTE encoded_name[MAX_FILENAME_LEN];
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
 		int encoded_name_len;
-		LONG name_len = strlen(name);
+		int name_len = strlen(name);
 
 		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-		if(encoded_name_len < 0 || encoded_name_len >= sizeof(name))
+		if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -6606,7 +7017,7 @@ Action_SetComment(
 		goto out;
 	}
 
-	SHOWSTRING(full_name);
+	D(("full_name = '%s'",escape_name(full_name)));
 
 	if (smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
@@ -6762,7 +7173,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 		cli = Cli();
 		if(NOT cli->cli_Background)
 		{
-			UBYTE name[MAX_FILENAME_LEN];
+			TEXT name[MAX_FILENAME_LEN+1];
 			LONG max_cli;
 			LONG which;
 			LONG i;
@@ -6804,6 +7215,11 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 		}
 	}
 
+	/* Don't show any further error message in the shell, and
+	 * certainly don't allocate memory for error messages which
+	 * would have to be displayed in an error requester (which
+	 * doesn't happen).
+	 */
 	Quiet = TRUE;
 
 	done = FALSE;
@@ -6868,13 +7284,13 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_LOCATE_OBJECT:
 						/* Lock,Name,Mode -> Lock */
 
-						res1 = Action_LocateObject((struct FileLock *)BADDR(dp->dp_Arg1),(APTR)BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
+						res1 = Action_LocateObject((struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
 						break;
 
 					case ACTION_RENAME_DISK:
 						/* Name -> Bool */
 
-						res1 = Action_RenameDisk((UBYTE *)BADDR(dp->dp_Arg1),&res2);
+						res1 = Action_RenameDisk(BADDR(dp->dp_Arg1),&res2);
 						break;
 
 					case ACTION_FREE_LOCK:
@@ -6886,7 +7302,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_DELETE_OBJECT:
 						/* Lock,Name -> Bool */
 
-						res1 = Action_DeleteObject((struct FileLock *)BADDR(dp->dp_Arg1),(APTR)BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_DeleteObject((struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_RENAME_OBJECT:
@@ -6932,7 +7348,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_CREATE_DIR:
 						/* Lock,Name -> Lock */
 
-						res1 = Action_CreateDir((struct FileLock *)BADDR(dp->dp_Arg1),(APTR)BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_CreateDir((struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_EXAMINE_OBJECT:
@@ -6982,7 +7398,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_SET_DATE:
 						/* (Ignore),FileLock,Name,DateStamp(APTR) -> Bool */
 
-						res1 = Action_SetDate((struct FileLock *)BADDR(dp->dp_Arg2),(APTR)BADDR(dp->dp_Arg3),(struct DateStamp *)dp->dp_Arg4,&res2);
+						res1 = Action_SetDate((struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),(struct DateStamp *)dp->dp_Arg4,&res2);
 						break;
 
 					case ACTION_SAME_LOCK:
@@ -7008,7 +7424,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_FINDOUTPUT:
 						/* FileHandle,FileLock,Name -> Bool */
 
-						res1 = Action_Find(dp->dp_Action,(struct FileHandle *)BADDR(dp->dp_Arg1),(struct FileLock *)BADDR(dp->dp_Arg2),(APTR)BADDR(dp->dp_Arg3),&res2);
+						res1 = Action_Find(dp->dp_Action,(struct FileHandle *)BADDR(dp->dp_Arg1),(struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),&res2);
 						break;
 
 					case ACTION_END:
@@ -7050,7 +7466,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_CHANGE_MODE:
 						/* Type,Object,Mode -> Bool */
 
-						res1 = Action_ChangeMode(dp->dp_Arg1,(APTR)BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
+						res1 = Action_ChangeMode(dp->dp_Arg1,BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
 						break;
 
 					case ACTION_COPY_DIR_FH:
@@ -7139,7 +7555,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 				    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
 				{
 					D(("  name='%s'",fn->fn_FullName));
-					D(("  mode=%ld, offset=%ld",fn->fn_Mode,fn->fn_Offset));
+					D(("  mode=%ld, offset=%s",fn->fn_Mode,convert_quad_to_string(&fn->fn_OffsetQuad)));
 					D((""));
 				}
 
@@ -7189,6 +7605,36 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 		LocalFPrintf(ZERO, "stopped.\n");
 
 	LEAVE();
+}
+
+/****************************************************************************/
+
+/* Convert an unsigned 64 bit integer into a string. The
+ * conversion uses a local static buffer and returns a pointer
+ * to the first digit of the string.
+ */
+const char *
+convert_quad_to_string(const QUAD * const number)
+{
+	static char string[22]; /* 21 bytes should be sufficient. */
+
+	QUAD m = (*number);
+	ULONG n;
+	int len;
+
+	memset(string,'\0',sizeof(string));
+
+	for(len = sizeof(string) - 2 ; len >= 0 ; )
+	{
+		n = divide_64_by_32(&m,10,&m);
+
+		string[len--] = '0' + n;
+
+		if(m.High == 0 && m.Low == 0)
+			break;
+	}
+
+	return(&string[len+1]);
 }
 
 /****************************************************************************/

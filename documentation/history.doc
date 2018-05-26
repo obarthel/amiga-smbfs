@@ -1665,8 +1665,8 @@ smbfs 1.136 (22.5.2018)
 smbfs 1.137 (24.5.2018)
 
 - Updated the table of error codes which eventually get translated
-  into AmigaDOS error codes. Quite a number of error codes were 
-  still not properly covered.
+  into AmigaDOS error codes. Quite a number of error codes were not
+  properly covered.
 
 - We now show how much memory smbfs has used (in debug mode), and
   how much memory has not been released yet.
@@ -1703,3 +1703,79 @@ smbfs 1.137 (24.5.2018)
 - Added further tests to figure out if a directory could not be deleted
   because it was not empty. However, it's difficult to tell all three
   cases apart which share the same error code. We'll try anyway...
+
+
+smbfs 1.138 (25.5.2018)
+
+- The name translation performed by the directory scanning code is now
+  a bit more paranoid than before. They will check if the names can
+  be translated into something suitable for use on the Amiga. This rules
+  out control characters, for example. If a name is unsuitable, an
+  explanation why it is unsuitable will be printed in the debug output.
+
+- The SBM directory scanning code which uses the TRANSACT2_FINDFIRST2
+  and TRANSACT2_FINDNEXT2 commands now uses the correct flag codes instead
+  of naked numeric constants.
+
+- Removed support for the "write raw" and "read raw" commands, which extends
+  to the command line parameters and tool types which could be used to
+  disable them or adjust how they would be used.
+
+
+smbfs 1.139 (26.5.2018)
+
+- Added more const qualifiers to pointers, so that unintended changes
+  are more easily detected.
+
+- Text that uses 8 bit characters now uses type TEXT rather than UBYTE,
+  and TEXT * replaces STRPTR where it makes sense.
+
+- Text buffer size and maximum size (without terminating NUL byte) of
+  the string that may be stored in there are now distinct.
+
+- Building the error message list for display in an error requester
+  is now more efficient, as it no longer resorts to strcat().
+
+- Removed the last traces of the SMB "system" file attribute and its
+  mapping to the "pure" protection bit on the Amiga.
+
+- File sizes returned (through the Examine(), ExNext() and ExAll()
+  functions) now refer to the original SMB file size information
+  which may be a 64 bit integer. Same goes for the file sizes
+  referenced by Seek() and SetFileSize(). Note that for now the
+  sizes returned will be truncated, which means that if they
+  exceed what an unsigned 32 bit integer may represent, then
+  the number 4294967295 will be used instead. There could be
+  hilarious consequences: watch out!
+
+- When scanning directory contents, names which end up containing
+  unprintable names (not "#$@&%*!") after conversion to Amiga format
+  are now ignored.
+
+- Reading/writing files updates the internal seek position of the
+  respective file, which is now a 64 bit integer. You can actually
+  read from files > 4 Gigabytes (and write to them, too) as long
+  as you do not use Seek(file, ..., OFFSET_BEGINNING) because that
+  will box you into the first 4 Gigabytes of the file. Note that the
+  result of Seek() and SetFileSize() will be a truncated position
+  (4294967295) if the position happens to be beyond what can be
+  represented by an unsigned 32 bit integer. Because "4294967295"
+  is also known as the signed 32 bit integer "-1" you probably
+  won't be able to tell it apart from a seek error (unless you
+  check the IoErr() value, of course, but who does?). This
+  used to be a problem with "normal" Amiga file systems, and now
+  it's a problem again :-(
+
+- When decoding directory entry data, we no longer replace the
+  "last change" time with the "last write access" time, and then
+  swap both time records again (who ordered that?). The
+  "last change" time now stays the last change time, and this
+  is what goes into the Amiga FileInfoBlock/ExAllData records.
+
+- The debug output for the directory scanner now prints the original
+  untranslated name in 'C' style escaped form, in case this might
+  reveal further insights into why the directory entry names look
+  like they do. Note that all file, directory and path names used
+  by the SMB file system layer now appear only in escaped form, which
+  means for example that all backslash characters which serve as
+  path delimiters show up twice as much.

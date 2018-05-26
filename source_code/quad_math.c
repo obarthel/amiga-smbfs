@@ -119,7 +119,7 @@ divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient)
 {
 	QUAD dividend_cdef = (*dividend);
 	ULONG dividend_ab = 0;
-	LONG i;
+	int i;
 
 	quotient->High = quotient->Low = 0;
 
@@ -165,6 +165,22 @@ divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient)
 	}
 
 	return(dividend_ab);
+}
+
+/****************************************************************************/
+
+/* Add an unsigned 32 bit quantity to a 64 bit quantity, yielding a
+ * 64 bit sum.
+ */
+ULONG
+add_64_plus_32_to_64(const QUAD * const a,ULONG b,QUAD * ab)
+{
+	QUAD b_quad;
+
+	b_quad.Low	= b;
+	b_quad.High	= 0;
+
+	return(add_64_plus_64_to_64(a,&b_quad,ab));
 }
 
 /****************************************************************************/
@@ -242,4 +258,33 @@ subtract_64_from_64_to_64(const QUAD * const minuend,const QUAD * const subtrahe
 
 	/* Return the underflow, if any. */
 	return(extended_minuend.High);
+}
+
+/****************************************************************************/
+
+/* Compare two unsigned 64 bit integers in the manner of strcmp(). */
+int
+compare_64_to_64(const QUAD * const a,const QUAD * const b)
+{
+	int result;
+
+	if(a->High < b->High)
+	{
+		result = -1;
+	}
+	else if (a->High == b->High)
+	{
+		if (a->Low < b->Low)
+			result = -1;
+		else if (a->Low == b->Low)
+			result = 0;
+		else
+			result = 1;
+	}
+	else
+	{
+		result = 1;
+	}
+
+	return(result);
 }

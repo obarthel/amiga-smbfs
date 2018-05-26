@@ -71,11 +71,13 @@ struct smb_dirent
 											/* to UTC. The ugly conversion happens in */
 											/* proc.c */
 
-	unsigned long	size;					/* File size. */
+	dword			size_low;				/* File size (least significant 32 bits). */
+	dword			size_high;				/* File size (most significant 32 bits). */
 
 	char *			complete_path;			/* Complete path, MS-DOS notation, with '\' */
 	size_t			complete_path_size;		/* Number of bytes allocated for name */
-	int				len;					/* Namelength. */
+
+	int				len;					/* Name length. */
 
 	unsigned		opened:1;				/* is it open on the fileserver? */
 	unsigned		writable:1;				/* was opened for read/write access? */

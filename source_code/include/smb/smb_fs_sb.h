@@ -51,18 +51,6 @@ struct smb_server
 	/* olsen (2012-12-10): raw SMB over TCP instead of NBT transport? */
 	int raw_smb;
 
-	/* olsen (2016-04-20): Use write-behind with SMB_COM_WRITE_RAW? */
-	int write_behind;
-
-	/* olsen (2016-04-20): Prefer SMB_COM_WRITE_RAW to SMB_COM_WRITE? */
-	int prefer_write_raw;
-
-	/* olsen (2018-05-08): Always use SMB_COM_WRITE, even if SMB_COM_WRITE_RAW were possible. */
-	int disable_write_raw;
-
-	/* olsen (2018-05-08): Always use SMB_COM_READ, even if SMB_COM_READ_RAW were possible. */
-	int disable_read_raw;
-
 	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
 	int timeout;
 

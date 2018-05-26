@@ -33,6 +33,10 @@
 #include "assert.h"
 #endif /* _ASSERT_H */
 
+#ifndef _QUAD_MATH_H
+#include "quad_math.h"
+#endif /* _QUAD_MATH_H */
+
 /****************************************************************************/
 
 #define SAME (0)
@@ -131,16 +135,18 @@ extern int h_errno;
 /****************************************************************************/
 
 extern int BroadcastNameQuery(const char *name, const char *scope, UBYTE *address);
-extern LONG CompareNames(STRPTR a,STRPTR b);
+extern LONG CompareNames(const TEXT * a,const TEXT * b);
 extern LONG GetTimeZoneDelta(VOID);
 extern STRPTR posix_strerror(int error);
 extern STRPTR host_strerror(int error);
 extern time_t MakeTime(const struct tm * const tm);
 extern ULONG GetCurrentTime(VOID);
 extern VOID GMTime(time_t seconds,struct tm * tm);
-extern VOID VARARGS68K ReportError(STRPTR fmt,...);
+extern VOID VARARGS68K ReportError(const TEXT * fmt,...);
 extern VOID StringToUpper(STRPTR s);
-extern VOID VARARGS68K SPrintf(STRPTR buffer, STRPTR formatString,...);
+extern VOID VARARGS68K SPrintf(STRPTR buffer, const TEXT * formatString,...);
+extern TEXT * escape_name(const TEXT * name);
+extern const char * convert_quad_to_string(const QUAD * const number);
 
 /****************************************************************************/
 
