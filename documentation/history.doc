@@ -1779,3 +1779,35 @@ smbfs 1.139 (26.5.2018)
   by the SMB file system layer now appear only in escaped form, which
   means for example that all backslash characters which serve as
   path delimiters show up twice as much.
+
+
+smbfs 1.140 (27.5.2018)
+
+- When opening a file or directory for access, the access rights
+  required now follow the original smbfs implementation which
+  always required write access regardless of whether it was
+  needed or not. If write access was not available it would
+  retry using read-only access.
+
+  The new code now starts with write access, even if only read
+  access was required, and will retry with read-only access if
+  needed. However, if write access was required, no retry with
+  read-only access will be made.
+
+- Only the directory cache needs to keep track of how much memory
+  is available for storing file and directory names during directory
+  scanning. Opening a file or directory doesn't have to bother,
+  which is why smbfs can now do its job without allocating a
+  minimum of 256 bytes per path name. This also simplified the
+  path name management. Incidentally, the path name management
+  could not reliably guarantee a NUL-terminated buffer :-(
+
+- Finally figured out why files or directories created through smbfs
+  could not be deleted again: smbfs could end up marking them as
+  "ready-only". Fixed!
+
+- Found and fixed a few utterly embarrassing "use after free" cases,
+  which thankfully had little impact :-/
+
+- The debug code now shows which file IDs the server assigned to
+  opened files/directories.

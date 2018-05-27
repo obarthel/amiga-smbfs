@@ -997,11 +997,34 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 	int result;
 	char *p;
 	char *buf = server->transmit_buffer;
-	const word o_attr = aSYSTEM | aHIDDEN | aDIR;
+	int retry_read_only;
 
 	ENTER();
 
 	D(("pathname = '%s'", escape_name(pathname)));
+
+	/* Because the original code opened every file/directory in
+	 * read/write mode, we emulate the same behaviour. Why this
+	 * is done is hard to tell. Presumably, some directories need
+	 * to be writable for modifications to take place within.
+	 *
+	 * If read access is requested, we start with write access
+	 * and disable truncation just to be safe. If that attempt
+	 * fails due to access rights issues, we try again with read
+	 * access.
+	 */
+	if(writable)
+	{
+		retry_read_only = FALSE;
+	}
+	else
+	{
+		writable = TRUE;
+
+		retry_read_only = TRUE;
+
+		truncate_file = FALSE;
+	}
 
 	if (server->protocol >= PROTOCOL_NT1)
 	{
@@ -1019,41 +1042,41 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		ASSERT( smb_payload_size(server, 24, len+1) >= 0 );
 
-		if(writable)
-		{
-			SHOWMSG("write access required");
-			// desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE;
-			desired_access = GENERIC_READ|GENERIC_WRITE;
-		}
-		else
-		{
-			SHOWMSG("read access is sufficient");
-			// desired_access = FILE_READ_DATA;
-			desired_access = GENERIC_READ;
-		}
-
-		// desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES;
-
-		/* Allows others to read, write and delete the file just created.
-		 * This may be useful if smbfs hangs or you need to restart your
-		 * System and you need to clean up after the file you just
-		 * created.
-		 */
-		share_access = FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
-
-		if(writable && truncate_file)
-		{
-			create_disposition	= FILE_OVERWRITE_IF;
-			create_options		= FILE_NON_DIRECTORY_FILE | FILE_RANDOM_ACCESS;
-		}
-		else
-		{
-			create_disposition	= FILE_OPEN;
-			create_options		= 0;
-		}
-
 		while(TRUE)
 		{
+			if(writable)
+			{
+				SHOWMSG("write access required");
+				// desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE;
+				desired_access = GENERIC_READ|GENERIC_WRITE;
+			}
+			else
+			{
+				SHOWMSG("read access is sufficient");
+				// desired_access = FILE_READ_DATA;
+				desired_access = GENERIC_READ;
+			}
+
+			// desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES;
+
+			/* Allows others to read, write and delete the file just created.
+			 * This may be useful if smbfs hangs or you need to restart your
+			 * System and you need to clean up after the file you just
+			 * created.
+			 */
+			share_access = FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
+
+			if(writable && truncate_file)
+			{
+				create_disposition	= FILE_OVERWRITE_IF;
+				create_options		= FILE_NON_DIRECTORY_FILE | FILE_RANDOM_ACCESS;
+			}
+			else
+			{
+				create_disposition	= FILE_OPEN;
+				create_options		= 0;
+			}
+
 			data = smb_setup_header (server, SMBntcreateX, 24, len+1);
 
 			params = SMB_VWV (server->transmit_buffer);
@@ -1084,6 +1107,25 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			if (result < 0)
 			{
 				SHOWMSG("that didn't work; retrying");
+
+				/* Try again in read-only mode? */
+				if ((*error_ptr) == EACCES || ((*error_ptr) == error_check_smb_error && smb_errno(server->rcls,server->err) == EACCES))
+				{
+					if(retry_read_only)
+					{
+						SHOWMSG("retrying with read-only access");
+
+						retry_read_only = FALSE;
+
+						writable = FALSE;
+
+						continue;
+					}
+					else
+					{
+						goto out;
+					}
+				}
 
 				if (smb_retry (server))
 					continue;
@@ -1123,62 +1165,69 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		goto out;
 	}
-
-	ASSERT( smb_payload_size(server, 2, 2 + len) >= 0 );
-
-	SHOWMSG("using the old SMB_COM_OPEN");
-
- retry:
-
-	p = smb_setup_header (server, SMBopen, 2, 2 + len);
-	WSET (buf, smb_vwv0, 0x42); /* read/write */
-	WSET (buf, smb_vwv1, o_attr);
-	smb_encode_ascii (p, pathname, len);
-
-	result = smb_request_ok (server, SMBopen, 7, 0, error_ptr);
-	if (result < 0)
+	else
 	{
-		if (smb_retry (server))
-			goto retry;
+		word access_and_share_modes;
 
-		if ((*error_ptr) == EACCES || ((*error_ptr) == error_check_smb_error && smb_errno(server->rcls,server->err) == EACCES))
+		ASSERT( smb_payload_size(server, 2, 2 + len) >= 0 );
+
+		SHOWMSG("using the old SMB_COM_OPEN");
+
+		while(TRUE)
 		{
-			/* Don't retry in read-only mode. */
 			if(writable)
-				goto out;
-
-			ASSERT( smb_payload_size(server, 2, 2 + len) >= 0 );
-
- retry_read_only:
+				access_and_share_modes = SMB_OPEN_SHARE_DENY_NOTHING|SMB_OPEN_ACCESS_READ_WRITE;
+			else
+				access_and_share_modes = SMB_OPEN_SHARE_DENY_NOTHING|SMB_OPEN_ACCESS_READ_ONLY;
 
 			p = smb_setup_header (server, SMBopen, 2, 2 + len);
-			WSET (buf, smb_vwv0, 0x40); /* read only */
-			WSET (buf, smb_vwv1, o_attr);
+			WSET (buf, smb_vwv0, access_and_share_modes);
+			WSET (buf, smb_vwv1, SMB_FILE_ATTRIBUTE_HIDDEN|SMB_FILE_ATTRIBUTE_SYSTEM|SMB_FILE_ATTRIBUTE_DIRECTORY);
 			smb_encode_ascii (p, pathname, len);
 
 			result = smb_request_ok (server, SMBopen, 7, 0, error_ptr);
 			if (result < 0)
 			{
+				/* Try again in read-only mode? */
+				if ((*error_ptr) == EACCES || ((*error_ptr) == error_check_smb_error && smb_errno(server->rcls,server->err) == EACCES))
+				{
+					if(retry_read_only)
+					{
+						SHOWMSG("retrying with read-only access");
+
+						retry_read_only = FALSE;
+
+						writable = FALSE;
+
+						continue;
+					}
+					else
+					{
+						goto out;
+					}
+				}
+
 				if (smb_retry (server))
-					goto retry_read_only;
-
-				goto out;
+					continue;
+				else
+					goto out;
 			}
-		}
-		else
-		{
-			goto out;
-		}
-	}
 
-	/* We should now have data in vwv[0..6]. */
-	entry->fileid = WVAL (buf, smb_vwv0);
-	entry->attr = WVAL (buf, smb_vwv1);
-	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
-	entry->size_low = DVAL (buf, smb_vwv4);
-	entry->size_high = 0;
-	entry->opened = TRUE;
-	entry->writable = writable;
+			break;
+		}
+
+		/* We should now have data in vwv[0..6]. */
+		entry->fileid = WVAL (buf, smb_vwv0);
+
+		entry->attr = WVAL (buf, smb_vwv1);
+		entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
+
+		entry->size_low = DVAL (buf, smb_vwv4);
+		entry->size_high = 0;
+
+		entry->opened = TRUE;
+		entry->writable = writable;
+	}
 
  out:
 
@@ -1440,13 +1489,13 @@ smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, const QUAD 
 
 /* smb_proc_lockingX: We don't chain any further packets to the initial one */
 int
-smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, struct smb_lkrng *locks, int num_entries, int mode, long timeout, int * error_ptr)
+smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, const struct smb_lkrng *locks, int num_entries, int mode, long timeout, int * error_ptr)
 {
 	int result;
 	int num_locks, num_unlocks;
 	char *buf = server->transmit_buffer;
 	char *data;
-	struct smb_lkrng *p;
+	const struct smb_lkrng *p;
 	int i;
 
 	num_locks = num_unlocks = 0;
@@ -1692,7 +1741,7 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 	/* Allow for system and hidden files to be deleted, too. After
 	 * all, we show these in the directory lists.
 	 */
-	WSET (buf, smb_vwv0, aSYSTEM | aHIDDEN);
+	WSET (buf, smb_vwv0, SMB_FILE_ATTRIBUTE_SYSTEM | SMB_FILE_ATTRIBUTE_HIDDEN);
 
 	smb_encode_ascii (p, path, len);
 
@@ -1738,8 +1787,8 @@ smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_p
 	return result;
 }
 
-static char *
-smb_decode_dirent (char *p, struct smb_dirent *entry)
+static int
+smb_decode_dirent (const char *p, struct smb_dirent *entry)
 {
 	size_t name_size;
 
@@ -1753,7 +1802,7 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 	name_size = 13;
 
 	if(name_size > entry->complete_path_size-1)
-		name_size = entry->complete_path_size-1;
+		return(-1);
 
 	memcpy (entry->complete_path, p + 9, name_size);
 
@@ -1770,13 +1819,13 @@ smb_decode_dirent (char *p, struct smb_dirent *entry)
 	}
 	#endif /* DEBUG */
 
-	return p + 22;
+	return(0);
 }
 
 /* This routine is used to read in directory entries from the network.
    Note that it is for short directory name seeks, i.e.: protocol < PROTOCOL_LANMAN2 */
 static int
-smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
+smb_proc_readdir_short (struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
 {
 	char *p;
 	char *buf;
@@ -1822,7 +1871,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 
 			p = smb_setup_header (server, SMBsearch, 2, 5 + strlen (mask));
 			WSET (buf, smb_vwv0, entries_asked);
-			WSET (buf, smb_vwv1, aDIR);
+			WSET (buf, smb_vwv1, SMB_FILE_ATTRIBUTE_DIRECTORY);
 			p = smb_encode_ascii (p, mask, strlen (mask));
 			(*p++) = 5;
 			(void) smb_encode_word (p, 0);
@@ -1833,7 +1882,7 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 
 			p = smb_setup_header (server, SMBsearch, 2, 5 + SMB_STATUS_SIZE);
 			WSET (buf, smb_vwv0, entries_asked);
-			WSET (buf, smb_vwv1, aDIR);
+			WSET (buf, smb_vwv1, SMB_FILE_ATTRIBUTE_DIRECTORY);
 			p = smb_encode_ascii (p, "", 0);
 			(void) smb_encode_vblock (p, status, SMB_STATUS_SIZE);
 		}
@@ -1901,9 +1950,16 @@ smb_proc_readdir_short (struct smb_server *server, char *path, int fpos, int cac
 			}
 			else
 			{
-				p = smb_decode_dirent (p, current_entry);
+				if(smb_decode_dirent (p, current_entry) == 0)
+				{
+					current_entry += 1;
+				}
+				else
+				{
+					p += SMB_DIRINFO_SIZE;
 
-				current_entry += 1;
+					LOG (("skipped entry because name is too long; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
+				}
 			}
 
 			total_count += 1;
@@ -2020,7 +2076,7 @@ smb_get_dirent_name(char *p,int level,char ** name_ptr,int * len_ptr)
 
 /* interpret a long filename structure */
 static int
-smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entry_length_ptr)
+smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int * entry_length_ptr)
 {
 	int success = TRUE;
 
@@ -2074,6 +2130,8 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 
 				memcpy(finfo->complete_path, name, name_len);
 				finfo->complete_path[name_len] = '\0';
+
+				D(("name = '%s', length=%ld",escape_name(finfo->complete_path),name_len));
 			}
 
 			break;
@@ -2177,6 +2235,8 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 				memcpy (finfo->complete_path, p, name_len);
 				finfo->complete_path[name_len] = '\0';
 				finfo->len = name_len;
+
+				D(("name = '%s', length=%ld",escape_name(finfo->complete_path),name_len));
 			}
 
 			break;
@@ -2197,7 +2257,7 @@ smb_decode_long_dirent (char *p, struct smb_dirent *finfo, int level, int * entr
 }
 
 static int
-smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
+smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
 {
 	int max_matches = 512; /* this should actually be based on the max_recv value */
 
@@ -2214,7 +2274,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 	int resp_data_len = 0;
 	int resp_param_len = 0;
 
-	int attribute = aSYSTEM | aHIDDEN | aDIR;
+	int attribute = SMB_FILE_ATTRIBUTE_SYSTEM | SMB_FILE_ATTRIBUTE_HIDDEN | SMB_FILE_ATTRIBUTE_DIRECTORY;
 	int result = 0;
 
 	int ff_searchcount;
@@ -2543,7 +2603,7 @@ smb_proc_readdir_long (struct smb_server *server, char *path, int fpos, int cach
 }
 
 int
-smb_proc_readdir (struct smb_server *server, char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
+smb_proc_readdir (struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
 {
 	int result;
 
@@ -2903,7 +2963,7 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
  * entry->mtime, to make touch work.
  */
 int
-smb_proc_setattr_core (struct smb_server *server, const char *path, int len, struct smb_dirent *new_finfo, int * error_ptr)
+smb_proc_setattr_core (struct smb_server *server, const char *path, int len, const struct smb_dirent *new_finfo, int * error_ptr)
 {
 	char *p;
 	char *buf = server->transmit_buffer;

@@ -85,7 +85,7 @@ typedef int (*smba_callback_t) (void *d, int fpos, int nextpos, char *name, int 
 
 /****************************************************************************/
 
-int smba_open(smba_server_t *s, char *name, size_t name_size, int writable, int truncate, smba_file_t **file, int * error_ptr);
+int smba_open(smba_server_t *s, char *name, int writable, int truncate, smba_file_t **file, int * error_ptr);
 void smba_close(smba_file_t *f, int * error_ptr);
 int smba_read(smba_file_t *f, char *data, long len, const QUAD * const offset, int * error_ptr);
 int smba_write(smba_file_t *f, const char *data, long len, const QUAD * const offset, int * error_ptr);

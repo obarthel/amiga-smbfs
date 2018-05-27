@@ -67,15 +67,19 @@ struct smb_dirent
 	dword			attr;					/* Attribute fields, DOS value */
 
 	time_t			atime, mtime, 
-					wtime, ctime;			/* Times, as seen by the server, normalized */
-											/* to UTC. The ugly conversion happens in */
-											/* proc.c */
+					wtime, ctime;			/* Times, as seen by the server, normalized
+											 * to UTC. The ugly conversion happens in
+											 * proc.c
+											 */
 
 	dword			size_low;				/* File size (least significant 32 bits). */
 	dword			size_high;				/* File size (most significant 32 bits). */
 
 	char *			complete_path;			/* Complete path, MS-DOS notation, with '\' */
-	size_t			complete_path_size;		/* Number of bytes allocated for name */
+	size_t			complete_path_size;		/* Number of bytes allocated for name; this is
+											 * used only by the directory reader and
+											 * the cache.
+											 */
 
 	int				len;					/* Name length. */
 

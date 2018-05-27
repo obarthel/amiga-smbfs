@@ -270,7 +270,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 				goto out;
 		}
 
-		if ((f->dirent.attr & aDIR) == 0) /* a regular file */
+		if ((f->dirent.attr & SMB_FILE_ATTRIBUTE_DIRECTORY) == 0) /* a regular file */
 		{
 			if (f->server->server.protocol >= PROTOCOL_LANMAN2)
 			{
@@ -286,7 +286,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 					}
 					else
 					{
-						LOG (("file '%s' is already open\n", escape_name(f->dirent.complete_path)));
+						LOG (("file '%s' is already open (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
 					}
 				}
 			}
@@ -302,7 +302,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 				}
 				else
 				{
-					LOG (("file '%s' is already open\n", escape_name(f->dirent.complete_path)));
+					LOG (("file '%s' is already open (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
 				}
 
 				if (s->supports_E || !s->supports_E_known)
@@ -348,7 +348,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 /*****************************************************************************/
 
 int
-smba_open (smba_server_t * s, char *name, size_t name_size, int writable, int truncate, smba_file_t ** file, int * error_ptr)
+smba_open (smba_server_t * s, char *name, int writable, int truncate, smba_file_t ** file, int * error_ptr)
 {
 	smba_file_t *f;
 	int result;
@@ -367,7 +367,6 @@ smba_open (smba_server_t * s, char *name, size_t name_size, int writable, int tr
 	memset(f,0,sizeof(*f));
 
 	f->dirent.complete_path = name;
-	f->dirent.complete_path_size = name_size;
 	f->dirent.len = strlen (name);
 	f->server = s;
 
@@ -383,7 +382,7 @@ smba_open (smba_server_t * s, char *name, size_t name_size, int writable, int tr
 	AddTail ((struct List *)&s->open_files, (struct Node *)f);
 	s->num_open_files++;
 
-	LOG(("open succeeded, number of open files = %ld\n",s->num_open_files));
+	LOG(("file is ready (but hasn't actually been opened yet), number of open files = %ld\n",s->num_open_files));
 
 	(*file) = f;
 	f = NULL;
@@ -415,7 +414,7 @@ write_attr (smba_file_t * f, int * error_ptr)
 	}
 	else
 	{
-		result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
+		result = make_open (f, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
 			goto out;
 
@@ -445,8 +444,6 @@ smba_close (smba_file_t * f, int * error_ptr)
 {
 	if(f != NULL)
 	{
-		LOG (("closing file '%s'\n", escape_name(f->dirent.complete_path)));
-
 		if(f->node.mln_Succ != NULL || f->node.mln_Pred != NULL)
 			Remove((struct Node *)f);
 
@@ -455,7 +452,8 @@ smba_close (smba_file_t * f, int * error_ptr)
 
 		if (f->dirent.opened)
 		{
-			LOG(("notifying the server that the file was closed"));
+			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
+
 			smb_proc_close (&f->server->server, f->dirent.fileid, f->dirent.mtime, error_ptr);
 		}
 
@@ -873,11 +871,11 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 		f->attr_time = now;
 	}
 
-	data->is_dir = (f->dirent.attr & aDIR) != 0;
-	data->is_read_only = (f->dirent.attr & aRONLY) != 0;
-	data->is_hidden = (f->dirent.attr & aHIDDEN) != 0;
-	data->is_system = (f->dirent.attr & aSYSTEM) != 0;
-	data->is_changed_since_last_archive = (f->dirent.attr & aARCH) != 0;
+	data->is_dir = (f->dirent.attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
+	data->is_read_only = (f->dirent.attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
+	data->is_hidden = (f->dirent.attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
+	data->is_system = (f->dirent.attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
+	data->is_changed_since_last_archive = (f->dirent.attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
 
 	data->size_low	= f->dirent.size_low;
 	data->size_high	= f->dirent.size_high;
@@ -923,14 +921,14 @@ smba_setattr (smba_file_t * f, const smba_stat_t * data, const QUAD * const size
 		attrs = f->dirent.attr;
 
 		if (data->is_read_only)
-			attrs |= aRONLY;
+			attrs |= SMB_FILE_ATTRIBUTE_READONLY;
 		else
-			attrs &= ~aRONLY;
+			attrs &= ~SMB_FILE_ATTRIBUTE_READONLY;
 
 		if (data->is_changed_since_last_archive)
-			attrs |= aARCH;
+			attrs |= SMB_FILE_ATTRIBUTE_ARCHIVE;
 		else
-			attrs &= ~aARCH;
+			attrs &= ~SMB_FILE_ATTRIBUTE_ARCHIVE;
 
 		if(f->dirent.attr != attrs)
 		{
@@ -1059,11 +1057,11 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int
 
 		LOG (("delivering '%s', cache_index=%ld, eof=%ld\n", escape_name(f->dircache->cache[o].complete_path), cache_index, eof));
 
-		data.is_dir							= (f->dircache->cache[o].attr & aDIR) != 0;
-		data.is_read_only					= (f->dircache->cache[o].attr & aRONLY) != 0;
-		data.is_hidden						= (f->dircache->cache[o].attr & aHIDDEN) != 0;
-		data.is_system						= (f->dircache->cache[o].attr & aSYSTEM) != 0;
-		data.is_changed_since_last_archive	= (f->dircache->cache[o].attr & aARCH) != 0;
+		data.is_dir							= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
+		data.is_read_only					= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
+		data.is_hidden						= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
+		data.is_system						= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
+		data.is_changed_since_last_archive	= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
 		data.size_low						= f->dircache->cache[o].size_low;
 		data.size_high						= f->dircache->cache[o].size_high;
 		data.atime							= f->dircache->cache[o].atime;
@@ -1149,7 +1147,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 	size_t len;
 	int result;
 
-	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
+	result = make_open (dir, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1208,7 +1206,7 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 	char *path = NULL;
 	int result;
 
-	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
+	result = make_open (dir, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1409,6 +1407,7 @@ smba_cleanup_dircache(struct smba_server * server)
 static int
 smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr)
 {
+	const int complete_path_size = SMB_MAXNAMELEN + 1;
 	dircache_t * the_dircache;
 	int result = -1;
 	int i;
@@ -1425,14 +1424,14 @@ smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr
 
 	for (i = 0; i < the_dircache->cache_size; i++)
 	{
-		the_dircache->cache[i].complete_path = malloc (SMB_MAXNAMELEN + 1);
+		the_dircache->cache[i].complete_path = malloc (complete_path_size);
 		if(the_dircache->cache[i].complete_path == NULL)
 		{
 			(*error_ptr) = ENOMEM;
 			goto out;
 		}
 
-		the_dircache->cache[i].complete_path_size = SMB_MAXNAMELEN + 1;
+		the_dircache->cache[i].complete_path_size = complete_path_size;
 	}
 
 	server->dircache = the_dircache;
@@ -1754,6 +1753,7 @@ smba_get_dircache_size(struct smba_server * server)
 int
 smba_change_dircache_size(struct smba_server * server,int cache_size)
 {
+	const int complete_path_size = SMB_MAXNAMELEN + 1;
 	dircache_t * new_cache;
 	dircache_t * old_dircache = server->dircache;
 	int result;
@@ -1791,14 +1791,14 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 		/* Allocate memory for the file names. */
 		for(i = old_dircache->cache_size ; i < cache_size ; i++)
 		{
-			new_cache->cache[i].complete_path = malloc (SMB_MAXNAMELEN + 1);
+			new_cache->cache[i].complete_path = malloc (complete_path_size);
 			if(new_cache->cache[i].complete_path == NULL)
 			{
 				free_dircache(new_cache);
 				goto out;
 			}
 
-			new_cache->cache[i].complete_path_size = SMB_MAXNAMELEN + 1;
+			new_cache->cache[i].complete_path_size = complete_path_size;
 		}
 
 		/* Reuse the file name buffers allocated for the old cache. */

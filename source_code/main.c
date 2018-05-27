@@ -935,7 +935,7 @@ main(VOID)
 
 		if(args.Service != NULL)
 		{
-			STRPTR name = FilePart(program_name);
+			const TEXT * name = FilePart(program_name);
 
 			/* Set up the name of the program, as it will be
 			 * displayed in the proces status list.
@@ -3170,15 +3170,25 @@ ConvertCString(void * bstring,int max_len,const TEXT * cstring,int len)
  * to the name of the parent directory. This takes care of all the
  * special cases, such as the root directory. The result will be converted
  * to be in a form suitable for use with the SMB file sharing service.
+ *
+ * Note that the parent directory name uses SMB path name separator
+ * characters ("\"), but the path name to be added ("name") uses the
+ * AmigaDOS path name separator characters ("/").
+ *
+ * This function will return ERROR_NO_FREE_STORE if the memory allocation
+ * failed, and ERROR_INVALID_COMPONENT_NAME if the combination of the
+ * parent name and the name wound up referring to the root directory.
  */
 STATIC LONG
 BuildFullName(
 	const TEXT *	parent_name,
-	STRPTR			name,
-	STRPTR *		result_ptr,
-	int *			result_size_ptr)
+	const TEXT *	name,
+	STRPTR *		result_ptr)
 {
 	int error = OK;
+	int parent_name_len;
+	int name_len;
+	int buffer_len;
 	STRPTR buffer;
 	int len,size;
 	int i;
@@ -3197,14 +3207,22 @@ BuildFullName(
 	/* Throw everything left of the colon away. */
 	if(name != NULL)
 	{
-		for(i = 0 ; i < (int)strlen(name) ; i++)
+		name_len = strlen(name);
+
+		for(i = 0 ; i < name_len ; i++)
 		{
 			if(name[i] == ':')
 			{
 				name = &name[i+1];
+				name_len -= i + 1;
+
 				break;
 			}
 		}
+	}
+	else
+	{
+		name_len = 0;
 	}
 
 	/* Now, how much room is needed for the complete
@@ -3213,13 +3231,24 @@ BuildFullName(
 	len = 2;
 
 	if(parent_name != NULL)
-		len += strlen(parent_name) + 1;
+	{
+		/* Skip any excess delimiters. */
+		while((*parent_name) == SMB_PATH_SEPARATOR)
+			parent_name++;
+
+		parent_name_len = strlen(parent_name);
+
+		len += 1 + parent_name_len;
+	}
+	else
+	{
+		len += strlen(SMB_ROOT_DIR_NAME);
+
+		parent_name_len = 0;
+	}
 
 	if(name != NULL)
-		len += strlen(name) + 1;
-
-	if(len < SMB_MAXNAMELEN)
-		len = SMB_MAXNAMELEN;
+		len += 1 + name_len;
 
 	size = len + 3;
 
@@ -3233,16 +3262,19 @@ BuildFullName(
 	/* Start by filling in the path name. */
 	if(parent_name != NULL)
 	{
-		/* Skip any excess separators. */
-		while((*parent_name) == SMB_PATH_SEPARATOR)
-			parent_name++;
-
 		buffer[0] = SMB_PATH_SEPARATOR;
-		strcpy(&buffer[1],parent_name);
+
+		memcpy(&buffer[1],parent_name,parent_name_len);
+
+		buffer_len = 1 + parent_name_len;
 	}
 	else
 	{
+		ASSERT( (int)strlen(SMB_ROOT_DIR_NAME) < size );
+
 		strcpy(buffer,SMB_ROOT_DIR_NAME);
+
+		buffer_len = strlen(buffer);
 	}
 
 	/* If there's a name to add, do just that. */
@@ -3250,11 +3282,6 @@ BuildFullName(
 	{
 		int segment_start;
 		int segment_len;
-		int buffer_len;
-		int name_len;
-
-		buffer_len = strlen(buffer);
-		name_len = strlen(name);
 
 		segment_start = 0;
 
@@ -3294,9 +3321,7 @@ BuildFullName(
 				/* Is this already the root directory name? */
 				if(buffer_len <= 1)
 				{
-					FreeMemory(buffer);
-					buffer = NULL;
-
+					error = ERROR_INVALID_COMPONENT_NAME;
 					goto out;
 				}
 				else
@@ -3332,7 +3357,15 @@ BuildFullName(
 				 * necessary.
 				 */
 				if(buffer_len > 0 && buffer[buffer_len-1] != SMB_PATH_SEPARATOR)
+				{
+					if(buffer_len+1 > size)
+					{
+						error = ERROR_NO_FREE_STORE;
+						goto out;
+					}
+
 					buffer[buffer_len++] = SMB_PATH_SEPARATOR;
+				}
 
 				/* Find out how many characters are in that name; this
 				 * excludes the terminating slash.
@@ -3341,6 +3374,12 @@ BuildFullName(
 					len = segment_len - 1;
 				else
 					len = segment_len;
+
+				if(buffer_len+len+1 > size)
+				{
+					error = ERROR_NO_FREE_STORE;
+					goto out;
+				}
 
 				memcpy(&buffer[buffer_len],&name[segment_start],len);
 				buffer_len += len;
@@ -3351,14 +3390,17 @@ BuildFullName(
 	}
 
 	(*result_ptr) = buffer;
-	(*result_size_ptr) = size;
+
+	ASSERT( buffer_len < size );
+
+	buffer[buffer_len] = '\0';
 
 	D(("buffer = '%s'",escape_name(buffer)));
+	buffer = NULL;
 
  out:
 
-	if(error != OK)
-		FreeMemory(buffer);
+	FreeMemory(buffer);
 
 	RETURN(error);
 	return(error);
@@ -3373,9 +3415,7 @@ Action_Parent(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	int full_name_size;
 	STRPTR parent_name;
-	BOOL cleanup = TRUE;
 	struct LockNode * ln = NULL;
 	int error;
 
@@ -3394,16 +3434,18 @@ Action_Parent(
 		parent_name = NULL;
 	}
 
-	error = BuildFullName(parent_name,"/",&full_name,&full_name_size);
+	error = BuildFullName(parent_name,"/",&full_name);
 	if(error != OK)
-		goto out;
+	{
+		/* Check if we ended up having to return the parent of
+		 * the root directory. This is indicated by the
+		 * error code ERROR_INVALID_COMPONENT_NAME.
+		 */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = OK;
 
-	/* Check if we ended up having to return the parent of
-	 * the root directory. This is indicated by a NULL
-	 * name pointer and a zero error code.
-	 */
-	if(full_name == NULL)
 		goto out;
+	}
 
 	ln = AllocateMemory(sizeof(*ln));
 	if(ln == NULL)
@@ -3422,7 +3464,7 @@ Action_Parent(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3430,16 +3472,15 @@ Action_Parent(
 
 	AddTail((struct List *)&LockList,(struct Node *)ln);
 	result = MKBADDR(&ln->ln_FileLock);
-	cleanup = FALSE;
 	SHOWVALUE(&ln->ln_FileLock);
+
+	full_name = NULL;
+	ln = NULL;
 
  out:
 
-	if(cleanup)
-	{
-		FreeMemory(full_name);
-		FreeMemory(ln);
-	}
+	FreeMemory(full_name);
+	FreeMemory(ln);
 
 	(*error_ptr) = error;
 
@@ -3488,7 +3529,7 @@ Action_DeleteObject(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	int full_name_size;
+	int full_name_len;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
 	STRPTR full_parent_name = NULL;
@@ -3560,16 +3601,17 @@ Action_DeleteObject(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
+	error = BuildFullName(parent_name,name,&full_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to delete the root directory, are you kidding? */
-	if(full_name == NULL)
 	{
-		LOG(("cannot delete the root directory\n"));
-		
-		error = ERROR_OBJECT_IN_USE;
+		/* Trying to delete the root directory, are you kidding? */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+		{
+			LOG(("cannot delete the root directory\n"));
+
+			error = ERROR_OBJECT_IN_USE;
+		}
+
 		goto out;
 	}
 
@@ -3587,21 +3629,23 @@ Action_DeleteObject(
 	 * in case the directory contents are currently being
 	 * examined, that process is restarted.
 	 */
-	full_parent_name = AllocateMemory(strlen(full_name)+3);
+	full_name_len = strlen(full_name);
+
+	full_parent_name = AllocateMemory(full_name_len+1);
 	if(full_parent_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	strcpy(full_parent_name,full_name);
+	memcpy(full_parent_name,full_name,full_name_len+1);
 
 	/* Build the parent object name - Piru */
-	if (full_parent_name[0] != '\0')
+	if (full_name_len > 0)
 	{
 		int i;
 
-		i = strlen(full_parent_name) - 1;
+		i = full_name_len - 1;
 		if (i >= 0 && full_parent_name[i] == SMB_PATH_SEPARATOR)
 			i--;
 
@@ -3629,7 +3673,7 @@ Action_DeleteObject(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3706,11 +3750,11 @@ Action_DeleteObject(
 
  out:
 
-	FreeMemory(full_name);
-	FreeMemory(full_parent_name);
-
 	if(file != NULL)
 		smba_close(file,&ignored_error);
+
+	FreeMemory(full_name);
+	FreeMemory(full_parent_name);
 
 	(*error_ptr) = error;
 
@@ -3728,11 +3772,10 @@ Action_CreateDir(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	int full_name_size;
+	int full_name_len;
 	struct LockNode * ln = NULL;
 	STRPTR parent_name;
 	STRPTR dir_name = NULL;
-	size_t dir_name_size;
 	smba_file_t * dir = NULL;
 	STRPTR base_name;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -3789,33 +3832,33 @@ Action_CreateDir(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
+	error = BuildFullName(parent_name,name,&full_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to overwrite the root directory, are you kidding? */
-	if(full_name == NULL)
 	{
-		error = ERROR_OBJECT_IN_USE;
+		/* Trying to overwrite the root directory, are you kidding? */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = ERROR_OBJECT_IN_USE;
+
 		goto out;
 	}
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	dir_name_size = strlen(full_name)+3;
+	full_name_len = strlen(full_name);
 
-	dir_name = AllocateMemory(dir_name_size);
+	/* Note: extra character needed for special case '\name'. */ 
+	dir_name = AllocateMemory(full_name_len+2);
 	if(dir_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	strcpy(dir_name,full_name);
+	memcpy(dir_name,full_name,full_name_len+1);
 
 	base_name = NULL;
 
-	for(i = strlen(dir_name)-1 ; i >= 0 ; i--)
+	for(i = full_name_len-1 ; i >= 0 ; i--)
 	{
 		if(dir_name[i] == SMB_PATH_SEPARATOR)
 		{
@@ -3824,7 +3867,7 @@ Action_CreateDir(
 			 */
 			if(i == 0)
 			{
-				memmove(&dir_name[1],&dir_name[0],strlen(dir_name)+1);
+				memmove(&dir_name[1],&dir_name[0],full_name_len+1);
 				i++;
 			}
 
@@ -3852,11 +3895,13 @@ Action_CreateDir(
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
 
-	if(smba_open(ServerData,dir_name,dir_name_size,open_read_only,open_dont_truncate,&dir,&error) < 0)
+	if(smba_open(ServerData,dir_name,open_read_only,open_dont_truncate,&dir,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
+
+	ASSERT( base_name != NULL );
 
 	if(smba_mkdir(dir,base_name,&error) < 0)
 	{
@@ -3869,7 +3914,7 @@ Action_CreateDir(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -3879,18 +3924,17 @@ Action_CreateDir(
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
+	full_name = NULL;
+	ln = NULL;
+
  out:
 
 	if(dir != NULL)
 		smba_close(dir,&ignored_error);
 
 	FreeMemory(dir_name);
-
-	if(result == ZERO)
-	{
-		FreeMemory(full_name);
-		FreeMemory(ln);
-	}
+	FreeMemory(full_name);
+	FreeMemory(ln);
 
 	(*error_ptr) = error;
 
@@ -3909,7 +3953,6 @@ Action_LocateObject(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	int full_name_size;
 	struct LockNode * ln = NULL;
 	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -3964,15 +4007,17 @@ Action_LocateObject(
 		goto out;
 	}
 
-	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
+	error = BuildFullName(parent_name,name,&full_name);
 	if(error != OK)
-		goto out;
+	{
+		/* Trying to get a lock on the root directory's parent?
+		 * My pleasure.
+		 */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = OK;
 
-	/* Trying to get a lock on the root directory's parent?
-	 * My pleasure.
-	 */
-	if(full_name == NULL)
 		goto out;
+	}
 
 	ln = AllocateMemory(sizeof(*ln));
 	if(ln == NULL)
@@ -3995,7 +4040,7 @@ Action_LocateObject(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -4005,13 +4050,13 @@ Action_LocateObject(
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
+	full_name = NULL;
+	ln = NULL;
+
  out:
 
-	if(result == ZERO)
-	{
-		FreeMemory(full_name);
-		FreeMemory(ln);
-	}
+	FreeMemory(full_name);
+	FreeMemory(ln);
 
 	(*error_ptr) = error;
 
@@ -4028,9 +4073,9 @@ Action_CopyDir(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	int full_name_size;
 	struct LockNode * ln = NULL;
-	STRPTR source_name;
+	const TEXT * source_name;
+	int source_name_len;
 	LONG source_mode;
 	int error;
 
@@ -4067,18 +4112,16 @@ Action_CopyDir(
 		source_mode = SHARED_LOCK;
 	}
 
-	full_name_size = strlen(source_name)+3;
-	if(full_name_size < SMB_MAXNAMELEN+1)
-		full_name_size = SMB_MAXNAMELEN+1;
+	source_name_len = strlen(source_name);
 
-	full_name = AllocateMemory(full_name_size);
+	full_name = AllocateMemory(source_name_len+1);
 	if(full_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	strcpy(full_name,source_name);
+	memcpy(full_name,source_name,source_name_len+1);
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
 	ln->ln_FileLock.fl_Access	= source_mode;
@@ -4088,7 +4131,7 @@ Action_CopyDir(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -4098,13 +4141,13 @@ Action_CopyDir(
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
+	full_name = NULL;
+	ln = NULL;
+
  out:
 
-	if(result == ZERO)
-	{
-		FreeMemory(full_name);
-		FreeMemory(ln);
-	}
+	FreeMemory(full_name);
+	FreeMemory(ln);
 
 	(*error_ptr) = error;
 
@@ -4210,7 +4253,6 @@ Action_SetProtect(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	int full_name_size;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -4266,30 +4308,27 @@ Action_SetProtect(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
+	error = BuildFullName(parent_name,name,&full_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to change the protection bits of the root
-	 * directory, are you kidding?
-	 */
-	if(full_name == NULL)
 	{
-		error = ERROR_OBJECT_WRONG_TYPE;
+		/* Trying to change the protection bits of the root
+		 * directory, are you kidding?
+		 */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = ERROR_OBJECT_WRONG_TYPE;
+
 		goto out;
 	}
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
 
 	memset(&st,0,sizeof(st));
-
-	mask ^= FIBF_READ | FIBF_WRITE | FIBF_EXECUTE | FIBF_DELETE;
 
 	st.atime = -1;
 	st.ctime = -1;
@@ -4320,14 +4359,14 @@ Action_SetProtect(
 
  out:
 
-	FreeMemory(full_name);
-
 	if(file != NULL)
 	{
 		int ignored_error;
 
 		smba_close(file, &ignored_error);
 	}
+
+	FreeMemory(full_name);
 
 	(*error_ptr) = error;
 
@@ -4348,9 +4387,7 @@ Action_RenameObject(
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
 	STRPTR full_source_name = NULL;
-	int full_source_name_size;
 	STRPTR full_destination_name = NULL;
-	int full_destination_name_size;
 	TEXT name[MAX_FILENAME_LEN+1];
 	STRPTR parent_name;
 	int error;
@@ -4405,14 +4442,13 @@ Action_RenameObject(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_source_name,&full_source_name_size);
+	error = BuildFullName(parent_name,name,&full_source_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to rename the root directory, are you kidding? */
-	if(full_source_name == NULL)
 	{
-		error = ERROR_OBJECT_IN_USE;
+		/* Trying to rename the root directory, are you kidding? */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = ERROR_OBJECT_IN_USE;
+
 		goto out;
 	}
 
@@ -4455,17 +4491,20 @@ Action_RenameObject(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_destination_name,&full_destination_name_size);
+	error = BuildFullName(parent_name,name,&full_destination_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to rename the root directory, are you kidding? */
-	if(full_destination_name == NULL)
 	{
-		error = ERROR_OBJECT_IN_USE;
+		/* Trying to rename the root directory, are you kidding? */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = ERROR_OBJECT_IN_USE;
+
 		goto out;
 	}
 
+	/* Is this object still in use? If so, renaming it would require
+	 * updating the names in all the file locks and file handles which
+	 * use it.
+	 */
 	error = NameAlreadyInUse(full_source_name);
 	if(error != OK)
 		goto out;
@@ -4474,14 +4513,16 @@ Action_RenameObject(
 	if(error != OK)
 		goto out;
 
-	D(("full_source_name = '%s'",escape_name(full_source_name)));
-	D(("full_destination_name = '%s'",escape_name(full_destination_name)));
+	D(("source name = '%s'",escape_name(full_source_name)));
+	D(("destination name = '%s'",escape_name(full_destination_name)));
 
 	if(smba_rename(ServerData,full_source_name,full_destination_name,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
 	}
+
+	/* ZZZ purge the caches of source and destination parent directories. */
 
 	result = DOSTRUE;
 
@@ -4809,7 +4850,10 @@ Action_ExamineObject(
 									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
 			if(st.is_read_only)
-				fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
+			{
+				fib->fib_Protection &= ~(FIBF_OTR_DELETE|FIBF_GRP_DELETE);
+				fib->fib_Protection |= FIBF_DELETE;
+			}
 
 			/* Careful: the 'archive' attribute has exactly the opposite
 			 *          meaning in the Amiga and the SMB worlds.
@@ -5651,7 +5695,6 @@ Action_Find(
 	LONG result = DOSFALSE;
 	STRPTR parent_path = NULL;
 	STRPTR full_name = NULL;
-	int full_name_size;
 	struct FileNode * fn = NULL;
 	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -5722,14 +5765,13 @@ Action_Find(
 		goto out;
 	}
 
-	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
+	error = BuildFullName(parent_name,name,&full_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to open the root directory? */
-	if(full_name == NULL)
 	{
-		error = ERROR_OBJECT_WRONG_TYPE;
+		/* Trying to open the root directory? */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = ERROR_OBJECT_WRONG_TYPE;
+
 		goto out;
 	}
 
@@ -5768,10 +5810,10 @@ Action_Find(
 		int ignored_error;
 		smba_stat_t st;
 
-		if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&file,&ignored_error) == OK &&
+		if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&file,&ignored_error) == OK &&
 		   smba_getattr(file,&st,&ignored_error) == OK)
 		{
-			/* File apparently opens Ok and information on it
+			/* File apparently opens OK and information on it
 			 * is available, don't try to replace it.
 			 */
 			create_new_file = FALSE;
@@ -5802,6 +5844,7 @@ Action_Find(
 	{
 		int ignored_error;
 		smba_file_t * dir;
+		int full_name_len;
 		STRPTR base_name;
 		int i;
 
@@ -5811,22 +5854,27 @@ Action_Find(
 			goto out;
 		}
 
-		parent_path = AllocateMemory(strlen(full_name)+3);
+		full_name_len = strlen(full_name);
+
+		/* Note: extra character required for special case below. */
+		parent_path = AllocateMemory(full_name_len+2);
 		if(parent_path == NULL)
 		{
 			error = ERROR_NO_FREE_STORE;
 			goto out;
 		}
 
-		strcpy(parent_path,full_name);
+		memcpy(parent_path,full_name,full_name_len+1);
+
 		base_name = NULL;
-		for(i = strlen(parent_path)-1 ; i >= 0 ; i--)
+
+		for(i = full_name_len-1 ; i >= 0 ; i--)
 		{
 			if(parent_path[i] == SMB_PATH_SEPARATOR)
 			{
 				if(i == 0)
 				{
-					memmove(&parent_path[1],&parent_path[0],strlen(parent_path)+1);
+					memmove(&parent_path[1],&parent_path[0],full_name_len+1);
 					i++;
 				}
 
@@ -5840,7 +5888,7 @@ Action_Find(
 		SHOWMSG("creating a file; finding parent path first");
 		D(("parent_path = '%s'",escape_name(parent_path)));
 
-		if(smba_open(ServerData,parent_path,strlen(full_name)+3,open_read_only,open_dont_truncate,&dir,&error) < 0)
+		if(smba_open(ServerData,parent_path,open_read_only,open_dont_truncate,&dir,&error) < 0)
 		{
 			error = MapErrnoToIoErr(error);
 			goto out;
@@ -5868,7 +5916,7 @@ Action_Find(
 	}
 
 	/* Now for the remainder... */
-	if(smba_open(ServerData,full_name,full_name_size,action != ACTION_FINDINPUT,create_new_file,&fn->fn_File,&error) < 0)
+	if(smba_open(ServerData,full_name,action != ACTION_FINDINPUT,create_new_file,&fn->fn_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -5879,14 +5927,13 @@ Action_Find(
 	AddTail((struct List *)&FileList,(struct Node *)fn);
 	result = DOSTRUE;
 
+	full_name = NULL;
+	fn = NULL;
+
  out:
 
-	if(result == DOSFALSE)
-	{
-		FreeMemory(full_name);
-		FreeMemory(fn);
-	}
-
+	FreeMemory(full_name);
+	FreeMemory(fn);
 	FreeMemory(parent_path);
 
 	(*error_ptr) = error;
@@ -5989,6 +6036,7 @@ Action_End(
 	Remove((struct Node *)fn);
 
 	smba_close(fn->fn_File,&ignored_error);
+
 	FreeMemory(fn->fn_FullName);
 	FreeMemory(fn);
 
@@ -6202,7 +6250,6 @@ Action_SetDate(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	int full_name_size;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -6259,20 +6306,19 @@ Action_SetDate(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
+	error = BuildFullName(parent_name,name,&full_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to change the date of the root directory? */
-	if(full_name == NULL)
 	{
-		error = ERROR_OBJECT_IN_USE;
+		/* Trying to change the date of the root directory? */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = ERROR_OBJECT_IN_USE;
+
 		goto out;
 	}
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6302,14 +6348,14 @@ Action_SetDate(
 
  out:
 
-	FreeMemory(full_name);
-
 	if(file != NULL)
 	{
 		int ignored_error;
 
 		smba_close(file,&ignored_error);
 	}
+
+	FreeMemory(full_name);
 
 	(*error_ptr) = error;
 
@@ -6478,25 +6524,25 @@ Action_ParentFH(
 	struct LockNode * ln = NULL;
 	int error;
 	STRPTR full_name;
-	int full_name_size;
+	int full_name_len;
 	int i;
 
 	ENTER();
 
-	full_name_size = strlen(fn->fn_FullName)+3;
-	if(full_name_size < SMB_MAXNAMELEN+1)
-		full_name_size = SMB_MAXNAMELEN+1;
+	full_name_len = strlen(fn->fn_FullName);
+	if(full_name_len < 2) /* Must be large enough to hold SMB_ROOT_DIR_NAME. */
+		full_name_len = 2;
 
-	full_name = AllocateMemory(full_name_size);
+	full_name = AllocateMemory(full_name_len+1);
 	if(full_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	strcpy(full_name,fn->fn_FullName);
+	memcpy(full_name,fn->fn_FullName,full_name_len+1);
 
-	for(i = strlen(full_name)-1 ; i >= 0 ; i--)
+	for(i = full_name_len-1 ; i >= 0 ; i--)
 	{
 		if(i == 0)
 		{
@@ -6527,7 +6573,7 @@ Action_ParentFH(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6537,13 +6583,13 @@ Action_ParentFH(
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
+	full_name = NULL;
+	ln = NULL;
+
  out:
 
-	if(result == ZERO)
-	{
-		FreeMemory(ln);
-		FreeMemory(full_name);
-	}
+	FreeMemory(ln);
+	FreeMemory(full_name);
 
 	(*error_ptr) = error;
 
@@ -6561,7 +6607,7 @@ Action_CopyDirFH(
 	BPTR result = ZERO;
 	struct LockNode * ln = NULL;
 	STRPTR full_name = NULL;
-	int full_name_size;
+	int full_name_len;
 	int error;
 
 	ENTER();
@@ -6572,18 +6618,16 @@ Action_CopyDirFH(
 		goto out;
 	}
 
-	full_name_size = strlen(fn->fn_FullName)+3;
-	if(full_name_size < SMB_MAXNAMELEN+1)
-		full_name_size = SMB_MAXNAMELEN+1;
+	full_name_len = strlen(fn->fn_FullName);
 
-	full_name = AllocateMemory(full_name_size);
+	full_name = AllocateMemory(full_name_len+1);
 	if(full_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	strcpy(full_name,fn->fn_FullName);
+	memcpy(full_name,fn->fn_FullName,full_name_len+1);
 
 	ln = AllocateMemory(sizeof(*ln));
 	if(ln == NULL)
@@ -6602,7 +6646,7 @@ Action_CopyDirFH(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if (smba_open(ServerData,full_name,full_name_size,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if (smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -6612,13 +6656,13 @@ Action_CopyDirFH(
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
+	full_name = NULL;
+	ln = NULL;
+
  out:
 
-	if(result == ZERO)
-	{
-		FreeMemory(ln);
-		FreeMemory(full_name);
-	}
+	FreeMemory(ln);
+	FreeMemory(full_name);
 
 	(*error_ptr) = error;
 
@@ -6950,7 +6994,6 @@ Action_SetComment(
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	int full_name_size;
 	smba_file_t * file = NULL;
 	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -7006,20 +7049,19 @@ Action_SetComment(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name,&full_name_size);
+	error = BuildFullName(parent_name,name,&full_name);
 	if(error != OK)
-		goto out;
-
-	/* Trying to change the comment of the root directory? */
-	if(full_name == NULL)
 	{
-		error = ERROR_OBJECT_IN_USE;
+		/* Trying to change the comment of the root directory? */
+		if(error == ERROR_INVALID_COMPONENT_NAME)
+			error = ERROR_OBJECT_IN_USE;
+
 		goto out;
 	}
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if (smba_open(ServerData,full_name,full_name_size,open_writable,open_dont_truncate,&file,&error) < 0)
+	if (smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = MapErrnoToIoErr(error);
 		goto out;
@@ -7040,14 +7082,14 @@ Action_SetComment(
 
  out:
 
-	FreeMemory(full_name);
-
 	if(file != NULL)
 	{
 		int ignored_error;
 
 		smba_close(file, &ignored_error);
 	}
+
+	FreeMemory(full_name);
 
 	(*error_ptr) = error;
 
