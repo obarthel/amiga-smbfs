@@ -1047,17 +1047,19 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			if(writable)
 			{
 				SHOWMSG("write access required");
-				// desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE;
-				desired_access = GENERIC_READ|GENERIC_WRITE;
+				desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE;
+
+				// desired_access = GENERIC_READ|GENERIC_WRITE;
 			}
 			else
 			{
 				SHOWMSG("read access is sufficient");
-				// desired_access = FILE_READ_DATA;
-				desired_access = GENERIC_READ;
+				desired_access = FILE_READ_DATA;
+
+				// desired_access = GENERIC_READ;
 			}
 
-			// desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES;
+			desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES;
 
 			/* Allows others to read, write and delete the file just created.
 			 * This may be useful if smbfs hangs or you need to restart your

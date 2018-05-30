@@ -58,7 +58,7 @@ struct smb_server
 	int dont_retry;
 
 	/* olsen (2018-05-18): Override the "Native OS" name passed to the server. */
-	char * native_os;
+	const char * native_os;
 };
 
 #endif

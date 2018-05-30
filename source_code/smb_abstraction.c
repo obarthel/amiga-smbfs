@@ -29,41 +29,6 @@
 
 /*****************************************************************************/
 
-typedef struct dircache
-{
-	int					base;
-	int					len;
-	int					eof;		/* cache end is eof */
-	ULONG				created_at;	/* for invalidation */
-	struct smba_file *	cache_for;	/* owner of this cache */
-	int					cache_size;
-	struct smb_dirent	cache[1];
-} dircache_t;
-
-/* opaque structures for server and files: */
-struct smba_server
-{
-	struct smb_server	server;
-	struct MinList		open_files;
-	ULONG				num_open_files;
-	dircache_t *		dircache;
-	unsigned			supports_E:1;
-	unsigned			supports_E_known:1;
-};
-
-struct smba_file
-{
-	struct MinNode			node;
-	struct smba_server *	server;
-	struct smb_dirent		dirent;
-	ULONG					attr_time;		/* time when dirent was read */
-	dircache_t *			dircache;		/* content cache for directories */
-	unsigned				is_valid:1;		/* server was down, entry removed, ... */
-	unsigned				attr_dirty:1;	/* attribute cache is dirty */
-};
-
-/*****************************************************************************/
-
 #include "smb_abstraction.h"
 
 /*****************************************************************************/
@@ -78,12 +43,12 @@ smba_connect (
 	smba_connect_parameters_t *	p,
 	in_addr_t					ip_addr,
 	int							use_E,
-	char *						workgroup_name,
+	const char *				workgroup_name,
 	int							cache_size,
 	int							max_transmit,
 	int							timeout,
 	int							opt_raw_smb,
-	char *						opt_native_os,
+	const char *				opt_native_os,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
 	int *						smb_error_ptr,
@@ -1082,7 +1047,7 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int
 /*****************************************************************************/
 
 static void
-invalidate_dircache (struct smba_server * server, char * path)
+invalidate_dircache (struct smba_server * server, const char * path)
 {
 	dircache_t * dircache = server->dircache;
 	char other_path[SMB_MAXNAMELEN + 1];
@@ -1188,7 +1153,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 			goto out;
 	}
 
-	invalidate_dircache (dir->server, path);
+	/* invalidate_dircache (dir->server, path); */
 
  out:
 
@@ -1227,7 +1192,7 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 	if(result < 0)
 		goto out;
 
-	invalidate_dircache (dir->server, path);
+	/* invalidate_dircache (dir->server, path); */
 
  out:
 
@@ -1240,7 +1205,7 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 /*****************************************************************************/
 
 static int
-close_path (smba_server_t * s, char *path, int * error_ptr)
+close_path (smba_server_t * s, const char *path, int * error_ptr)
 {
 	int result = 0;
 	smba_file_t *p;
@@ -1273,7 +1238,7 @@ close_path (smba_server_t * s, char *path, int * error_ptr)
 /*****************************************************************************/
 
 int
-smba_remove (smba_server_t * s, char *path, int * error_ptr)
+smba_remove (smba_server_t * s, const char *path, int * error_ptr)
 {
 	int result;
 
@@ -1285,7 +1250,7 @@ smba_remove (smba_server_t * s, char *path, int * error_ptr)
 	if(result < 0)
 		goto out;
 
-	invalidate_dircache (s, path);
+	/* invalidate_dircache (s, path); */
 
  out:
 
@@ -1295,7 +1260,7 @@ smba_remove (smba_server_t * s, char *path, int * error_ptr)
 /*****************************************************************************/
 
 int
-smba_rmdir (smba_server_t * s, char *path, int * error_ptr)
+smba_rmdir (smba_server_t * s, const char *path, int * error_ptr)
 {
 	int result;
 
@@ -1307,7 +1272,7 @@ smba_rmdir (smba_server_t * s, char *path, int * error_ptr)
 	if(result < 0)
 		goto out;
 
-	invalidate_dircache (s, path);
+	/* invalidate_dircache (s, path); */
 
  out:
 
@@ -1317,7 +1282,7 @@ smba_rmdir (smba_server_t * s, char *path, int * error_ptr)
 /*****************************************************************************/
 
 int
-smba_rename (smba_server_t * s, char *from, char *to, int * error_ptr)
+smba_rename (smba_server_t * s, const char *from, const char *to, int * error_ptr)
 {
 	int result;
 
@@ -1329,7 +1294,7 @@ smba_rename (smba_server_t * s, char *from, char *to, int * error_ptr)
 	if(result < 0)
 		goto out;
 
-	invalidate_dircache (s, from);
+	/* invalidate_dircache (s, from); */
 
  out:
 
@@ -1364,6 +1329,8 @@ smb_invalidate_all_inodes (struct smb_server *server)
 {
 	smba_file_t *f;
 
+	ENTER();
+
 	invalidate_dircache (server->abstraction, NULL);
 
 	for (f = (smba_file_t *)server->abstraction->open_files.mlh_Head;
@@ -1373,6 +1340,8 @@ smb_invalidate_all_inodes (struct smb_server *server)
 		f->dirent.opened	= FALSE;
 		f->is_valid			= FALSE;
 	}
+
+	LEAVE();
 }
 
 /*****************************************************************************/
@@ -1450,7 +1419,7 @@ smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr
 /*****************************************************************************/
 
 static int
-extract_service (char *service, char *server, size_t server_size, char *share, size_t share_size,int * error_ptr)
+extract_service (const char *service, char *server, size_t server_size, char *share, size_t share_size,int * error_ptr)
 {
 	char * share_start;
 	char * root_start;
@@ -1523,17 +1492,17 @@ extract_service (char *service, char *server, size_t server_size, char *share, s
 
 int
 smba_start(
-	char *				service,
-	char *				opt_workgroup,
-	char *				opt_username,
-	char *				opt_password,
-	char *				opt_clientname,
-	char *				opt_servername,
+	const char *		service,
+	const char *		opt_workgroup,
+	const char *		opt_username,
+	const char *		opt_password,
+	const char *		opt_clientname,
+	const char *		opt_servername,
 	int					opt_cachesize,
 	int					opt_max_transmit,
 	int					opt_timeout,
 	int					opt_raw_smb,
-	char *				opt_native_os,
+	const char *		opt_native_os,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,

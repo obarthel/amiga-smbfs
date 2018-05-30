@@ -75,6 +75,7 @@ int smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int *
 int smb_proc_connect(struct smb_server *server, int * error_ptr);
 
 /* sock.c */
+int smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_ptr);
 void smb_check_server_connection(struct smb_server *server, int error);
 void smb_release(struct smb_server *server);
 int smb_connect(struct smb_server *server, int * error_ptr);

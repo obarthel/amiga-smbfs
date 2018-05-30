@@ -24,12 +24,15 @@
 #include "quad_math.h"
 #endif /* _QUAD_MATH_H */
 
-/****************************************************************************/
+/*****************************************************************************/
 
-/* Forward declaration to keep the compiler happy. */
 #ifndef _SMB_FS_SB
-struct smb_server;
+#include <smb/smb_fs_sb.h>
 #endif /* _SMB_FS_SB */
+
+#ifndef _LINUX_SMB_H
+#include <smb/smb.h>
+#endif /* _LINUX_SMB_H */
 
 /*****************************************************************************/
 
@@ -50,34 +53,63 @@ struct smb_server;
 
 typedef struct smba_connect_parameters
 {
-	char server_ipname[64];
-	char service[64];
-	char *server_name;
-	char *client_name;
-	char *username;
-	char *password;
+	char	server_ipname[64];
+	char	service[64];
+	char *	server_name;
+	char *	client_name;
+	char *	username;
+	char *	password;
 } smba_connect_parameters_t;
 
 typedef struct smba_stat
 {
-	unsigned is_dir:1;
-	unsigned is_read_only:1;
-	unsigned is_hidden:1;
-	unsigned is_system:1;
-	unsigned is_changed_since_last_archive:1;
+	unsigned		is_dir:1;
+	unsigned		is_read_only:1;
+	unsigned		is_hidden:1;
+	unsigned		is_system:1;
+	unsigned		is_changed_since_last_archive:1;
 
-	unsigned long size_low;
-	unsigned long size_high;
+	unsigned long	size_low;
+	unsigned long	size_high;
 
-	time_t atime;
-	time_t ctime;
-	time_t mtime;
+	time_t			atime;
+	time_t			ctime;
+	time_t			mtime;
 } smba_stat_t;
 
-/****************************************************************************/
+/*****************************************************************************/
 
-typedef struct smba_server smba_server_t;
-typedef struct smba_file smba_file_t;
+typedef struct dircache
+{
+	int					base;
+	int					len;
+	int					eof;		/* cache end is eof */
+	ULONG				created_at;	/* for invalidation */
+	struct smba_file *	cache_for;	/* owner of this cache */
+	int					cache_size;
+	struct smb_dirent	cache[1];
+} dircache_t;
+
+typedef struct smba_server
+{
+	struct smb_server	server;
+	struct MinList		open_files;
+	ULONG				num_open_files;
+	dircache_t *		dircache;
+	unsigned			supports_E:1;
+	unsigned			supports_E_known:1;
+} smba_server_t;
+
+typedef struct smba_file
+{
+	struct MinNode			node;
+	struct smba_server *	server;
+	struct smb_dirent		dirent;
+	ULONG					attr_time;		/* time when dirent was read */
+	dircache_t *			dircache;		/* content cache for directories */
+	unsigned				is_valid:1;		/* server was down, entry removed, ... */
+	unsigned				attr_dirty:1;	/* attribute cache is dirty */
+} smba_file_t;
 
 /****************************************************************************/
 
@@ -95,12 +127,12 @@ int smba_setattr(smba_file_t *f, const smba_stat_t *data, const QUAD * const siz
 int smba_readdir(smba_file_t *f, long offs, void *d, smba_callback_t callback, int * error_ptr);
 int smba_create(smba_file_t *dir, const char *name, int * error_ptr);
 int smba_mkdir(smba_file_t *dir, const char *name, int * error_ptr);
-int smba_remove(smba_server_t *s, char *path, int * error_ptr);
-int smba_rmdir(smba_server_t *s, char *path, int * error_ptr);
-int smba_rename(smba_server_t *s, char *from, char *to, int * error_ptr);
+int smba_remove(smba_server_t *s, const char *path, int * error_ptr);
+int smba_rmdir(smba_server_t *s, const char *path, int * error_ptr);
+int smba_rename(smba_server_t *s, const char *from, const char *to, int * error_ptr);
 int smba_statfs(smba_server_t *s, long *bsize, long *blocks, long *bfree, int * error_ptr);
 void smb_invalidate_all_inodes(struct smb_server *server);
-int smba_start(char *service, char *opt_workgroup, char *opt_username, char *opt_password, char *opt_clientname, char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, int opt_raw_smb, char * opt_native_os, int * error_ptr, int * smb_error_class_ptr, int * smb_error_ptr, smba_server_t **result);
+int smba_start(const char *service, const char *opt_workgroup, const char *opt_username, const char *opt_password, const char *opt_clientname, const char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, int opt_raw_smb, const char * opt_native_os, int * error_ptr, int * smb_error_class_ptr, int * smb_error_ptr, smba_server_t **result);
 void smba_disconnect(smba_server_t *server);
 int smba_get_dircache_size(struct smba_server * server);
 int smba_change_dircache_size(struct smba_server * server,int cache_size);

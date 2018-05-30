@@ -161,7 +161,7 @@ extern void smb_nt_encrypt(unsigned char *passwd, unsigned char *c8, unsigned ch
 /****************************************************************************/
 
 extern VOID FreeMemory(APTR address);
-extern APTR AllocateMemory(ULONG size);
+extern APTR AllocateMemory(LONG size);
 
 #define malloc(s) AllocateMemory(s)
 #define free(m) FreeMemory(m)

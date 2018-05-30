@@ -1811,3 +1811,38 @@ smbfs 1.140 (27.5.2018)
 
 - The debug code now shows which file IDs the server assigned to
   opened files/directories.
+
+
+smbfs 1.141 (28.5.2018)
+
+- smbfs now makes sure to dispatch any "keep alive" NetBIOS messages
+  which the server might send. This should avoid the problem of these
+  messages piling up in the inbound traffic queue until all receive
+  buffers have been consumed by them.
+
+- When opening a file or directory the desired access modes are no
+  longer "generic read" and "generic write", but very specific to the
+  access mode. Write access now uses "read data", "write data" and
+  "delete file", whereas read access uses "read data". On top of that
+  "read attributes" and "write attributes" are also requested.
+
+
+smbfs 1.142 (30.5.2018)
+
+- Deleting entries from a directory no longer directly collides with
+  directory scanning if the same process is reading the directory
+  contents and deleting them one at a time. This means that the
+  "delete foo all" command may work better than before (or maybe not).
+
+- Constructing the parent directory path of the file/directory to be
+  deleted now figures out how long the parent directory name is before
+  copying it, rather than copying the full name of the file/directory
+  in question and then truncating it. Also, the new code handles
+  deletion from the root directory better.
+
+
+smbfs 1.143 (30.5.2018)
+
+- Renaming a file or directory can restart filling the directory
+  scan cache if the file/directory was moved from its home directory to
+  a different directory.

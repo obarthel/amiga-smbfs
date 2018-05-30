@@ -26,9 +26,9 @@
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
- * Samba 4.6.7: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 volume=ubuntu-test //ubuntu-17-olaf/test
- * Samba 4.7.6: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 volume=ubuntu-test //ubuntu-18-olaf/test
- * Samba 3.0.25: smbfs debuglevel=2 dumpsmb dumpsmblevel=1 user=olsen password=... volume=olsen //192.168.1.118/olsen
+ * Samba 4.6.7: smbfs debuglevel=2 volume=ubuntu-test //ubuntu-17-olaf/test
+ * Samba 4.7.6: smbfs debuglevel=2 volume=ubuntu-test //ubuntu-18-olaf/test
+ * Samba 3.0.25: smbfs debuglevel=2 user=olsen password=... volume=olsen //192.168.1.118/olsen
  */
 
 #include "smbfs.h"
@@ -75,21 +75,28 @@ typedef LONG	SWITCH;
 struct FileNode
 {
 	struct MinNode		fn_MinNode;
+
 	struct FileHandle *	fn_Handle;
+
 	QUAD				fn_OffsetQuad;
 	LONG				fn_Mode;
+
 	smba_file_t *		fn_File;
 	STRPTR				fn_FullName;
 };
 
 struct LockNode
 {
-	struct MinNode	ln_MinNode;
-	struct FileLock	ln_FileLock;
-	smba_file_t *	ln_File;
-	BOOL			ln_RestartExamine;
-	UWORD			ln_Pad;
-	STRPTR			ln_FullName;
+	struct MinNode			ln_MinNode;
+
+	struct FileLock			ln_FileLock;
+
+	smba_file_t *			ln_File;
+	STRPTR					ln_FullName;
+
+	const struct MsgPort *	ln_LastUser;
+
+	unsigned int			ln_RestartExamine:1;
 };
 
 /****************************************************************************/
@@ -137,8 +144,8 @@ STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 STATIC LONG CVSPrintf(const TEXT * format_string, APTR args);
 STATIC VOID VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(const TEXT * program_name, STRPTR service, STRPTR workgroup, STRPTR username, STRPTR opt_password, BOOL opt_changecase, STRPTR opt_clientname, STRPTR opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, STRPTR opt_native_os, STRPTR device_name, STRPTR volume_name, STRPTR translation_file);
-STATIC VOID HandleFileSystem(STRPTR device_name, STRPTR volume_name, STRPTR service_name);
+STATIC BOOL Setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, const TEXT * opt_native_os, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
+STATIC VOID HandleFileSystem(const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
 
@@ -773,7 +780,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'DEBUG' parameter.",str);
+				ReportError("Invalid number '%s' for 'DEBUG' parameter.",str);
 				goto out;
 			}
 
@@ -792,7 +799,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&other_number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'TIMEZONEOFFSET' parameter.",str);
+				ReportError("Invalid number '%s' for 'TIMEZONEOFFSET' parameter.",str);
 				goto out;
 			}
 
@@ -832,7 +839,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&other_number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'DSTOFFSET' parameter.",str);
+				ReportError("Invalid number '%s' for 'DSTOFFSET' parameter.",str);
 				goto out;
 			}
 
@@ -847,7 +854,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'CACHE' parameter.",str);
+				ReportError("Invalid number '%s' for 'CACHE' parameter.",str);
 				goto out;
 			}
 
@@ -859,7 +866,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'MAXTRANSMIT' parameter.",str);
+				ReportError("Invalid number '%s' for 'MAXTRANSMIT' parameter.",str);
 				goto out;
 			}
 
@@ -871,7 +878,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1 || number < 0)
 			{
-				ReportError("Invalid number '%s' for 'TIMEOUT' parameter.",str);
+				ReportError("Invalid number '%s' for 'TIMEOUT' parameter.",str);
 				goto out;
 			}
 
@@ -1512,7 +1519,7 @@ FreeMemory(APTR address)
 
 /* Allocate memory from the global pool. */
 APTR
-AllocateMemory(ULONG size)
+AllocateMemory(LONG size)
 {
 	APTR result = NULL;
 
@@ -2029,7 +2036,7 @@ SendDiskChange(ULONG class)
  * skipping a particular entry if necessary.
  */
 STATIC struct FileNode *
-FindFileNode(STRPTR name,struct FileNode * skip)
+FindFileNode(const TEXT * name,struct FileNode * skip)
 {
 	struct FileNode * result = NULL;
 	struct FileNode * fn;
@@ -2052,7 +2059,7 @@ FindFileNode(STRPTR name,struct FileNode * skip)
  * skipping a particular entry if necessary.
  */
 STATIC struct LockNode *
-FindLockNode(STRPTR name,struct LockNode * skip)
+FindLockNode(const TEXT * name,struct LockNode * skip)
 {
 	struct LockNode * result = NULL;
 	struct LockNode * ln;
@@ -2079,7 +2086,7 @@ FindLockNode(STRPTR name,struct LockNode * skip)
  * trying to avoid.
  */
 STATIC LONG
-CheckAccessModeCollision(STRPTR name,LONG mode)
+CheckAccessModeCollision(const TEXT * name,LONG mode)
 {
 	struct LockNode * ln;
 	struct FileNode * fn;
@@ -2121,7 +2128,7 @@ CheckAccessModeCollision(STRPTR name,LONG mode)
  * certain file or directory.
  */
 STATIC LONG
-NameAlreadyInUse(STRPTR name)
+NameAlreadyInUse(const TEXT * name)
 {
 	int error = OK;
 
@@ -2599,29 +2606,29 @@ Cleanup(VOID)
 STATIC BOOL
 Setup(
 	const TEXT *	program_name,
-	STRPTR			service,
-	STRPTR			workgroup,
-	STRPTR			username,
+	const TEXT *	service,
+	const TEXT *	workgroup,
+	const TEXT *	username,
 	STRPTR			opt_password,
 	BOOL			opt_changecase,
-	STRPTR			opt_clientname,
-	STRPTR			opt_servername,
+	const TEXT *	opt_clientname,
+	const TEXT *	opt_servername,
 	int				opt_cachesize,
 	int				opt_max_transmit,
 	int				opt_timeout,
 	LONG *			opt_time_zone_offset,
 	LONG *			opt_dst_offset,
 	BOOL			opt_raw_smb,
-	STRPTR			opt_native_os,
-	STRPTR			device_name,
-	STRPTR			volume_name,
-	STRPTR			translation_file)
+	const TEXT *	opt_native_os,
+	const TEXT *	device_name,
+	const TEXT *	volume_name,
+	const TEXT *	translation_file)
 {
 	BOOL result = FALSE;
 	struct DosList * dl;
 	int error = 0;
 	int smb_error_class = 0, smb_error = 0;
-	STRPTR actual_volume_name;
+	const TEXT * actual_volume_name;
 	int actual_volume_name_len;
 	TEXT name[MAX_FILENAME_LEN+1];
 	BOOL device_exists = FALSE;
@@ -3389,13 +3396,13 @@ BuildFullName(
 		}
 	}
 
-	(*result_ptr) = buffer;
-
 	ASSERT( buffer_len < size );
 
 	buffer[buffer_len] = '\0';
 
 	D(("buffer = '%s'",escape_name(buffer)));
+
+	(*result_ptr) = buffer;
 	buffer = NULL;
 
  out:
@@ -3408,14 +3415,143 @@ BuildFullName(
 
 /****************************************************************************/
 
+/* Find the parent directory of a file or directory. This strips off the
+ * last part of the name, e.g. translating "\foo" into "\" and "\foo\bar"
+ * into "\foo". There is no parent for the root directory ("\").
+ */
+STATIC LONG
+GetParentDirName(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
+{
+	STRPTR parent_name = NULL;
+	LONG error;	int i;
+
+	ENTER();
+
+	ASSERT( name != NULL && name_len >= 0 && parent_name_ptr != NULL );
+
+	(*parent_name_ptr) = NULL;
+
+	D(("finding parent directory of '%s'",escape_name(name)));
+
+	if(name_len == 0)
+	{
+		SHOWMSG("no parent directory found");
+
+		/* The root directory has no parent. */
+		error = ERROR_INVALID_COMPONENT_NAME;
+		goto out;
+	}
+
+	/* Drop any trailing '\' character. */
+	if(name_len > 1 && name[name_len-1] == SMB_PATH_SEPARATOR)
+		name_len--;
+
+	if(name_len == 1 && name[0] == SMB_PATH_SEPARATOR)
+	{
+		SHOWMSG("no parent directory found");
+
+		/* The root directory has no parent. */
+		error = ERROR_INVALID_COMPONENT_NAME;
+		goto out;
+	}
+
+	/* Remove the last part of the path. */
+	for(i = name_len - 1 ; i >= 0 ; i--)
+	{
+		if(name[i] == SMB_PATH_SEPARATOR)
+		{
+			/* This translates "\foo" into "\", and
+			 * "\foo\bar" into "\foo".
+			 */
+			if(i == 0)
+				name_len = 1;
+			else
+				name_len = i;
+
+			break;
+		}
+	}
+
+	parent_name = AllocateMemory(name_len+1);
+	if(parent_name == NULL)
+	{
+		SHOWMSG("not enough memory");
+
+		error = ERROR_NO_FREE_STORE;
+		goto out;
+	}
+
+	memcpy(parent_name,name,name_len);
+	parent_name[name_len] = '\0';
+
+	D(("parent directory = '%s'",escape_name(parent_name)));
+
+	(*parent_name_ptr) = parent_name;
+	parent_name = NULL;
+
+	error = OK;
+
+ out:
+
+	FreeMemory(parent_name);
+
+	RETURN(error);
+	return(error);
+}
+
+/****************************************************************************/
+
+/* Restart directory scanning for all locks which share
+ * the parent directory of a directory or file which was
+ * just deleted.
+ *
+ * Because restarting interferes with the default
+ * procedure for deleting all the entries of a directory,
+ * we do not restart scanning on directories which the
+ * same process is currently scanning and issuing deletion
+ * commands for.
+ */
+STATIC VOID
+RestartDirScanner(const struct MsgPort * user,const TEXT * parent_dir_name)
+{
+	struct LockNode * ln;
+
+	ENTER();
+
+	SHOWSTRING(parent_dir_name);
+
+	for(ln = (struct LockNode *)LockList.mlh_Head ;
+	    ln->ln_MinNode.mln_Succ != NULL ;
+	    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
+	{
+		/* Try not to self-disrupt directory scanning while
+		 * deleting the contents of the directory.
+		 */
+		if(ln->ln_LastUser == user)
+			continue;
+
+		if(CompareNames(parent_dir_name,ln->ln_FullName) == SAME)
+		{
+			D(("restart scanning for '%s'", ln->ln_FullName));
+
+			ln->ln_RestartExamine = TRUE;
+		}
+	}
+
+	LEAVE();
+}
+
+/****************************************************************************/
+
 STATIC BPTR
 Action_Parent(
-	struct FileLock *	parent,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		parent,
+	LONG *					error_ptr)
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	struct LockNode * ln = NULL;
 	int error;
 
@@ -3428,6 +3564,8 @@ Action_Parent(
 		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
 
 		parent_name = parent_ln->ln_FullName;
+
+		parent_ln->ln_LastUser = user;
 	}
 	else
 	{
@@ -3461,6 +3599,7 @@ Action_Parent(
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
+	ln->ln_LastUser				= user;
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
@@ -3490,48 +3629,17 @@ Action_Parent(
 
 /****************************************************************************/
 
-/* Find the lock node corresponding to a given name,
- * starting from node start. (if node, this one is skipped)
- */
-STATIC struct LockNode *
-FindNextLockNode(STRPTR name,struct LockNode * last_ln)
-{
-	struct LockNode * result = NULL;
-	struct LockNode * ln;
-	struct LockNode * start;
-
-	if(last_ln != NULL)
-		start = (struct LockNode *)last_ln->ln_MinNode.mln_Succ;
-	else
-		start = (struct LockNode *)LockList.mlh_Head;
-
-	for(ln = start ;
-	    ln->ln_MinNode.mln_Succ != NULL ;
-	    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
-	{
-		if(CompareNames(name,ln->ln_FullName) == SAME)
-		{
-			result = ln;
-			break;
-		}
-	}
-
-	return(result);
-}
-
-/****************************************************************************/
-
 STATIC LONG
 Action_DeleteObject(
-	struct FileLock *	parent,
-	const void *		bcpl_name,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		parent,
+	const void *			bcpl_name,
+	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
-	int full_name_len;
 	smba_file_t * file = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	STRPTR full_parent_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
 	struct LockNode * ln;
@@ -3554,6 +3662,8 @@ Action_DeleteObject(
 		ln = (struct LockNode *)parent->fl_Key;
 
 		parent_name = ln->ln_FullName;
+
+		ln->ln_LastUser = user;
 	}
 	else
 	{
@@ -3629,47 +3739,9 @@ Action_DeleteObject(
 	 * in case the directory contents are currently being
 	 * examined, that process is restarted.
 	 */
-	full_name_len = strlen(full_name);
-
-	full_parent_name = AllocateMemory(full_name_len+1);
-	if(full_parent_name == NULL)
-	{
-		error = ERROR_NO_FREE_STORE;
+	error = GetParentDirName(full_name,strlen(full_name),&full_parent_name);
+	if(error != OK)
 		goto out;
-	}
-
-	memcpy(full_parent_name,full_name,full_name_len+1);
-
-	/* Build the parent object name - Piru */
-	if (full_name_len > 0)
-	{
-		int i;
-
-		i = full_name_len - 1;
-		if (i >= 0 && full_parent_name[i] == SMB_PATH_SEPARATOR)
-			i--;
-
-		for ( ; i >= 0 ; i--)
-		{
-			if (full_parent_name[i] == SMB_PATH_SEPARATOR)
-			{
-				full_parent_name[i] = '\0';
-				break;
-			}
-		}
-	}
-
-	/* NOTE: Mark all locks to this object as restart, not just first one - Piru */
-	ln = NULL;
-	while ((ln = FindNextLockNode(full_parent_name, ln)) != NULL)
-		ln->ln_RestartExamine = TRUE;
-
-	ln = FindLockNode(full_parent_name,NULL);
-	if(ln != NULL)
-		ln->ln_RestartExamine = TRUE;
-
-	FreeMemory(full_parent_name);
-	full_parent_name = NULL;
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
@@ -3744,6 +3816,11 @@ Action_DeleteObject(
 		}
 	}
 
+	/* Restart directory scanning for all locks which share
+	 * the parent directory of the object just deleted.
+	 */
+	RestartDirScanner(user, full_parent_name);
+
 	SHOWMSG("done.");
 
 	result = DOSTRUE;
@@ -3766,18 +3843,19 @@ Action_DeleteObject(
 
 STATIC BPTR
 Action_CreateDir(
-	struct FileLock *	parent,
-	const void * 		bcpl_name,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		parent,
+	const void * 			bcpl_name,
+	LONG *					error_ptr)
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
 	int full_name_len;
 	struct LockNode * ln = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	STRPTR dir_name = NULL;
 	smba_file_t * dir = NULL;
-	STRPTR base_name;
+	const TEXT * base_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int ignored_error;
 	int error;
@@ -3796,6 +3874,8 @@ Action_CreateDir(
 	if(parent != NULL)
 	{
 		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
+
+		parent_ln->ln_LastUser = user;
 
 		parent_name = parent_ln->ln_FullName;
 	}
@@ -3894,6 +3974,7 @@ Action_CreateDir(
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
+	ln->ln_LastUser				= user;
 
 	if(smba_open(ServerData,dir_name,open_read_only,open_dont_truncate,&dir,&error) < 0)
 	{
@@ -3946,15 +4027,16 @@ Action_CreateDir(
 
 STATIC BPTR
 Action_LocateObject(
-	struct FileLock *	parent,
-	const void * 		bcpl_name,
-	LONG				mode,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		parent,
+	const void * 			bcpl_name,
+	LONG					mode,
+	LONG *					error_ptr)
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
 	struct LockNode * ln = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int error;
 
@@ -3965,6 +4047,8 @@ Action_LocateObject(
 	if(parent != NULL)
 	{
 		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
+
+		parent_ln->ln_LastUser = user;
 
 		parent_name = parent_ln->ln_FullName;
 	}
@@ -4033,6 +4117,7 @@ Action_LocateObject(
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
+	ln->ln_LastUser				= user;
 
 	error = CheckAccessModeCollision(full_name,ln->ln_FileLock.fl_Access);
 	if(error != OK)
@@ -4068,8 +4153,9 @@ Action_LocateObject(
 
 STATIC BPTR
 Action_CopyDir(
-	struct FileLock *	lock,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		lock,
+	LONG *					error_ptr)
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
@@ -4103,6 +4189,8 @@ Action_CopyDir(
 	{
 		struct LockNode * source = (struct LockNode *)lock->fl_Key;
 
+		source->ln_LastUser = user;
+
 		source_name = source->ln_FullName;
 		source_mode = source->ln_FileLock.fl_Access;
 	}
@@ -4128,6 +4216,7 @@ Action_CopyDir(
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
+	ln->ln_LastUser				= user;
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
@@ -4194,13 +4283,14 @@ Action_FreeLock(
 
 STATIC LONG
 Action_SameLock(
-	struct FileLock *	lock1,
-	struct FileLock *	lock2,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		lock1,
+	struct FileLock *		lock2,
+	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
-	STRPTR name1;
-	STRPTR name2;
+	const TEXT * name1;
+	const TEXT * name2;
 	int error = OK;
 
 	ENTER();
@@ -4212,6 +4302,8 @@ Action_SameLock(
 	{
 		struct LockNode * ln = (struct LockNode *)lock1->fl_Key;
 
+		ln->ln_LastUser = user;
+
 		name1 = ln->ln_FullName;
 	}
 	else
@@ -4222,6 +4314,8 @@ Action_SameLock(
 	if(lock2 != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)lock2->fl_Key;
+
+		ln->ln_LastUser = user;
 
 		name2 = ln->ln_FullName;
 	}
@@ -4246,15 +4340,16 @@ Action_SameLock(
 
 STATIC LONG
 Action_SetProtect(
-	struct FileLock *	parent,
-	const void * 		bcpl_name,
-	LONG				mask,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		parent,
+	const void * 			bcpl_name,
+	LONG					mask,
+	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
 	smba_file_t * file = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
 	int error;
@@ -4272,6 +4367,8 @@ Action_SetProtect(
 	if(parent != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+
+		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
 	}
@@ -4378,18 +4475,21 @@ Action_SetProtect(
 
 STATIC LONG
 Action_RenameObject(
-	struct FileLock *	source_lock,
-	const void *		source_bcpl_name,
-	struct FileLock *	destination_lock,
-	const void *		destination_bcpl_name,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		source_lock,
+	const void *			source_bcpl_name,
+	struct FileLock *		destination_lock,
+	const void *			destination_bcpl_name,
+	LONG *					error_ptr)
 {
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
 	STRPTR full_source_name = NULL;
 	STRPTR full_destination_name = NULL;
+	STRPTR parent_source_name = NULL;
+	STRPTR parent_destination_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	int error;
 
 	ENTER();
@@ -4406,6 +4506,8 @@ Action_RenameObject(
 	if(source_lock != NULL)
 	{
 		ln = (struct LockNode *)source_lock->fl_Key;
+
+		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
 	}
@@ -4455,6 +4557,8 @@ Action_RenameObject(
 	if(destination_lock != NULL)
 	{
 		ln = (struct LockNode *)destination_lock->fl_Key;
+
+		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
 	}
@@ -4522,7 +4626,15 @@ Action_RenameObject(
 		goto out;
 	}
 
-	/* ZZZ purge the caches of source and destination parent directories. */
+	GetParentDirName(full_source_name,strlen(full_source_name),&parent_source_name);
+	GetParentDirName(full_destination_name,strlen(full_destination_name),&parent_destination_name);
+
+	/* Restart directory scanning in the source directory from which
+	 * the entry was removed unless entry just changed name, but did
+	 * not move to a different directory.
+	 */
+	if(parent_source_name != NULL && (parent_destination_name == NULL || CompareNames(parent_source_name,parent_destination_name) != SAME))
+		RestartDirScanner(user,parent_source_name);
 
 	result = DOSTRUE;
 
@@ -4530,6 +4642,9 @@ Action_RenameObject(
 
 	FreeMemory(full_source_name);
 	FreeMemory(full_destination_name);
+
+	FreeMemory(parent_source_name);
+	FreeMemory(parent_destination_name);
 
 	(*error_ptr) = error;
 
@@ -4621,9 +4736,10 @@ Action_DiskInfo(
 
 STATIC LONG
 Action_Info(
-	struct FileLock *	lock,
-	struct InfoData *	id,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		lock,
+	struct InfoData *		id,
+	LONG *					error_ptr)
 {
 	LONG result;
 
@@ -4644,6 +4760,12 @@ Action_Info(
 	}
 	else
 	{
+		struct LockNode * ln;
+
+		ln = (struct LockNode *)lock->fl_Key;
+
+		ln->ln_LastUser = user;
+
 		result = Action_DiskInfo(id,error_ptr);
 	}
 
@@ -4655,6 +4777,7 @@ Action_Info(
 
 STATIC LONG
 Action_ExamineObject(
+	const struct MsgPort *	user,
 	struct FileLock *		lock,
 	struct FileInfoBlock *	fib,
 	LONG *					error_ptr)
@@ -4693,6 +4816,8 @@ Action_ExamineObject(
 		struct LockNode * ln = (struct LockNode *)lock->fl_Key;
 		LONG seconds;
 		smba_stat_t st;
+
+		ln->ln_LastUser = user;
 
 		if(smba_getattr(ln->ln_File,&st,&error) < 0)
 		{
@@ -5082,6 +5207,7 @@ dir_scan_callback_func_exnext(
 
 STATIC LONG
 Action_ExamineNext(
+	const struct MsgPort *	user,
 	struct FileLock *		lock,
 	struct FileInfoBlock *	fib,
 	LONG *					error_ptr)
@@ -5113,6 +5239,8 @@ Action_ExamineNext(
 	offset = fib->fib_DiskKey;
 
 	ln = (struct LockNode *)lock->fl_Key;
+
+	ln->ln_LastUser = user;
 
 	/* Check if we should restart scanning the directory
 	 * contents. This is tricky at best and may produce
@@ -5487,6 +5615,7 @@ dir_scan_callback_func_exall(
 
 STATIC LONG
 Action_ExamineAll(
+	const struct MsgPort *	last_user,
 	struct FileLock *		lock,
 	struct ExAllData *		ed,
 	LONG					size,
@@ -5594,6 +5723,8 @@ Action_ExamineAll(
 
 	ln = (struct LockNode *)lock->fl_Key;
 
+	ln->ln_LastUser = last_user;
+
 	/* Check if we should restart scanning the directory
 	 * contents. This is tricky at best and may produce
 	 * irritating results :(
@@ -5616,7 +5747,9 @@ Action_ExamineAll(
 		{
 			SHOWMSG("didn't work");
 			error = MapErrnoToIoErr(error);
+
 			eac->eac_LastKey = (ULONG)-1;
+
 			goto out;
 		}
 
@@ -5624,7 +5757,9 @@ Action_ExamineAll(
 		{
 			SHOWMSG("lock does not refer to a directory");
 			error = ERROR_OBJECT_WRONG_TYPE;
+
 			eac->eac_LastKey = (ULONG)-1;
+
 			goto out;
 		}
 	}
@@ -5643,7 +5778,9 @@ Action_ExamineAll(
 		{
 			SHOWMSG("flagging an error");
 			SHOWVALUE(ec.ec_Error);
+
 			eac->eac_LastKey = (ULONG)-1;
+
 			error = ec.ec_Error;
 		}
 
@@ -5652,6 +5789,7 @@ Action_ExamineAll(
 	else if (error != OK)
 	{
 		SHOWMSG("error whilst scanning");
+
 		eac->eac_LastKey = (ULONG)-1;
 
 		error = MapErrnoToIoErr(error);
@@ -5686,6 +5824,7 @@ Action_ExamineAll(
 
 STATIC LONG
 Action_Find(
+	const struct MsgPort *	user,
 	LONG					action,
 	struct FileHandle *		fh,
 	struct FileLock *		parent,
@@ -5696,7 +5835,7 @@ Action_Find(
 	STRPTR parent_path = NULL;
 	STRPTR full_name = NULL;
 	struct FileNode * fn = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	BOOL create_new_file;
 	int error;
@@ -5723,6 +5862,8 @@ Action_Find(
 	if(parent != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+
+		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
 	}
@@ -6243,6 +6384,7 @@ Action_SetFileSize(
 
 STATIC LONG
 Action_SetDate(
+	const struct MsgPort *		user,
 	struct FileLock *			parent,
 	const void *				bcpl_name,
 	const struct DateStamp *	ds,
@@ -6251,7 +6393,7 @@ Action_SetDate(
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
 	smba_file_t * file = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
 	LONG seconds;
@@ -6270,6 +6412,8 @@ Action_SetDate(
 	if(parent != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+
+		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
 	}
@@ -6379,7 +6523,7 @@ Action_ExamineFH(
 	smba_stat_t st;
 	int error;
 	LONG seconds;
-	STRPTR name;
+	const TEXT * name;
 	int name_len;
 	int i;
 
@@ -6601,8 +6745,9 @@ Action_ParentFH(
 
 STATIC BPTR
 Action_CopyDirFH(
-	struct FileNode *	fn,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileNode *		fn,
+	LONG *					error_ptr)
 {
 	BPTR result = ZERO;
 	struct LockNode * ln = NULL;
@@ -6643,6 +6788,7 @@ Action_CopyDirFH(
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
+	ln->ln_LastUser				= user;
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
@@ -6792,16 +6938,17 @@ Action_RenameDisk(
 
 STATIC LONG
 Action_ChangeMode(
-	LONG				type,
-	APTR				object,
-	LONG				new_mode,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	LONG					type,
+	APTR					object,
+	LONG					new_mode,
+	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
 	struct FileLock * fl = NULL;
 	struct FileNode * fn = NULL;
 	struct LockNode * ln = NULL;
-	STRPTR name;
+	const TEXT * name;
 	LONG old_mode;
 	int error = OK;
 
@@ -6824,6 +6971,8 @@ Action_ChangeMode(
 		ln = (struct LockNode *)fl->fl_Key;
 		name = ln->ln_FullName;
 		old_mode = fl->fl_Access;
+
+		ln->ln_LastUser = user;
 	}
 	else
 	{
@@ -6987,15 +7136,16 @@ Action_MoreCache(
 
 STATIC LONG
 Action_SetComment(
-	struct FileLock *	parent,
-	const void *		bcpl_name,
-	const void *		bcpl_comment,
-	LONG *				error_ptr)
+	const struct MsgPort *	user,
+	struct FileLock *		parent,
+	const void *			bcpl_name,
+	const void *			bcpl_comment,
+	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
 	smba_file_t * file = NULL;
-	STRPTR parent_name;
+	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	TEXT comment[80];
 	int error;
@@ -7013,6 +7163,8 @@ Action_SetComment(
 	if(parent != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+
+		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
 	}
@@ -7196,11 +7348,13 @@ Action_FreeRecord (
 /****************************************************************************/
 
 STATIC VOID
-HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
+HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * service_name)
 {
 	struct Process * this_process = (struct Process *)FindTask(NULL);
 	BOOL sign_off = FALSE;
 	BYTE old_priority;
+	fd_set read_fds;
+	int server_fd;
 	ULONG signals;
 	BOOL done;
 
@@ -7277,9 +7431,97 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 
 	Permit();
 
+	FD_ZERO(&read_fds);
+
 	do
 	{
-		signals = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit));
+		server_fd = ServerData->server.mount_data.fd;
+
+		/* If the server is currently connected, check if it has sent
+		 * a NetBIOS "keep alive" message and deal with it.
+		 */
+		if(server_fd >= 0)
+		{
+			/* We want to know if this socket has readable data for us. */
+			FD_SET(server_fd, &read_fds);
+
+			signals = SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit);
+
+			/* Wait for the server to send something, a signal to be received
+			 * or the next file system packet to arrive.
+			 */
+			if(WaitSelect(server_fd+1,&read_fds,NULL,NULL,NULL,&signals) > 0)
+			{
+				int num_bytes;
+				UBYTE data[4];
+				int error;
+
+				/* We need to pick up everything that might be waiting to be
+				 * read, but we need to stop reading from the socket as soon
+				 * as there is no further data.
+				 */
+				while(TRUE)
+				{
+					/* Throw away what's waiting to be read. */
+					num_bytes = smb_discard_netbios_frames(&ServerData->server, server_fd, &error);
+					if(num_bytes != -1)
+					{
+						int non_blocking_io;
+
+						SHOWMSG("checking for more data...");
+
+						non_blocking_io = TRUE;
+						IoctlSocket(server_fd, FIONBIO, &non_blocking_io);
+
+						/* If there's what might be one NetBIOS header worth
+						 * of data waiting to be read, keep going.
+						 */
+						num_bytes = recv(server_fd, data, sizeof(data), MSG_PEEK);
+
+						non_blocking_io = FALSE;
+						IoctlSocket(server_fd, FIONBIO, &non_blocking_io);
+
+						if(num_bytes > 0)
+						{
+							D(("there's probably something waiting to be read... (%ld bytes)", num_bytes));
+							continue;
+						}
+
+						SHOWMSG("no more data's waiting");
+					}
+
+					/* If we ran into trouble we might want to shut down
+					 * the server connection...
+					 */
+					if(num_bytes == -1 && errno != EWOULDBLOCK)
+					{
+						D(("picked up trouble (error=%ld)",errno));
+						smb_check_server_connection(&ServerData->server, errno);
+					}
+
+					SHOWMSG("and were'done here");
+					break;
+				}
+			}
+
+			D(("signals = 0x%08lx",signals));
+
+			/* We don't want to call FD_ZERO() on each loop
+			 * count, because it is costly. This is why we
+			 * clear the socket which we previously used on
+			 * WaitSelect(), just in case the next loop
+			 * iteration may end up changing the value of
+			 * ServerData->server.mount_data.fd.
+			 */
+			FD_CLR(server_fd, &read_fds);
+		}
+		/* The server connection isn't ready yet, so we wait for
+		 * stop/debug signals and more file system packets.
+		 */
+		else
+		{
+			signals = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit));
+		}
 
 		if(signals & (1UL << FileSystemPort->mp_SigBit))
 		{
@@ -7326,7 +7568,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_LOCATE_OBJECT:
 						/* Lock,Name,Mode -> Lock */
 
-						res1 = Action_LocateObject((struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
+						res1 = Action_LocateObject(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
 						break;
 
 					case ACTION_RENAME_DISK:
@@ -7344,13 +7586,13 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_DELETE_OBJECT:
 						/* Lock,Name -> Bool */
 
-						res1 = Action_DeleteObject((struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_DeleteObject(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_RENAME_OBJECT:
 						/* Source lock,source name,destination lock,destination name -> Bool */
 
-						res1 = Action_RenameObject((struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),
+						res1 = Action_RenameObject(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),
 							(struct FileLock *)BADDR(dp->dp_Arg3),BADDR(dp->dp_Arg4),&res2);
 
 						break;
@@ -7378,31 +7620,31 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_COPY_DIR:
 						/* Lock -> Lock */
 
-						res1 = Action_CopyDir((struct FileLock *)BADDR(dp->dp_Arg1),&res2);
+						res1 = Action_CopyDir(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),&res2);
 						break;
 
 					case ACTION_SET_PROTECT:
 						/* (Ignore),Lock,Name,Mask -> Bool */
 
-						res1 = Action_SetProtect((struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),dp->dp_Arg4,&res2);
+						res1 = Action_SetProtect(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),dp->dp_Arg4,&res2);
 						break;
 
 					case ACTION_CREATE_DIR:
 						/* Lock,Name -> Lock */
 
-						res1 = Action_CreateDir((struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_CreateDir(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_EXAMINE_OBJECT:
 						/* FileLock,FileInfoBlock -> Bool */
 
-						res1 = Action_ExamineObject((struct FileLock *)BADDR(dp->dp_Arg1),(struct FileInfoBlock *)BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_ExamineObject(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(struct FileInfoBlock *)BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_EXAMINE_NEXT:
 						/* FileLock,FileInfoBlock -> Bool */
 
-						res1 = Action_ExamineNext((struct FileLock *)BADDR(dp->dp_Arg1),(struct FileInfoBlock *)BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_ExamineNext(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(struct FileInfoBlock *)BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_DISK_INFO:
@@ -7416,19 +7658,19 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_INFO:
 						/* FileLock,InfoData -> Bool */
 
-						res1 = Action_Info((struct FileLock *)BADDR(dp->dp_Arg1),(struct InfoData *)BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_Info(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(struct InfoData *)BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_SET_COMMENT:
 						/* (Ignore),FileLock,Name,Comment -> Bool */
 
-						res1 = Action_SetComment((struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),BADDR(dp->dp_Arg4),&res2);
+						res1 = Action_SetComment(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),BADDR(dp->dp_Arg4),&res2);
 						break;
 
 					case ACTION_PARENT:
 						/* Lock -> Lock */
 
-						res1 = Action_Parent((struct FileLock *)BADDR(dp->dp_Arg1),&res2);
+						res1 = Action_Parent(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),&res2);
 						break;
 
 					case ACTION_INHIBIT:
@@ -7440,13 +7682,13 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_SET_DATE:
 						/* (Ignore),FileLock,Name,DateStamp(APTR) -> Bool */
 
-						res1 = Action_SetDate((struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),(struct DateStamp *)dp->dp_Arg4,&res2);
+						res1 = Action_SetDate(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),(struct DateStamp *)dp->dp_Arg4,&res2);
 						break;
 
 					case ACTION_SAME_LOCK:
 						/* Lock,Lock -> Bool */
 
-						res1 = Action_SameLock((struct FileLock *)BADDR(dp->dp_Arg1),(struct FileLock *)BADDR(dp->dp_Arg2),&res2);
+						res1 = Action_SameLock(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(struct FileLock *)BADDR(dp->dp_Arg2),&res2);
 						break;
 
 					case ACTION_READ:
@@ -7466,7 +7708,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_FINDOUTPUT:
 						/* FileHandle,FileLock,Name -> Bool */
 
-						res1 = Action_Find(dp->dp_Action,(struct FileHandle *)BADDR(dp->dp_Arg1),(struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),&res2);
+						res1 = Action_Find(dp->dp_Port,dp->dp_Action,(struct FileHandle *)BADDR(dp->dp_Arg1),(struct FileLock *)BADDR(dp->dp_Arg2),BADDR(dp->dp_Arg3),&res2);
 						break;
 
 					case ACTION_END:
@@ -7508,13 +7750,13 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_CHANGE_MODE:
 						/* Type,Object,Mode -> Bool */
 
-						res1 = Action_ChangeMode(dp->dp_Arg1,BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
+						res1 = Action_ChangeMode(dp->dp_Port,dp->dp_Arg1,BADDR(dp->dp_Arg2),dp->dp_Arg3,&res2);
 						break;
 
 					case ACTION_COPY_DIR_FH:
 						/* FileHandle->fh_Arg1 -> Bool */
 
-						res1 = Action_CopyDirFH((struct FileNode *)dp->dp_Arg1,&res2);
+						res1 = Action_CopyDirFH(dp->dp_Port,(struct FileNode *)dp->dp_Arg1,&res2);
 						break;
 
 					case ACTION_PARENT_FH:
@@ -7526,7 +7768,7 @@ HandleFileSystem(STRPTR device_name,STRPTR volume_name,STRPTR service_name)
 					case ACTION_EXAMINE_ALL:
 						/* FileLock,ExAllData(APTR),Size,Type,ExAllControl(APTR) -> Bool */
 
-						res1 = Action_ExamineAll((struct FileLock *)BADDR(dp->dp_Arg1),(struct ExAllData *)dp->dp_Arg2,
+						res1 = Action_ExamineAll(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(struct ExAllData *)dp->dp_Arg2,
 							dp->dp_Arg3,dp->dp_Arg4,(struct ExAllControl *)dp->dp_Arg5,&res2);
 
 						break;

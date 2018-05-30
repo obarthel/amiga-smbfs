@@ -93,6 +93,102 @@ receive_all(int fd, void * _data, int len, int * error_ptr)
 
 /*****************************************************************************/
 
+/* Read the next NetBIOS frame and discard it. The primary purpose
+ * of this function is to receive and ignore NetBIOS "keep alive"
+ * messages.
+ */
+int
+smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_ptr)
+{
+	unsigned char netbios_session_buf[NETBIOS_HEADER_SIZE];
+	int netbios_session_payload_size;
+	int result;
+
+	ENTER();
+
+	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
+	result = receive_all (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE, error_ptr);
+	if (result < 0)
+	{
+		LOG (("recv error = %ld\n", (*error_ptr)));
+		goto out;
+	}
+
+	if (result < NETBIOS_HEADER_SIZE)
+	{
+		LOG (("got less than %ld bytes\n", NETBIOS_HEADER_SIZE));
+
+		(*error_ptr) = error_end_of_file;
+
+		result = -1;
+		goto out;
+	}
+
+	/* Check the session type. */
+	switch (netbios_session_buf[0])
+	{
+		/* 0x00 == session message */
+		case 0x00:
+
+			SHOWMSG("Got session message");
+			break;
+
+		/* 0x85 == session keepalive */
+		case 0x85:
+
+			SHOWMSG("Got session keepalive");
+			break;
+
+		/* 0x81 == session request */
+		/* 0x82 == positive session response */
+		/* 0x83 == negative session response */
+		/* 0x84 == retarget session response */
+		default:
+
+			/* The session setup may need to know about the
+			 * NetBIOS session response, but for any command
+			 * these message types are invalid.
+			 */
+			D(("Invalid session header type 0x%02lx\n", netbios_session_buf[0]));
+
+			(*error_ptr) = error_invalid_netbios_session;
+
+			result = -1;
+			goto out;
+	}
+
+	netbios_session_payload_size = (int)smb_len(netbios_session_buf);
+	SHOWVALUE(netbios_session_payload_size);
+
+	if(netbios_session_payload_size > 0)
+	{
+		/* The length in the NetBIOS header is the raw data length (17 bits) */
+		if (netbios_session_payload_size > server->transmit_buffer_allocation_size)
+		{
+			D(("Received length (%ld) > max_xmit (%ld)!", netbios_session_payload_size, server->transmit_buffer_allocation_size));
+
+			(*error_ptr) = error_message_exceeds_buffer_size;
+
+			result = -1;
+			goto out;
+		}
+
+		result = receive_all (sock_fd, server->transmit_buffer, netbios_session_payload_size, error_ptr);
+		if (result < 0)
+		{
+			D(("recv error = %ld", (*error_ptr)));
+			goto out;
+		}
+	}
+
+ out:
+
+	RETURN(result);
+	return(result);
+}
+
+/*****************************************************************************/
+
 /* smb_receive_raw: The NetBIOS header is only stored if want_header != 0. */
 static int
 smb_receive_raw (
