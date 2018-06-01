@@ -8,13 +8,20 @@
  * Modified for supporting SMBlockingX packets by Peter Riede <Noster-Riede -at- T-Online -dot- de>
  */
 
-#ifndef _LINUX_SMB_FS_H
-#define _LINUX_SMB_FS_H
+#ifndef _SMB_FS_H_SMB_H
+#define _SMB_FS_H_SMB_H
 
+#ifndef _SMB_H
 #include <smb/smb.h>
+#endif /* _SMB_H */
 
+#ifndef _SMB_MOUNT_H
 #include <smb/smb_mount.h>
+#endif /* _SMB_MOUNT_H */
+
+#ifndef _SMB_FS_SB
 #include <smb/smb_fs_sb.h>
+#endif /* _SMB_FS_SB */
 
 #include <netinet/in.h>
 
@@ -22,8 +29,7 @@
 #include "quad_math.h"
 #endif /* _QUAD_MATH_H */
 
-/* This structure is used to pass the arguments to smb_proc_lockingX
- */
+/* This structure is used to pass the arguments to smb_proc_lockingX */
 struct smb_lkrng
 {
 	off_t	offset;		/* offset to first byte to be (un)locked */
@@ -82,4 +88,4 @@ int smb_connect(struct smb_server *server, int * error_ptr);
 int smb_request(struct smb_server *server, int command, void * input_payload,const void * output_payload,int payload_size, int * error_ptr);
 int smb_trans2_request(struct smb_server *server, int command, int *data_len, int *param_len, char **data, char **param, int * error_ptr);
 
-#endif /* _LINUX_SMB_FS_H */
+#endif /* _SMB_FS_H_SMB_H */

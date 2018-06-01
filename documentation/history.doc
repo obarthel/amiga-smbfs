@@ -1846,3 +1846,22 @@ smbfs 1.143 (30.5.2018)
 - Renaming a file or directory can restart filling the directory
   scan cache if the file/directory was moved from its home directory to
   a different directory.
+
+
+smbfs 1.144 (1.6.2018)
+
+- When closing a file its modification time is no longer updated unless
+  its contents had been modified. Simply accessing a file or directory
+  without writing to it no longer has the effect of bumping its modification
+  time.
+
+- If reading from a file failed, the error code was not translated properly
+  for AmigaDOS and always came out as ERROR_ACTION_NOT_KNOWN. Fixed.
+
+- Dropped the NATIVEOS switch and the corresponding tool type.
+
+- Added the UNICODE switch and the corresponding tool type. This switch
+  will enable limited Unicode support for servers which cannot deliver
+  proper directory information, such as the Samba 3.0.37 version which
+  is part of the FRITZ!Box firmware. Note that once Unicode support is
+  enabled, the UTF8, CP437, CP850 and TRANSLATE options will be ignored.

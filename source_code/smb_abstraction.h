@@ -30,9 +30,9 @@
 #include <smb/smb_fs_sb.h>
 #endif /* _SMB_FS_SB */
 
-#ifndef _LINUX_SMB_H
+#ifndef _SMB_H
 #include <smb/smb.h>
-#endif /* _LINUX_SMB_H */
+#endif /* _SMB_H */
 
 /*****************************************************************************/
 
@@ -109,6 +109,7 @@ typedef struct smba_file
 	dircache_t *			dircache;		/* content cache for directories */
 	unsigned				is_valid:1;		/* server was down, entry removed, ... */
 	unsigned				attr_dirty:1;	/* attribute cache is dirty */
+	unsigned				modified:1;		/* file was modified */
 } smba_file_t;
 
 /****************************************************************************/
@@ -132,7 +133,7 @@ int smba_rmdir(smba_server_t *s, const char *path, int * error_ptr);
 int smba_rename(smba_server_t *s, const char *from, const char *to, int * error_ptr);
 int smba_statfs(smba_server_t *s, long *bsize, long *blocks, long *bfree, int * error_ptr);
 void smb_invalidate_all_inodes(struct smb_server *server);
-int smba_start(const char *service, const char *opt_workgroup, const char *opt_username, const char *opt_password, const char *opt_clientname, const char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, int opt_raw_smb, const char * opt_native_os, int * error_ptr, int * smb_error_class_ptr, int * smb_error_ptr, smba_server_t **result);
+int smba_start(const char *service, const char *opt_workgroup, const char *opt_username, const char *opt_password, const char *opt_clientname, const char *opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, int opt_raw_smb, int opt_unicode, int * error_ptr, int * smb_error_class_ptr, int * smb_error_ptr, smba_server_t **result);
 void smba_disconnect(smba_server_t *server);
 int smba_get_dircache_size(struct smba_server * server);
 int smba_change_dircache_size(struct smba_server * server,int cache_size);

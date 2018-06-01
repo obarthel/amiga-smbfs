@@ -7,8 +7,8 @@
  * Modified for use with AmigaOS by Olaf Barthel <obarthel -at- gmx -dot- net>
  */
 
-#ifndef _LINUX_SMB_H
-#define _LINUX_SMB_H
+#ifndef _SMB_H
+#define _SMB_H
 
 #define SMB_MAXNAMELEN 255
 
@@ -87,4 +87,4 @@ struct smb_dirent
 	unsigned		writable:1;				/* was opened for read/write access? */
 };
 
-#endif /* _LINUX_SMB_H */
+#endif /* _SMB_H */

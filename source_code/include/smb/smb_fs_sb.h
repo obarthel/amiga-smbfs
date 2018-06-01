@@ -10,8 +10,13 @@
 #ifndef _SMB_FS_SB
 #define _SMB_FS_SB
 
+#ifndef _SMB_H
 #include <smb/smb.h>
+#endif /* _SMB_H */
+
+#ifndef _SMB_MOUNT_H
 #include <smb/smb_mount.h>
+#endif /* _SMB_MOUNT_H */
 
 struct smb_server
 {
@@ -41,6 +46,9 @@ struct smb_server
 	int crypt_key_length;
 	unsigned char crypt_key[8];
 
+	/* olsen (2018-06-01): UTF-16LE Unicode strings are used for path names. */
+	int unicode_enabled;
+
 	struct smba_server * abstraction;
 
 	enum smb_conn_state state;
@@ -57,8 +65,8 @@ struct smb_server
 	/* olsen (2018-05-14): Don't retry establishing a server connection. */
 	int dont_retry;
 
-	/* olsen (2018-05-18): Override the "Native OS" name passed to the server. */
-	const char * native_os;
+	/* olsen (2018-06-01): Enable Unicode support if the server supports it. */
+	int use_unicode;
 };
 
 #endif

@@ -42,7 +42,6 @@
  * SMBnegprot		SMB_COM_NEGOTIATE				0x72	Core Protocol	-			negotiate protocol
  * SMBopen			SMB_COM_OPEN					0x02	Core Protocol	deprecated	open file (-> SMB_COM_NT_CREATE_ANDX)
  * SMBread			SMB_COM_READ					0x0A	Core Protocol	deprecated	read from file (-> SMB_COM_READ_ANDX)
- * SMBreadbraw		SMB_COM_READ_RAW				0x1a	Core Protocol	deprecated	read a block of data with no smb header (-> SMB_COM_READ_ANDX)
  * SMBreadX			SMB_COM_READ_ANDX				0x2E	LAN Manager 1.0	-			read and X
  * SMBrmdir			SMB_COM_DELETE_DIRECTORY		0x01	Core Protocol	-			delete directory
  * SMBsearch		SMB_COM_SEARCH					0x81	Core Protocol	deprecated	search directory (-> SMB_COM_TRANSACTION2+TRANS2_FIND_FIRST2)
@@ -54,7 +53,6 @@
  * SMBtrans2		SMB_COM_TRANSACTION2			0x32	LAN Manager 1.2	-			TRANS2 protocol set
  * SMBunlink		SMB_COM_DELETE					0x06	Core Protocol	-			delete file
  * SMBwrite			SMB_COM_WRITE					0x0B	Core Protocol	deprecated	write to file (-> SMB_COM_WRITE_ANDX)
- * SMBwritebraw		SMB_COM_WRITE_RAW				0x1d	LAN Manager 1.0	deprecated	write a block of data with no smb header (-> SMB_COM_WRITE_ANDX)
  * SMBwriteX		SMB_COM_WRITE_ANDX				0x2F	LAN Manager 1.0	-			write and X
  */
 
@@ -267,6 +265,136 @@ static void convert_time_t_to_long_date(time_t t, QUAD * long_date);
 
 /*****************************************************************************/
 
+/* Copy a string in ISO-Latin-1 form (8 bits per character) into a
+ * buffer, converting it into a little-endian 16 bit Unicode version
+ * of the string. This works because the ISO-Latin-1 sits within
+ * the ASCII/BMP Latin-1 Unicode range.
+ *
+ * This function creates a null-terminated UTF16-LE Unicode string and
+ * returns how many bytes were written to the buffer, including the
+ * null-termination.
+ */
+static int
+copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
+{
+	int num_bytes_written = 0;
+	int i;
+
+	if(to_size >= 2)
+	{
+		to_size -= 2;
+
+		for(i = 0 ; i < len ; i++)
+		{
+			if(num_bytes_written + 2 <= to_size)
+			{
+				(*to++) = (*from++);
+				(*to++) = '\0';
+
+				num_bytes_written += 2;
+			}
+		}
+
+		(*to++) = '\0';
+		(*to++) = '\0';
+
+		num_bytes_written += 2;
+	}
+
+	return(num_bytes_written);
+}
+
+/*****************************************************************************/
+
+/* Copy a string in little-endian 16 bit Unicode into a buffer, converting
+ * it into a ISO-Latin-1 (8 bits per character) version of the string, if
+ * possible. Code points beyond the ASCII/BMP Latin-1 are replaced by the
+ * control character 0x80.
+ *
+ * Note that the length is given as the number of 16 bit Unicode
+ * characters, not the number of bytes required to store the string.
+ *
+ * This function creates a null-terminated ISO-Latin-1 string and
+ * returns how many bytes were written to the buffer, including the
+ * null-termination.
+ */
+static int
+copy_utf16le_to_latin1(byte * to,int to_size,const byte * from,int len)
+{
+	int num_bytes_written = 0;
+	word c;
+	int i;
+
+	if(to_size >= 1)
+	{
+		to_size -= 1;
+
+		for(i = 0 ; i < len ; i++, from += 2)
+		{
+			c = ((word)from[1] << 8) | from[0];
+
+			if(c >= 256)
+				c = 0x80;
+
+			if(num_bytes_written + 1 <= to_size)
+			{
+				(*to++) = c;
+				num_bytes_written++;
+			}
+		}
+
+		(*to) = '\0';
+
+		num_bytes_written++;
+	}
+
+	return(num_bytes_written);
+}
+
+/*****************************************************************************/
+
+/* Works just like strlen(), but stops as soon as it hits
+ * the boundaries of the buffer which contains the string.
+ */
+static size_t strnlen(const char * s,size_t max_size)
+{
+	const char * start = s;
+	size_t result = 0;
+
+	if(max_size > 0)
+	{
+		while((*s) != '\0' && --max_size > 0)
+			s++;
+	}
+
+	result = (size_t)(s - start);
+
+	return(result);
+}
+
+/*****************************************************************************/
+
+/* Works just like strnlen(), but operates on 16 bit characters. */
+static size_t strnlen_utf16(const char * s,size_t max_size)
+{
+	size_t result = 0;
+
+	while(max_size >= 2)
+	{
+		if((s[0] | s[1]) == 0)
+			break;
+
+		s += 2;
+		max_size -= 2;
+
+		result++;
+	}
+
+	return(result);
+}
+
+/*****************************************************************************/
+
 /*****************************************************************************
  *
  *  Encoding/Decoding section
@@ -352,7 +480,8 @@ static byte *
 smb_encode_ascii (byte * p, const byte * name, int len)
 {
 	(*p++) = 4;
-	strcpy (p, name);
+	memcpy (p, name, len);
+	p[len] = '\0';
 
 	return p + len + 1;
 }
@@ -957,8 +1086,8 @@ smb_setup_header (struct smb_server *server, byte command, int wct, int bcc)
 
 	if (server->protocol > PROTOCOL_CORE)
 	{
-		BSET (buf, smb_flg, 0x8); /* path names are caseless */
-		WSET (buf, smb_flg2, 0x3); /* extended attributes supported, long names supported */
+		BSET (buf, smb_flg, SMB_FLG_CASELESS_PATHNAMES);
+		WSET (buf, smb_flg2, SMB_FLG2_KNOWS_LONG_NAMES|SMB_FLG2_EAS|(server->unicode_enabled ? SMB_FLG2_UNICODE_STRINGS : 0));
 	}
 
 	(*p++) = wct;
@@ -1037,29 +1166,50 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 		dword end_of_file_high;
 		char *params;
 		char *data;
+		int pathname_size;
+		int pathname_pad;
 
 		SHOWMSG("we'll try SMB_COM_NT_CREATE_ANDX");
 
-		ASSERT( smb_payload_size(server, 24, len+1) >= 0 );
+		if(server->unicode_enabled)
+		{
+			pathname_size = 2 * (len + 1);
+			pathname_pad = 1;
+		}
+		else
+		{
+			pathname_size = len + 1;
+			pathname_pad = 0;
+		}
+
+		ASSERT( smb_payload_size(server, 24, pathname_size + pathname_pad) >= 0 );
 
 		while(TRUE)
 		{
 			if(writable)
 			{
 				SHOWMSG("write access required");
-				desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE;
 
-				// desired_access = GENERIC_READ|GENERIC_WRITE;
+				/* The following does not work consistently with multiple
+				 * SMB servers. Which is why we stick with generic read/write.
+				 */
+				/* desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE; */
+
+				desired_access = GENERIC_READ|GENERIC_WRITE;
 			}
 			else
 			{
 				SHOWMSG("read access is sufficient");
-				desired_access = FILE_READ_DATA;
 
-				// desired_access = GENERIC_READ;
+				/* The following does not work consistently with multiple
+				 * SMB servers. Which is why we stick with generic read.
+				 */
+				/* desired_access = FILE_READ_DATA; */
+
+				desired_access = GENERIC_READ;
 			}
 
-			desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES;
+			/* desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES; */
 
 			/* Allows others to read, write and delete the file just created.
 			 * This may be useful if smbfs hangs or you need to restart your
@@ -1079,29 +1229,38 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 				create_options		= 0;
 			}
 
-			data = smb_setup_header (server, SMBntcreateX, 24, len+1);
+			data = smb_setup_header (server, SMBntcreateX, 24, pathname_pad + pathname_size);
 
 			params = SMB_VWV (server->transmit_buffer);
 
-			params = smb_encode_byte(params, 0xFF); 				/* AndXCommand: no next command */
-			params = smb_encode_byte(params, 0);					/* AndXReserved */
-			params = smb_encode_word(params, 0);					/* AndXOffset */
-			params = smb_encode_byte(params, 0);					/* Reserved */
-			params = smb_encode_word(params, len+1);				/* NameLength */
-			params = smb_encode_dword(params, 0);					/* Flags */
-			params = smb_encode_dword(params, 0);					/* RootDirectoryFID: 0 -> file name is relative to root directory */
-			params = smb_encode_dword(params, desired_access);		/* DesiredAccess */
-			params = smb_encode_dword(params, 0);					/* AllocationSize (low) */
-			params = smb_encode_dword(params, 0);					/* AllocationSize (high) */
-			params = smb_encode_dword(params, ATTR_NORMAL);			/* ExtFileAttributes */
-			params = smb_encode_dword(params, share_access);		/* ShareAccess */
-			params = smb_encode_dword(params, create_disposition);	/* CreateDisposition */
-			params = smb_encode_dword(params, create_options);		/* CreateOptions */
-			params = smb_encode_dword(params, SEC_ANONYMOUS);		/* ImpersonationLevel */
-			(void) smb_encode_byte(params, 0);						/* SecurityFlags */
+			params = smb_encode_byte(params, 0xFF); 						/* AndXCommand: no next command */
+			params = smb_encode_byte(params, 0);							/* AndXReserved */
+			params = smb_encode_word(params, 0);							/* AndXOffset */
+			params = smb_encode_byte(params, 0);							/* Reserved */
+			params = smb_encode_word(params, pathname_pad + pathname_size);	/* NameLength */
+			params = smb_encode_dword(params, 0);							/* Flags */
+			params = smb_encode_dword(params, 0);							/* RootDirectoryFID: 0 -> file name is relative to root directory */
+			params = smb_encode_dword(params, desired_access);				/* DesiredAccess */
+			params = smb_encode_dword(params, 0);							/* AllocationSize (low) */
+			params = smb_encode_dword(params, 0);							/* AllocationSize (high) */
+			params = smb_encode_dword(params, ATTR_NORMAL);					/* ExtFileAttributes */
+			params = smb_encode_dword(params, share_access);				/* ShareAccess */
+			params = smb_encode_dword(params, create_disposition);			/* CreateDisposition */
+			params = smb_encode_dword(params, create_options);				/* CreateOptions */
+			params = smb_encode_dword(params, SEC_ANONYMOUS);				/* ImpersonationLevel */
+			(void) smb_encode_byte(params, 0);								/* SecurityFlags */
 
 			/* Now for the data portion of the message */
-			(void) smb_copy_data(data, pathname, len+1);
+			if(server->unicode_enabled)
+			{
+				(*data++) = 0;
+
+				copy_latin1_to_utf16le(data, pathname_size, pathname, len);
+			}
+			else
+			{
+				(void) smb_copy_data(data, pathname, pathname_size); /* Length includes the terminating NUL byte. */
+			}
 
 			LOG(("requesting SMBntcreateX\n"));
 
@@ -1243,22 +1402,15 @@ int
 smb_proc_close (struct smb_server *server, word fileid, dword mtime, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
-	int local_time;
 	int result;
 
+	/* 0 and 0xffffffff mean: do not set mtime */
 	if(mtime != 0 && mtime != 0xffffffff)
-	{
-		/* 0 and 0xffffffff mean: do not set mtime */
-		local_time = utc2local (mtime);
-	}
-	else
-	{
-		local_time = mtime;
-	}
+		mtime = utc2local (mtime);
 
 	smb_setup_header (server, SMBclose, 3, 0);
 	WSET (buf, smb_vwv0, fileid);
-	DSET (buf, smb_vwv1, local_time);
+	DSET (buf, smb_vwv1, mtime);
 
 	result = smb_request_ok (server, SMBclose, 0, 0, error_ptr);
 
@@ -1574,7 +1726,8 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 	entry->opened = TRUE;
 	entry->fileid = WVAL (buf, smb_vwv0);
 
-	smb_proc_close (server, entry->fileid, entry->mtime, error_ptr);
+	/* Don't change the modification time. */
+	smb_proc_close (server, entry->fileid, 0, error_ptr);
 
  out:
 
@@ -1586,18 +1739,35 @@ smb_proc_mv (struct smb_server *server, const char *opath, const int olen, const
 {
 	char *p;
 	char *buf = server->transmit_buffer;
+	int size;
 	int result;
 
-	ASSERT( smb_payload_size(server, 1, olen + nlen + 4) >= 0 );
+	if(server->unicode_enabled)
+		size = 2 + 1 + 2 * (olen+1) + 1 + 2 * (nlen+1);
+	else
+		size = 2 + 1 + (olen+1) + 1 + (nlen+1);
+
+	ASSERT( smb_payload_size(server, 1, size) >= 0 );
 
  retry:
 
-	p = smb_setup_header (server, SMBmv, 1, olen + nlen + 4);
+	p = smb_setup_header (server, SMBmv, 1, size);
 
 	WSET (buf, smb_vwv0, 0);
 
-	p = smb_encode_ascii (p, opath, olen);
-	smb_encode_ascii (p, npath, olen);
+	if(server->unicode_enabled)
+	{
+		(*p++) = 4; /* A null-terminated string follows. */
+		p += copy_latin1_to_utf16le(p,2 * (olen+1),opath,olen);
+
+		(*p++) = 4; /* A null-terminated string follows. */
+		(void) copy_latin1_to_utf16le(p,2 * (nlen+1),npath,nlen);
+	}
+	else
+	{
+		p = smb_encode_ascii (p, opath, olen);
+		smb_encode_ascii (p, npath, olen);
+	}
 
 	result = smb_request_ok (server, SMBmv, 0, 0, error_ptr);
 	if (result < 0)
@@ -1612,10 +1782,14 @@ smb_proc_mv (struct smb_server *server, const char *opath, const int olen, const
 int
 smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int * error_ptr)
 {
+	int path_size;
 	int result;
 	char *p;
 
-	ASSERT( smb_payload_size(server, 0, 2 + len) >= 0 );
+	if(server->unicode_enabled)
+		path_size = 2 * (len + 1);
+	else
+		path_size = len + 1;
 
  retry:
 
@@ -1632,11 +1806,11 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 	{
 		unsigned char *outbuf = server->transmit_buffer;
 
-		ASSERT( smb_payload_size(server, 15, 3 + 4 + len+1) >= 0 );
+		ASSERT( smb_payload_size(server, 15, 3 + 4 + path_size) >= 0 );
 
-		smb_setup_header (server, SMBtrans2, 15, 3 + 4 + len+1);
+		smb_setup_header (server, SMBtrans2, 15, 3 + 4 + path_size);
 
-		WSET (outbuf, smb_tpscnt, 4 + len+1);								/* TotalParameterCount */
+		WSET (outbuf, smb_tpscnt, 4 + path_size);							/* TotalParameterCount */
 		WSET (outbuf, smb_tdscnt, 0);										/* TotalDataCount */
 		WSET (outbuf, smb_mprcnt, 2);										/* MaxParameterCount */
 		WSET (outbuf, smb_mdrcnt, server->max_recv);						/* MaxDataCount */
@@ -1661,8 +1835,15 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 		DSET (p, 0, 0);	/* Reserved */
 		p += 4;
 
-		memcpy(p,path,len);
-		p[len] = '\0';
+		if(server->unicode_enabled)
+		{
+			copy_latin1_to_utf16le(p,path_size,path,len);
+		}
+		else
+		{
+			memcpy(p,path,len);
+			p[len] = '\0';
+		}
 
 		result = smb_trans2_request (server, SMBtrans2, NULL, NULL, NULL, NULL, error_ptr);
 		if (result < 0)
@@ -1686,9 +1867,19 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 	}
 	else
 	{
-		p = smb_setup_header (server, SMBmkdir, 0, 2 + len);
+		ASSERT( smb_payload_size(server, 0, 1 + path_size) >= 0 );
 
-		smb_encode_ascii (p, path, len);
+		p = smb_setup_header (server, SMBmkdir, 0, 1 + path_size);
+
+		if(server->unicode_enabled)
+		{
+			(*p++) = 4; /* A null-terminated string follows. */
+			copy_latin1_to_utf16le(p,path_size,path,len);
+		}
+		else
+		{
+			smb_encode_ascii (p, path, len);
+		}
 
 		result = smb_request_ok (server, SMBmkdir, 0, 0, error_ptr);
 		if (result < 0)
@@ -1706,16 +1897,30 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 int
 smb_proc_rmdir (struct smb_server *server, const char *path, const int len, int * error_ptr)
 {
+	int path_size;
 	int result;
 	char *p;
 
-	ASSERT( smb_payload_size(server, 0, 2 + len) >= 0 );
+	if(server->unicode_enabled)
+		path_size = 2 * (len + 1);
+	else
+		path_size = len + 1;
+
+	ASSERT( smb_payload_size(server, 0, 1 + path_size) >= 0 );
 
  retry:
 
-	p = smb_setup_header (server, SMBrmdir, 0, 2 + len);
+	p = smb_setup_header (server, SMBrmdir, 0, 1 + path_size);
 
-	smb_encode_ascii (p, path, len);
+	if(server->unicode_enabled)
+	{
+		(*p++) = 4; /* A null-terminated string follows. */
+		copy_latin1_to_utf16le(p,path_size,path,len);
+	}
+	else
+	{
+		smb_encode_ascii (p, path, len);
+	}
 
 	result = smb_request_ok (server, SMBrmdir, 0, 0, error_ptr);
 	if (result < 0)
@@ -1730,22 +1935,36 @@ smb_proc_rmdir (struct smb_server *server, const char *path, const int len, int 
 int
 smb_proc_unlink (struct smb_server *server, const char *path, const int len, int * error_ptr)
 {
+	int path_size;
 	char *p;
 	char *buf = server->transmit_buffer;
 	int result;
 
-	ASSERT( smb_payload_size(server, 1, 2 + len) >= 0 );
+	if(server->unicode_enabled)
+		path_size = 2 * (len + 1);
+	else
+		path_size = len + 1;
+
+	ASSERT( smb_payload_size(server, 1, 1 + path_size) >= 0 );
 
  retry:
 
-	p = smb_setup_header (server, SMBunlink, 1, 2 + len);
+	p = smb_setup_header (server, SMBunlink, 1, 1 + path_size);
 
 	/* Allow for system and hidden files to be deleted, too. After
 	 * all, we show these in the directory lists.
 	 */
 	WSET (buf, smb_vwv0, SMB_FILE_ATTRIBUTE_SYSTEM | SMB_FILE_ATTRIBUTE_HIDDEN);
 
-	smb_encode_ascii (p, path, len);
+	if(server->unicode_enabled)
+	{
+		(*p++) = 4; /* A null-terminated string follows. */
+		copy_latin1_to_utf16le(p,path_size,path,len);
+	}
+	else
+	{
+		smb_encode_ascii (p, path, len);
+	}
 
 	result = smb_request_ok (server, SMBunlink, 0, 0, error_ptr);
 	if (result < 0)
@@ -2078,7 +2297,7 @@ smb_get_dirent_name(char *p,int level,char ** name_ptr,int * len_ptr)
 
 /* interpret a long filename structure */
 static int
-smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int * entry_length_ptr)
+smb_decode_long_dirent (const struct smb_server *server, const char *p, struct smb_dirent *finfo, int level, int * entry_length_ptr)
 {
 	int success = TRUE;
 
@@ -2097,10 +2316,21 @@ smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int 
 			if (finfo != NULL)
 			{
 				const char * name;
+				int name_size;
 				int name_len;
 
 				name = &p[27];
-				name_len = BVAL (p, 26);
+				name_size = BVAL (p, 26);
+
+				SHOWVALUE(name_size);
+
+				/* Figure out how long the string really is. It's
+				 * supposed to be NUL-terminated.
+				 */
+				if(server->unicode_enabled)
+					name_len = strnlen_utf16(name, name_size);
+				else
+					name_len = strnlen(name, name_size);
 
 				SHOWVALUE(name_len);
 
@@ -2128,10 +2358,18 @@ smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int 
 				finfo->size_low		= DVAL (p, 16);
 				finfo->size_high	= DVAL (p, 16);
 				finfo->attr			= WVAL (p, 24);
-				finfo->len			= name_len;
 
-				memcpy(finfo->complete_path, name, name_len);
-				finfo->complete_path[name_len] = '\0';
+				if(server->unicode_enabled)
+				{
+					copy_utf16le_to_latin1(finfo->complete_path, finfo->complete_path_size, name, name_len);
+				}
+				else
+				{
+					memcpy(finfo->complete_path, name, name_len);
+					finfo->complete_path[name_len] = '\0';
+				}
+
+				finfo->len = name_len;
 
 				D(("name = '%s', length=%ld",escape_name(finfo->complete_path),name_len));
 			}
@@ -2147,6 +2385,7 @@ smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int 
 			if (finfo != NULL)
 			{
 				dword size_low,size_high;
+				int name_size;
 				int name_len;
 
 				p += 4; /* next entry offset */
@@ -2183,11 +2422,11 @@ smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int 
 				finfo->attr = DVAL (p, 0);
 				p += 4;
 
-				name_len = DVAL (p, 0);
+				name_size = DVAL (p, 0);
 				p += 4;
 
 				/* Skip directory entries whose names we cannot store. */
-				if(name_len == 0)
+				if(name_size == 0)
 				{
 					SHOWMSG("name is empty");
 
@@ -2195,7 +2434,7 @@ smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int 
 					break;
 				}
 
-				SHOWVALUE(name_len);
+				SHOWVALUE(name_size);
 
 				p += 4; /* EA size */
 
@@ -2204,26 +2443,15 @@ smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int 
 
 				p += 12*2; /* short name (12 WCHAR characters) */
 
-				/* Just in case, try to remove any trailing NUL bytes from the name. */
-				if(p[name_len - 1] == '\0')
-				{
-					SHOWMSG("removing trailing NUL bytes from name");
+				/* Figure out how long the string really is. It's
+				 * supposed to be NUL-terminated.
+				 */
+				if(server->unicode_enabled)
+					name_len = strnlen_utf16(p, name_size);
+				else
+					name_len = strnlen(p, name_size);
 
-					do
-					{
-						name_len--;
-					}
-					while(name_len > 0 && p[name_len - 1] == '\0');
-
-					/* This shouldn't become an empty name. */
-					if(name_len == 0)
-					{
-						SHOWMSG("name is empty");
-
-						success = FALSE;
-						break;
-					}
-				}
+				SHOWVALUE(name_len);
 
 				/* Skip directory entries whose names we cannot store. */
 				if(name_len >= (int)finfo->complete_path_size)
@@ -2234,8 +2462,24 @@ smb_decode_long_dirent (const char *p, struct smb_dirent *finfo, int level, int 
 					break;
 				}
 
-				memcpy (finfo->complete_path, p, name_len);
-				finfo->complete_path[name_len] = '\0';
+				if(name_len == 0)
+				{
+					D(("name length == 0 (skipping it)"));
+
+					success = FALSE;
+					break;
+				}
+
+				if(server->unicode_enabled)
+				{
+					copy_utf16le_to_latin1(finfo->complete_path, finfo->complete_path_size, p, name_len);
+				}
+				else
+				{
+					memcpy(finfo->complete_path, p, name_len);
+					finfo->complete_path[name_len] = '\0';
+				}
+
 				finfo->len = name_len;
 
 				D(("name = '%s', length=%ld",escape_name(finfo->complete_path),name_len));
@@ -2287,9 +2531,11 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 
 	unsigned char *outbuf = server->transmit_buffer;
 
-	int dirlen = strlen (path) + 2 + 1;
+	int path_len = strlen(path);
+	int mask_buffer_size = path_len + 2 + 1;
 	char *mask;
-	int masklen;
+	int mask_len;
+	int mask_size;
 
 	int entry_length;
 
@@ -2306,7 +2552,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 	SHOWVALUE(server->max_recv);
 	SHOWVALUE(max_matches);
 
-	mask = malloc (dirlen);
+	mask = malloc (mask_buffer_size);
 	if (mask == NULL)
 	{
 		LOG (("Memory allocation failed\n"));
@@ -2317,9 +2563,10 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 		goto out;
 	}
 
-	strcpy (mask, path);
-	strcat (mask, "\\*");
-	masklen = strlen (mask);
+	memcpy(mask,path,path_len);
+	memcpy(&mask[path_len],"\\*",3); /* This includes the terminating NUL. */
+
+	mask_len = path_len + 2;
 
 	LOG (("SMB call lreaddir %ld @ %ld\n", cache_size, fpos));
 	LOG (("                  mask = '%s'\n", escape_name(mask)));
@@ -2348,11 +2595,16 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 
 		memset (outbuf, 0, sizeof(word) * smb_setup1);
 
-		ASSERT( smb_payload_size(server, 15, 3 + 12 + masklen + 1) >= 0 );
+		if(server->unicode_enabled)
+			mask_size = 2 * (mask_len + 1);
+		else
+			mask_size = mask_len + 1;
 
-		smb_setup_header (server, SMBtrans2, 15, 3 + 12 + masklen + 1);
+		ASSERT( smb_payload_size(server, 15, 3 + 12 + mask_size) >= 0 );
 
-		WSET (outbuf, smb_tpscnt, 12 + masklen + 1);						/* TotalParameterCount */
+		smb_setup_header (server, SMBtrans2, 15, 3 + 12 + mask_size);
+
+		WSET (outbuf, smb_tpscnt, 12 + mask_size);							/* TotalParameterCount */
 		WSET (outbuf, smb_tdscnt, 0);										/* TotalDataCount */
 		WSET (outbuf, smb_mprcnt, 10);										/* MaxParameterCount */
 		WSET (outbuf, smb_mdrcnt, server->max_recv);						/* MaxDataCount */
@@ -2395,11 +2647,15 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 
 		p += 12;
 
-		if(masklen > 0)
-			memcpy (p, mask, masklen);
-
-		p += masklen;
-		(*p) = '\0';
+		if(server->unicode_enabled)
+		{
+			copy_latin1_to_utf16le(p,mask_size,mask,mask_len);
+		}
+		else
+		{
+			memcpy (p, mask, mask_len);
+			p[mask_len] = '\0';
+		}
 
 		result = smb_trans2_request (server, SMBtrans2, &resp_data_len, &resp_param_len, &resp_data, &resp_param, error_ptr);
 
@@ -2487,7 +2743,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 
 				if(len > 0)
 				{
-					if(len + 1 > dirlen)
+					if(len + 1 > mask_buffer_size)
 					{
 						/* Grow the buffer in steps of 16 bytes,
 						 * so that we won't have to reallocate it
@@ -2496,15 +2752,15 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 						 */
 						const int grow_size_by = 16;
 
-						D(("increasing mask; old value = %ld new value = %ld",dirlen,len + grow_size_by));
+						D(("increasing mask; old value = %ld new value = %ld",mask_buffer_size,len + grow_size_by));
 
-						dirlen = len + grow_size_by;
-						SHOWVALUE(dirlen);
+						mask_buffer_size = len + grow_size_by;
+						SHOWVALUE(mask_buffer_size);
 
 						if(mask != NULL)
 							free (mask);
 
-						mask = malloc (dirlen);
+						mask = malloc (mask_buffer_size);
 						if (mask == NULL)
 						{
 							LOG (("Memory allocation failed\n"));
@@ -2520,12 +2776,12 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 					mask[len] = '\0';
 				}
 
-				masklen = len;
+				mask_len = len;
 			}
 
 			if (total_count < fpos)
 			{
-				smb_decode_long_dirent (p, NULL, info_level, &entry_length);
+				smb_decode_long_dirent (server, p, NULL, info_level, &entry_length);
 				if(entry_length == 0)
 					break;
 
@@ -2533,7 +2789,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 			}
 			else if (total_count >= fpos + cache_size)
 			{
-				smb_decode_long_dirent (p, NULL, info_level, &entry_length);
+				smb_decode_long_dirent (server, p, NULL, info_level, &entry_length);
 				if(entry_length == 0)
 					break;
 
@@ -2546,7 +2802,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 				/* Skip this entry if we cannot decode the name. This could happen
 				 * if the name will no fit into the buffer.
 				 */
-				if(!smb_decode_long_dirent (p, current_entry, info_level, &entry_length))
+				if(!smb_decode_long_dirent (server, p, current_entry, info_level, &entry_length))
 				{
 					if(entry_length == 0)
 						break;
@@ -2676,13 +2932,24 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	int result;
 	char *resp_data = NULL;
 	int resp_data_len = 0;
+	int path_size;
 
  retry:
 
 	if(len > 0)
-		parameter_count = 2 + 4 + len + 1;
+	{
+		if(server->unicode_enabled)
+			path_size = 2 * (len+1);
+		else
+			path_size = len+1;
+
+		parameter_count = 2 + 4 + path_size;
+	}
 	else
+	{
 		parameter_count = 2 + 2;
+		path_size = 0;
+	}
 
 	ASSERT( smb_payload_size(server, 15, 3 + parameter_count) >= 0 );
 
@@ -2717,8 +2984,15 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 
 		p += 2 + 4;
 
-		memcpy(p,path,len);
-		p[len] = '\0';
+		if(server->unicode_enabled)
+		{
+			copy_latin1_to_utf16le(p,path_size,path,len);
+		}
+		else
+		{
+			memcpy(p,path,len);
+			p[len] = '\0';
+		}
 	}
 	else
 	{
@@ -3228,6 +3502,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	int nt_password_len;
 	unsigned char full_share[SMB_MAXNAMELEN+1];
 	int full_share_len;
+	int full_share_size;
 	byte *packet;
 	dword max_buffer_size;
 	int packet_size;
@@ -3238,6 +3513,9 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		LOG (("could not smb_connect\n"));
 		goto fail;
 	}
+
+	/* Unless we know better, we don't go for Unicode just yet. */
+	server->unicode_enabled = FALSE;
 
 	/* Here we assume that the connection is valid */
 	server->state = CONN_VALID;
@@ -3522,7 +3800,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		/* NT LAN Manager or newer. */
 		if (server->protocol >= PROTOCOL_NT1)
 		{
-			const char *native_os = server->native_os != NULL ? server->native_os : "AmigaOS";
+			const char *native_os = "AmigaOS";
 			const char *native_lanman = VERS;
 			dword capabilities;
 
@@ -3533,6 +3811,15 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			smb_setup_header (server, SMBsesssetupX, 13, user_len + password_len + nt_password_len + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1);
 
 			capabilities = CAP_LARGE_READX|CAP_LARGE_WRITEX|CAP_NT_FIND|CAP_LARGE_FILES;
+
+			if(server->use_unicode && (server->capabilities & CAP_UNICODE) != 0)
+			{
+				SHOWMSG("Unicode support enabled");
+
+				server->unicode_enabled = TRUE;
+
+				capabilities |= CAP_UNICODE;
+			}
 
 			WSET (packet, smb_vwv0, 0xff);				/* AndXCommand+AndXReserved */
 			WSET (packet, smb_vwv1, 0);					/* AndXOffset */
@@ -3628,6 +3915,8 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 	if(nt_password_len > 0)
 	{
+		int padding_needed;
+
 		strlcpy(full_share,"//",sizeof(full_share));
 		strlcat(full_share,server->mount_data.server_name,sizeof(full_share));
 		strlcat(full_share,"/",sizeof(full_share));
@@ -3645,24 +3934,37 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 		D(("full_share = '%s'", escape_name(full_share)));
 
-		ASSERT( smb_payload_size(server, 4, password_len + full_share_len+1 + strlen(dev)+1) >= 0 );
+		if(server->unicode_enabled)
+			full_share_size = 2 * (full_share_len + 1);
+		else
+			full_share_size = full_share_len + 1;
 
-		smb_setup_header (server, SMBtconX, 4, password_len + full_share_len+1 + strlen(dev)+1);
+		if(server->unicode_enabled && (password_len % 2) == 0)
+			padding_needed = 1;
+		else
+			padding_needed = 0;
+
+		ASSERT( smb_payload_size(server, 4, password_len + padding_needed + full_share_size + strlen(dev)+1) >= 0 );
+
+		smb_setup_header (server, SMBtconX, 4, password_len + padding_needed + full_share_size + strlen(dev)+1);
 
 		WSET (packet, smb_vwv0, 0xFF);
 		WSET (packet, smb_vwv3, password_len);
 
 		p = SMB_BUF (packet);
 
-		if(nt_password_len > 0)
-			memcpy(p,password,password_len);
-		else
-			memcpy (p, server->mount_data.password, password_len);
-
+		memcpy(p,password,password_len);
 		p += password_len;
 
-		memcpy(p,full_share,full_share_len+1);
-		p += full_share_len+1;
+		if(padding_needed)
+			(*p++) = 0;
+
+		if(server->unicode_enabled)
+			copy_latin1_to_utf16le(p,full_share_size,full_share,full_share_len);
+		else
+			memcpy(p,full_share,full_share_size);
+
+		p += full_share_size;
 
 		strcpy(p,dev);
 

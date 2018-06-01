@@ -48,7 +48,7 @@ smba_connect (
 	int							max_transmit,
 	int							timeout,
 	int							opt_raw_smb,
-	const char *				opt_native_os,
+	int							opt_unicode,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
 	int *						smb_error_ptr,
@@ -82,8 +82,8 @@ smba_connect (
 	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
 	res->server.timeout = timeout;
 
-	/* olsen (2018-05-18): Override the "Native OS" name passed to the server. */
-	res->server.native_os = opt_native_os;
+	/* olsen (2018-06-01): Enable Unicode support if the server supports it. */
+	res->server.use_unicode = opt_unicode;
 
 	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
 	{
@@ -419,7 +419,10 @@ smba_close (smba_file_t * f, int * error_ptr)
 		{
 			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
 
-			smb_proc_close (&f->server->server, f->dirent.fileid, f->dirent.mtime, error_ptr);
+			/* Don't change the modification time unless the contents
+			 * of the file were changed.
+			 */
+			smb_proc_close (&f->server->server, f->dirent.fileid, f->modified ? f->dirent.mtime : 0, error_ptr);
 		}
 
 		if (f->dircache != NULL)
@@ -732,17 +735,19 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 
 	if (result < 0)
 		f->attr_time = 0;
-	else if (result > 0)
-		f->dirent.mtime = GetCurrentTime();
 
 	/* Even if one write access failed, we may have succeeded
 	 * at writing some data. Hence we update the cached file
-	 * size here.
+	 * size here and take note of the change made.
 	 */
 	if(num_bytes_written > 0)
 	{
 		QUAD size_quad;
 		QUAD new_position_quad;
+
+		/* This file was modified. */
+		f->dirent.mtime = GetCurrentTime();
+		f->modified = TRUE;
 
 		size_quad.Low	= f->dirent.size_low;
 		size_quad.High	= f->dirent.size_high;
@@ -923,6 +928,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * data, const QUAD * const size
 		if(result < 0)
 			goto out;
 
+		f->modified			= TRUE;
 		f->dirent.size_low	= size->Low;
 		f->dirent.size_high	= size->High;
 	}
@@ -1143,8 +1149,10 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 		if(result < 0)
 			goto out;
 
-		/* Close the file again, we don't really need it right now. */
-		smb_proc_close(&dir->server->server,entry.fileid,entry.mtime,&ignored_error);
+		/* Close the file again, we don't really need it right now.
+		 * Don't change the modification time.
+		 */
+		smb_proc_close(&dir->server->server,entry.fileid,0,&ignored_error);
 	}
 	else
 	{
@@ -1218,7 +1226,8 @@ close_path (smba_server_t * s, const char *path, int * error_ptr)
 		{
 			if (p->dirent.opened)
 			{
-				result = smb_proc_close (&s->server, p->dirent.fileid, p->dirent.mtime, error_ptr);
+				/* Don't change the modification time unless the file was modified. */
+				result = smb_proc_close (&s->server, p->dirent.fileid, p->modified ? p->dirent.mtime : 0, error_ptr);
 				if(result < 0)
 				{
 					LOG(("closing '%s' with file id %ld failed\n", escape_name(path), p->dirent.fileid));
@@ -1502,7 +1511,7 @@ smba_start(
 	int					opt_max_transmit,
 	int					opt_timeout,
 	int					opt_raw_smb,
-	const char *		opt_native_os,
+	int					opt_unicode,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,
@@ -1673,7 +1682,7 @@ smba_start(
 		opt_max_transmit,
 		opt_timeout,
 		opt_raw_smb,
-		opt_native_os,
+		opt_unicode,
 		error_ptr,
 		smb_error_class_ptr,
 		smb_error_ptr,

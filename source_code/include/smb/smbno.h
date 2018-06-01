@@ -339,6 +339,10 @@
 								 * and SMB_COM_READ_RAW requests.
 								 */
 
+#define CAP_UNICODE 0x00000004	/* The server supports UTF-16LE Unicode
+								 * strings.
+								 */
+
 #define CAP_LARGE_READX 0x00004000	/* The server permits SMB_COM_READ_ANDX
 									 * to read up to 65535 bytes.
 									 */
@@ -414,5 +418,25 @@
 #define SMB_OPEN_LOCALITY_MIXED				0x0300
 #define SMB_OPEN_CACHE_DISABLED				0x1000
 #define SMB_OPEN_WRITE_THROUGH_ENABLED		0x4000
+
+/* SMB header flags (which go into the "flags" field). */
+#define SMB_FLG_SERVER_TO_REDIR		0x80
+#define SMB_FLG_REQUEST_BATCH_OPLOCK	0x40
+#define SMB_FLG_REQUEST_OPLOCK		0x20
+#define SMB_FLG_CANONICAL_PATHNAMES	0x10
+#define SMB_FLG_CASELESS_PATHNAMES	0x08
+#define SMB_FLG_CLIENT_BUF_AVAIL		0x02
+#define SMB_FLG_SUPPORT_LOCKREAD		0x0
+
+/* More SMB header flags (which go into the "flags2" field). */
+#define SMB_FLG2_UNICODE_STRINGS	0x8000
+#define SMB_FLG2_32BIT_STATUS		0x4000
+#define SMB_FLG2_READ_IF_EXECUTE	0x2000
+#define SMB_FLG2_DFS_PATHNAME		0x1000
+#define SMB_FLG2_EXTENDED_SECURITY	0x0800
+#define SMB_FLG2_IS_LONG_NAME		0x0040
+#define SMB_FLG2_SECURITY_SIGNATURE	0x0004
+#define SMB_FLG2_EAS				0x0002
+#define SMB_FLG2_KNOWS_LONG_NAMES	0x0001
 
 #endif /* _SMBNO_H_ */
