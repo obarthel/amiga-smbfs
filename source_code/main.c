@@ -26,10 +26,10 @@
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
- * Fritz!Box: smbfs debuglevel=2 user=nas password=nas volume=fritz.nas //fritzbox-3272/fritz.nas
- * Samba 4.6.7: smbfs debuglevel=2 volume=ubuntu-test //ubuntu-17-olaf/test
- * Samba 4.7.6: smbfs debuglevel=2 volume=ubuntu-test //ubuntu-18-olaf/test
- * Samba 3.0.25: smbfs debuglevel=2 user=olsen password=... volume=olsen //192.168.1.118/olsen
+ * Fritz!Box: smbfs debuglevel=2 debugfile=ram:fritz.nas.log unicode user=nas password=nas volume=fritz.nas //fritzbox-3272/fritz.nas
+ * Samba 4.6.7: smbfs debuglevel=2 debugfile=ram:ubuntu-17.log volume=ubuntu-test //ubuntu-17-olaf/test
+ * Samba 4.7.6: smbfs debuglevel=2 debugfile=ram:ubuntu-18.log volume=ubuntu-test //ubuntu-18-olaf/test
+ * Samba 3.0.25: smbfs debuglevel=2 debugfile=ram:samba-3.0.25.log user=olsen password=... volume=olsen //192.168.1.118/olsen
  */
 
 #include "smbfs.h"
@@ -53,7 +53,7 @@
 /****************************************************************************/
 
 #include "smbfs_rev.h"
-STRPTR Version = VERSTAG;
+TEXT Version[] = VERSTAG;
 
 /****************************************************************************/
 
@@ -77,6 +77,8 @@ struct FileNode
 {
 	struct MinNode		fn_MinNode;
 
+	ULONG				fn_Magic;
+
 	struct FileHandle *	fn_Handle;
 
 	QUAD				fn_OffsetQuad;
@@ -89,6 +91,8 @@ struct FileNode
 struct LockNode
 {
 	struct MinNode			ln_MinNode;
+
+	ULONG					ln_Magic;
 
 	struct FileLock			ln_FileLock;
 
@@ -145,7 +149,7 @@ STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 STATIC LONG CVSPrintf(const TEXT * format_string, APTR args);
 STATIC VOID VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
 STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
+STATIC BOOL Setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_write_raw, BOOL opt_write_behind, BOOL opt_prefer_read_raw, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
 STATIC VOID HandleFileSystem(const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -547,20 +551,23 @@ main(VOID)
 		NUMBER	CacheSize;
 		NUMBER	MaxTransmit;
 		NUMBER	Timeout;
-		NUMBER	DebugLevel;
-		KEY		DebugFile;
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
 		SWITCH	NetBIOSTransport;
-		SWITCH	DumpSMB;
-		NUMBER	DumpSMBLevel;
-		KEY		DumpSMBFile;
+		SWITCH	PreferWriteRaw;
+		SWITCH	WriteBehind;
+		SWITCH	PreferReadRaw;
 		SWITCH	Unicode;
 		SWITCH	UTF8;
 		SWITCH	CP437;
 		SWITCH	CP850;
 		KEY		TranslationFile;
 		KEY		Service;
+		NUMBER	DebugLevel;
+		KEY		DebugFile;
+		SWITCH	DumpSMB;
+		NUMBER	DumpSMBLevel;
+		KEY		DumpSMBFile;
 	} args;
 
 	STRPTR cmd_template =
@@ -578,20 +585,23 @@ main(VOID)
 		"CACHE=CACHESIZE/N/K,"
 		"MAXTRANSMIT/N/K,"
 		"TIMEOUT/N/K,"
-		"DEBUGLEVEL=DEBUG/N/K,"
-		"DEBUGFILE/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
 		"NETBIOS/S,"
-		"DUMPSMB/S,"
-		"DUMPSMBLEVEL/N/K,"
-		"DUMPSMBFILE/K,"
+		"PREFERWRITERAW/S,"
+		"WRITEBEHIND/S,"
+		"PREFERREADRAW/S,"
 		"UNICODE/S,"
 		"UTF8/S,"
 		"CP437/S,"
 		"CP850/S,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
-		"SERVICE/A";
+		"SERVICE/A,"
+		"DEBUGLEVEL=DEBUG/N/K,"
+		"DEBUGFILE/K,"
+		"DUMPSMB/S,"
+		"DUMPSMBLEVEL/N/K,"
+		"DUMPSMBFILE/K";
 
 	BPTR debug_file = (BPTR)NULL;
 	BOOL close_debug_file = FALSE;
@@ -809,6 +819,15 @@ main(VOID)
 
 		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
 			args.NetBIOSTransport = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"PREFERWRITERAW") != NULL)
+			args.PreferWriteRaw = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"WRITEBEHIND") != NULL)
+			args.WriteBehind = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"PREFERREADRAW") != NULL)
+			args.PreferReadRaw = TRUE;
 
 		str = FindToolType(Icon->do_ToolTypes,"TRANSLATE");
 		if(str == NULL)
@@ -1093,6 +1112,9 @@ main(VOID)
 		args.DSTOffset,
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
 		args.Unicode,
+		args.PreferWriteRaw,
+		args.WriteBehind,
+		args.PreferReadRaw,
 		args.DeviceName,
 		args.VolumeName,
 		args.TranslationFile))
@@ -1127,10 +1149,16 @@ main(VOID)
 	}
 	#endif /* DUMP_SMB */
 
+	Cleanup();
+
 	if(close_debug_file && debug_file != (BPTR)NULL)
+	{
 		Close(debug_file);
 
-	Cleanup();
+		SETDEBUGFILE((BPTR)NULL);
+
+		SETDEBUGLEVEL(0);
+	}
 
 	return(result);
 }
@@ -2272,7 +2300,10 @@ MapErrnoToIoErr(int error)
 		{ -1,				-1 }
 	};
 
+	#if DEBUG
 	int original_error = error;
+	#endif /* DEBUG */
+
 	LONG result = ERROR_ACTION_NOT_KNOWN;
 	int i;
 
@@ -2397,16 +2428,25 @@ TranslateCName(TEXT * name,const TEXT * map)
 STATIC BOOL
 ReallyRemoveDosEntry(struct DosList * entry)
 {
+	struct DosPacket * dp;
 	struct Message * mn;
 	struct MsgPort * port;
 	struct DosList * dl;
 	BOOL result = FALSE;
 	int kind,i;
 
+	ENTER();
+
 	if(entry->dol_Type == DLT_DEVICE)
+	{
+		D(("removing '%b' (device)", entry->dol_Name));
 		kind = LDF_DEVICES;
+	}
 	else
+	{
+		D(("removing '%b' (volume)", entry->dol_Name));
 		kind = LDF_VOLUMES;
+	}
 
 	port = entry->dol_Task;
 
@@ -2418,6 +2458,8 @@ ReallyRemoveDosEntry(struct DosList * entry)
 
 		if(dl != NULL)
 		{
+			D(("doslist is locked; removing '%b' for good", entry->dol_Name));
+
 			RemDosEntry(entry);
 
 			UnLockDosList(LDF_WRITE|kind);
@@ -2428,11 +2470,21 @@ ReallyRemoveDosEntry(struct DosList * entry)
 		}
 
 		while((mn = GetMsg(port)) != NULL)
-			ReplyPkt((struct DosPacket *)mn->mn_Node.ln_Name,DOSFALSE,ERROR_ACTION_NOT_KNOWN);
+		{
+			SHOWMSG("returning pending packet");
+
+			dp = (struct DosPacket *)mn->mn_Node.ln_Name;
+
+			ReplyPkt(dp,(dp->dp_Action == ACTION_READ_LINK) ? -1 : DOSFALSE,ERROR_ACTION_NOT_KNOWN);
+		}
 
 		Delay(TICKS_PER_SECOND / 10);
 	}
 
+	if(NOT result)
+		SHOWMSG("that didn't work");
+
+	RETURN(result);
 	return(result);
 }
 
@@ -2479,8 +2531,17 @@ Cleanup(VOID)
 	{
 		if(DeviceNodeAdded)
 		{
+			SHOWMSG("removing the device node");
+
 			if(ReallyRemoveDosEntry(DeviceNode))
+			{
+				SHOWMSG("freeing the device node");
 				FreeDosEntry(DeviceNode);
+			}
+			else
+			{
+				SHOWMSG("that didn't work.");
+			}
 		}
 		else
 		{
@@ -2494,10 +2555,19 @@ Cleanup(VOID)
 	{
 		if(VolumeNodeAdded)
 		{
+			SHOWMSG("removing the volume node");
+
 			if(ReallyRemoveDosEntry(VolumeNode))
+			{
+				SHOWMSG("freeing the volume node");
 				FreeDosEntry(VolumeNode);
 
-			send_disk_change = TRUE;
+				send_disk_change = TRUE;
+			}
+			else
+			{
+				SHOWMSG("that didn't work.");
+			}
 		}
 		else
 		{
@@ -2509,18 +2579,32 @@ Cleanup(VOID)
 
 	if(FileSystemPort != NULL)
 	{
+		struct DosPacket * dp;
 		struct Message * mn;
+
+		SHOWMSG("returning all pending packets");
 
 		/* Return all queued packets; there should be none, though. */
 		while((mn = GetMsg(FileSystemPort)) != NULL)
-			ReplyPkt((struct DosPacket *)mn->mn_Node.ln_Name,DOSFALSE,ERROR_ACTION_NOT_KNOWN);
+		{
+			dp = (struct DosPacket *)mn->mn_Node.ln_Name;
+
+			ReplyPkt(dp,(dp->dp_Action == ACTION_READ_LINK) ? -1 : DOSFALSE,ERROR_ACTION_NOT_KNOWN);
+		}
+
+		SHOWMSG("done");
 
 		DeleteMsgPort(FileSystemPort);
 		FileSystemPort = NULL;
 	}
 
 	if(WBStartup == NULL && send_disk_change)
+	{
+		SHOWMSG("sending a disk removed event");
 		SendDiskChange(IECLASS_DISKREMOVED);
+	}
+
+	SHOWMSG("closing libraries and devices...");
 
 	#if defined(__amigaos4__)
 	{
@@ -2619,6 +2703,9 @@ Setup(
 	LONG *			opt_dst_offset,
 	BOOL			opt_raw_smb,
 	BOOL			opt_unicode,
+	BOOL			opt_prefer_write_raw,
+	BOOL			opt_write_behind,
+	BOOL			opt_prefer_read_raw, 
 	const TEXT *	device_name,
 	const TEXT *	volume_name,
 	const TEXT *	translation_file)
@@ -2795,6 +2882,9 @@ Setup(
 		opt_timeout,
 		opt_raw_smb,
 		opt_unicode,
+		opt_prefer_write_raw,
+		opt_write_behind,
+		opt_prefer_read_raw, 
 		&error,
 		&smb_error_class,
 		&smb_error,
@@ -3562,6 +3652,14 @@ Action_Parent(
 	{
 		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
 
+		if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
+
 		parent_name = parent_ln->ln_FullName;
 
 		parent_ln->ln_LastUser = user;
@@ -3594,6 +3692,7 @@ Action_Parent(
 	memset(ln,0,sizeof(*ln));
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
+	ln->ln_Magic				= ID_SMB_DISK;
 	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
@@ -3642,7 +3741,6 @@ Action_DeleteObject(
 	STRPTR full_parent_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
 	struct LockNode * ln;
-	int ignored_error;
 	smba_stat_t st;
 	int error;
 
@@ -3659,6 +3757,14 @@ Action_DeleteObject(
 	if(parent != NULL)
 	{
 		ln = (struct LockNode *)parent->fl_Key;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		parent_name = ln->ln_FullName;
 
@@ -3759,7 +3865,7 @@ Action_DeleteObject(
 		goto out;
 	}
 
-	smba_close(file,&ignored_error);
+	smba_close(ServerData,file);
 	file = NULL;
 
 	if(st.is_dir)
@@ -3830,7 +3936,7 @@ Action_DeleteObject(
  out:
 
 	if(file != NULL)
-		smba_close(file,&ignored_error);
+		smba_close(ServerData,file);
 
 	FreeMemory(full_name);
 	FreeMemory(full_parent_name);
@@ -3859,7 +3965,6 @@ Action_CreateDir(
 	smba_file_t * dir = NULL;
 	const TEXT * base_name;
 	TEXT name[MAX_FILENAME_LEN+1];
-	int ignored_error;
 	int error;
 	int i;
 
@@ -3876,6 +3981,14 @@ Action_CreateDir(
 	if(parent != NULL)
 	{
 		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
+
+		if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		parent_ln->ln_LastUser = user;
 
@@ -3975,6 +4088,7 @@ Action_CreateDir(
 	memset(ln,0,sizeof(*ln));
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
+	ln->ln_Magic				= ID_SMB_DISK;
 	ln->ln_FileLock.fl_Access	= EXCLUSIVE_LOCK;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
@@ -3995,7 +4109,7 @@ Action_CreateDir(
 		goto out;
 	}
 
-	smba_close(dir,&ignored_error);
+	smba_close(ServerData,dir);
 	dir = NULL;
 
 	D(("full_name = '%s'",escape_name(full_name)));
@@ -4016,7 +4130,7 @@ Action_CreateDir(
  out:
 
 	if(dir != NULL)
-		smba_close(dir,&ignored_error);
+		smba_close(ServerData,dir);
 
 	FreeMemory(dir_name);
 	FreeMemory(full_name);
@@ -4052,6 +4166,14 @@ Action_LocateObject(
 	if(parent != NULL)
 	{
 		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
+
+		if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		parent_ln->ln_LastUser = user;
 
@@ -4121,6 +4243,7 @@ Action_LocateObject(
 	memset(ln,0,sizeof(*ln));
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
+	ln->ln_Magic				= ID_SMB_DISK;
 	ln->ln_FileLock.fl_Access	= (mode != EXCLUSIVE_LOCK) ? SHARED_LOCK : EXCLUSIVE_LOCK;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
@@ -4197,6 +4320,14 @@ Action_CopyDir(
 	{
 		struct LockNode * source = (struct LockNode *)lock->fl_Key;
 
+		if(source == NULL || source->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
+
 		source->ln_LastUser = user;
 
 		source_name = source->ln_FullName;
@@ -4220,6 +4351,7 @@ Action_CopyDir(
 	memcpy(full_name,source_name,source_name_len+1);
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
+	ln->ln_Magic				= ID_SMB_DISK;
 	ln->ln_FileLock.fl_Access	= source_mode;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
@@ -4260,8 +4392,9 @@ Action_FreeLock(
 	LONG *				error_ptr)
 {
 	LONG result = DOSTRUE;
+	const struct LockNode * key;
+	struct LockNode * found;
 	struct LockNode * ln;
-	int ignored_error;
 	int error = OK;
 
 	ENTER();
@@ -4271,13 +4404,45 @@ Action_FreeLock(
 	if(lock == NULL)
 		goto out;
 
-	ln = (struct LockNode *)lock->fl_Key;
+	/* Make sure that no lock is released twice, and that we
+	 * know which locks are ours.
+	 */
+	found = NULL;
+	key = (struct LockNode *)lock->fl_Key;
 
-	Remove((struct Node *)ln);
+	if(key == NULL || key->ln_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("lock doesn't look right");
 
-	smba_close(ln->ln_File,&ignored_error);
-	FreeMemory(ln->ln_FullName);
-	FreeMemory(ln);
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
+	for(ln = (struct LockNode *)LockList.mlh_Head ;
+		ln->ln_MinNode.mln_Succ != NULL ; 
+		ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
+	{
+		if(ln == key)
+		{
+			found = ln;
+			break;
+		}
+	}
+
+	if(found == NULL)
+	{
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
+	Remove((struct Node *)found);
+
+	smba_close(ServerData,found->ln_File);
+
+	found->ln_Magic = 0;
+
+	FreeMemory(found->ln_FullName);
+	FreeMemory(found);
 
  out:
 
@@ -4310,6 +4475,14 @@ Action_SameLock(
 	{
 		struct LockNode * ln = (struct LockNode *)lock1->fl_Key;
 
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
+
 		ln->ln_LastUser = user;
 
 		name1 = ln->ln_FullName;
@@ -4322,6 +4495,14 @@ Action_SameLock(
 	if(lock2 != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)lock2->fl_Key;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		ln->ln_LastUser = user;
 
@@ -4337,6 +4518,8 @@ Action_SameLock(
 
 	if(Stricmp(name1,name2) == SAME)
 		result = DOSTRUE;
+
+ out:
 
 	(*error_ptr) = error;
 
@@ -4375,6 +4558,14 @@ Action_SetProtect(
 	if(parent != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		ln->ln_LastUser = user;
 
@@ -4468,11 +4659,7 @@ Action_SetProtect(
  out:
 
 	if(file != NULL)
-	{
-		int ignored_error;
-
-		smba_close(file, &ignored_error);
-	}
+		smba_close(ServerData,file);
 
 	FreeMemory(full_name);
 
@@ -4517,6 +4704,14 @@ Action_RenameObject(
 	if(source_lock != NULL)
 	{
 		ln = (struct LockNode *)source_lock->fl_Key;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		ln->ln_LastUser = user;
 
@@ -4571,6 +4766,14 @@ Action_RenameObject(
 	if(destination_lock != NULL)
 	{
 		ln = (struct LockNode *)destination_lock->fl_Key;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		ln->ln_LastUser = user;
 
@@ -4758,7 +4961,9 @@ Action_Info(
 	struct InfoData *		id,
 	LONG *					error_ptr)
 {
-	LONG result;
+	struct LockNode * ln;
+	LONG result = DOSFALSE;
+	LONG error = OK;
 
 	ENTER();
 
@@ -4771,20 +4976,27 @@ Action_Info(
 	{
 		SHOWMSG("volume node does not match");
 
-		result = DOSFALSE;
-
-		(*error_ptr) = ERROR_NO_DISK;
+		error = ERROR_NO_DISK;
+		goto out;
 	}
-	else
+
+	ln = (struct LockNode *)lock->fl_Key;
+
+	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
 	{
-		struct LockNode * ln;
+		SHOWMSG("lock doesn't look right");
 
-		ln = (struct LockNode *)lock->fl_Key;
-
-		ln->ln_LastUser = user;
-
-		result = Action_DiskInfo(id,error_ptr);
+		error = ERROR_INVALID_LOCK;
+		goto out;
 	}
+
+	ln->ln_LastUser = user;
+
+	result = Action_DiskInfo(id,error_ptr);
+
+ out:
+
+	(*error_ptr) = error;
 
 	RETURN(result);
 	return(result);
@@ -4833,6 +5045,14 @@ Action_ExamineObject(
 		struct LockNode * ln = (struct LockNode *)lock->fl_Key;
 		LONG seconds;
 		smba_stat_t st;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		ln->ln_LastUser = user;
 
@@ -5256,6 +5476,14 @@ Action_ExamineNext(
 	offset = fib->fib_DiskKey;
 
 	ln = (struct LockNode *)lock->fl_Key;
+
+	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("lock doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
 
 	ln->ln_LastUser = user;
 
@@ -5740,6 +5968,14 @@ Action_ExamineAll(
 
 	ln = (struct LockNode *)lock->fl_Key;
 
+	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("lock doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
 	ln->ln_LastUser = last_user;
 
 	/* Check if we should restart scanning the directory
@@ -5862,14 +6098,17 @@ Action_Find(
 	switch(action)
 	{
 		case ACTION_FINDINPUT:
+
 			D(("ACTION_FINDINPUT [Open(\"%b\",MODE_OLDFILE)]",MKBADDR(bcpl_name)));
 			break;
 
 		case ACTION_FINDOUTPUT:
+
 			D(("ACTION_FINDOUTPUT [Open(\"%b\",MODE_NEWFILE)]",MKBADDR(bcpl_name)));
 			break;
 
 		case ACTION_FINDUPDATE:
+
 			D(("ACTION_FINDUPDATE [Open(\"%b\",MODE_READWRITE)]",MKBADDR(bcpl_name)));
 			break;
 	}
@@ -5879,6 +6118,14 @@ Action_Find(
 	if(parent != NULL)
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
 
 		ln->ln_LastUser = user;
 
@@ -5946,6 +6193,7 @@ Action_Find(
 	memset(fn,0,sizeof(*fn));
 
 	fn->fn_Handle	= fh;
+	fn->fn_Magic	= ID_SMB_DISK;
 	fn->fn_FullName	= full_name;
 	fn->fn_Mode		= (action == ACTION_FINDOUTPUT) ? EXCLUSIVE_LOCK : SHARED_LOCK;
 
@@ -5991,7 +6239,7 @@ Action_Find(
 		}
 
 		if(file != NULL)
-			smba_close(file,&ignored_error);
+			smba_close(ServerData,file);
 	}
 	else
 	{
@@ -6003,7 +6251,6 @@ Action_Find(
 	/* Create a new file? */
 	if(create_new_file)
 	{
-		int ignored_error;
 		smba_file_t * dir;
 		int full_name_len;
 		STRPTR base_name;
@@ -6063,7 +6310,8 @@ Action_Find(
 			SHOWMSG("didn't work.");
 			SHOWVALUE(error);
 
-			smba_close(dir,&ignored_error);
+			smba_close(ServerData,dir);
+
 			error = MapErrnoToIoErr(error);
 
 			SHOWVALUE(error);
@@ -6073,7 +6321,7 @@ Action_Find(
 
 		SHOWMSG("good.");
 
-		smba_close(dir,&ignored_error);
+		smba_close(ServerData,dir);
 	}
 
 	/* Now for the remainder... */
@@ -6117,6 +6365,14 @@ Action_Read(
 
 	ENTER();
 
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
 	SHOWVALUE(length);
 
 	if(length > 0)
@@ -6155,6 +6411,14 @@ Action_Write(
 
 	ENTER();
 
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
 	if(WriteProtected)
 	{
 		error = ERROR_DISK_WRITE_PROTECTED;
@@ -6189,21 +6453,59 @@ Action_Write(
 
 STATIC LONG
 Action_End(
-	struct FileNode *	fn,
+	struct FileNode *	which_fn,
 	LONG *				error_ptr)
 {
-	int ignored_error;
+	LONG result = DOSFALSE;
+	struct FileNode * fn;
+	struct FileNode * found;
+	int error = OK;
 
-	Remove((struct Node *)fn);
+	if(which_fn == NULL || which_fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
 
-	smba_close(fn->fn_File,&ignored_error);
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
 
-	FreeMemory(fn->fn_FullName);
-	FreeMemory(fn);
+	found = NULL;
 
-	(*error_ptr) = OK;
+	for(fn = (struct FileNode *)FileList.mlh_Head ;
+	    fn->fn_MinNode.mln_Succ != NULL ;
+	    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
+	{
+		if(fn == which_fn)
+		{
+			found = fn;
+			break;
+		}
+	}
 
-	return(DOSTRUE);
+	if(found == NULL)
+	{
+		SHOWMSG("file not known");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
+	Remove((struct Node *)found);
+
+	smba_close(ServerData,found->fn_File);
+
+	found->fn_Magic = 0;
+
+	FreeMemory(found->fn_FullName);
+	FreeMemory(found);
+
+	result = DOSTRUE;
+
+ out:
+
+	(*error_ptr) = error;
+
+	return(result);
 }
 
 /****************************************************************************/
@@ -6215,7 +6517,7 @@ Action_Seek(
 	LONG				mode,
 	LONG *				error_ptr)
 {
-	QUAD previous_position_quad = fn->fn_OffsetQuad;
+	QUAD previous_position_quad;
 	QUAD reference_position_quad;
 	QUAD new_position_quad;
 	LONG result = -1;
@@ -6223,6 +6525,16 @@ Action_Seek(
 	int error;
 
 	ENTER();
+
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
+	previous_position_quad = fn->fn_OffsetQuad;
 
 	switch(mode)
 	{
@@ -6307,7 +6619,7 @@ Action_SetFileSize(
 	LONG				mode,
 	LONG *				error_ptr)
 {
-	QUAD previous_position_quad = fn->fn_OffsetQuad;
+	QUAD previous_position_quad;
 	QUAD reference_position_quad;
 	QUAD new_position_quad;
 	LONG result = -1;
@@ -6315,6 +6627,16 @@ Action_SetFileSize(
 	int error;
 
 	ENTER();
+
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
+	previous_position_quad = fn->fn_OffsetQuad;
 
 	switch(mode)
 	{
@@ -6433,6 +6755,14 @@ Action_SetDate(
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
 
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
+
 		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
@@ -6516,11 +6846,7 @@ Action_SetDate(
  out:
 
 	if(file != NULL)
-	{
-		int ignored_error;
-
-		smba_close(file,&ignored_error);
-	}
+		smba_close(ServerData,file);
 
 	FreeMemory(full_name);
 
@@ -6551,6 +6877,14 @@ Action_ExamineFH(
 	int i;
 
 	ENTER();
+
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
 
 	if(smba_getattr(fn->fn_File,&st,&error) < 0)
 	{
@@ -6690,11 +7024,19 @@ Action_ParentFH(
 	BPTR result = ZERO;
 	struct LockNode * ln = NULL;
 	int error;
-	STRPTR full_name;
+	STRPTR full_name = NULL;
 	int full_name_len;
 	int i;
 
 	ENTER();
+
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
 
 	full_name_len = strlen(fn->fn_FullName);
 	if(full_name_len < 2) /* Must be large enough to hold SMB_ROOT_DIR_NAME. */
@@ -6733,6 +7075,7 @@ Action_ParentFH(
 	memset(ln,0,sizeof(*ln));
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
+	ln->ln_Magic				= ID_SMB_DISK;
 	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
@@ -6780,6 +7123,14 @@ Action_CopyDirFH(
 
 	ENTER();
 
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
 	if(fn->fn_Mode != SHARED_LOCK)
 	{
 		error = ERROR_OBJECT_IN_USE;
@@ -6807,6 +7158,7 @@ Action_CopyDirFH(
 	memset(ln,0,sizeof(*ln));
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
+	ln->ln_Magic				= ID_SMB_DISK;
 	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
@@ -6856,6 +7208,16 @@ Action_FHFromLock(
 
 	SHOWVALUE(fl);
 
+	ln = (struct LockNode *)fl->fl_Key;
+
+	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("lock doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
 	fn = AllocateMemory(sizeof(*fn));
 	if(fn == NULL)
 	{
@@ -6865,14 +7227,14 @@ Action_FHFromLock(
 
 	memset(fn,0,sizeof(*fn));
 
-	ln = (struct LockNode *)fl->fl_Key;
-
 	fn->fn_Handle	= fh;
+	fn->fn_Magic	= ID_SMB_DISK;
 	fn->fn_FullName	= ln->ln_FullName;
 	fn->fn_File		= ln->ln_File;
 	fn->fn_Mode		= fl->fl_Access;
 
 	Remove((struct Node *)ln);
+	ln->ln_Magic = 0;
 	FreeMemory(ln);
 
 	fh->fh_Arg1 = (LONG)fn;
@@ -6991,7 +7353,17 @@ Action_ChangeMode(
 	if(type == CHANGE_LOCK)
 	{
 		fl = object;
+
 		ln = (struct LockNode *)fl->fl_Key;
+
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
+
 		name = ln->ln_FullName;
 		old_mode = fl->fl_Access;
 
@@ -7002,6 +7374,15 @@ Action_ChangeMode(
 		struct FileHandle * fh = object;
 
 		fn = (struct FileNode *)fh->fh_Arg1;
+
+		if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("file doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
+
 		name = fn->fn_FullName;
 		old_mode = fn->fn_Mode;
 	}
@@ -7187,6 +7568,14 @@ Action_SetComment(
 	{
 		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
 
+		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+		{
+			SHOWMSG("lock doesn't look right");
+
+			error = ERROR_INVALID_LOCK;
+			goto out;
+		}
+
 		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
@@ -7261,11 +7650,7 @@ Action_SetComment(
  out:
 
 	if(file != NULL)
-	{
-		int ignored_error;
-
-		smba_close(file, &ignored_error);
-	}
+		smba_close(ServerData,file);
 
 	FreeMemory(full_name);
 
@@ -7289,6 +7674,16 @@ Action_LockRecord (
 	LONG result = DOSFALSE;
 	int error;
 	LONG umode;
+
+	ENTER();
+
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
 
 	/* Sanity checks... */
 	if (mode < REC_EXCLUSIVE || mode > REC_SHARED_IMMED)
@@ -7347,6 +7742,16 @@ Action_FreeRecord (
 {
 	LONG result = DOSFALSE;
 	int error;
+
+	ENTER();
+
+	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
 
 	/* Sanity checks... */
 	if(offset < 0 || length <= 0 || offset + length < offset)

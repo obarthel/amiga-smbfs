@@ -1865,3 +1865,54 @@ smbfs 1.144 (1.6.2018)
   proper directory information, such as the Samba 3.0.37 version which
   is part of the FRITZ!Box firmware. Note that once Unicode support is
   enabled, the UTF8, CP437, CP850 and TRANSLATE options will be ignored.
+
+
+smbfs 1.145 (2.6.2018)
+
+- I broke renaming by mixing up the length of the new name with the
+  old name length. Fixed.
+
+- Renaming now also works on hidden files and system files, just like
+  deletion works on system files and hidden files, too. Keep in mind
+  that a file or directory which is not write-enabled cannot be
+  renamed (that's what the documentation says, anyway).
+
+- Plugged the SMB_COM_READ_RAW/SMB_COM_WRITE_RAW code back into the
+  file system. Added support for 64 bit file position information.
+
+
+smbfs 1.146 (3.6.2018)
+
+- Added extra sanity checks for file handles and file locks, which
+  should prevent files from getting closed twice, or locks from
+  getting freed twice. We also detect files and locks which smbfs
+  does not know and reject these before it's too late.
+
+- Dropped more unused code, e.g. in the cache invalidation function.
+
+- Instead of using local string buffers, we now allocate memory for
+  the buffers instead. This avoids truncating path/service names
+  if these would have become too long for the original local string
+  buffer to hold.
+
+- Added the options PREFERWRITERAW, PREFERREADRAW and WRITEBEHIND.
+  The first two will make smbfs use SMB_COM_WRITE_RAW over
+  SMB_COM_WRITE_ANDX and SMB_COM_READ_RAW over SMB_COM_READ_ANDX,
+  respectively. WRITEBEHIND activates somewhat asynchronous
+  SMB_COM_WRITE_RAW operations, but don't get your hopes up just
+  yet, as the effects are (so far) rather minor.
+
+  Careful about the PREFERWRITERAW/PREFERREADRAW switches: if the
+  server does not support these operations, smbfs will fall back
+  onto the original SMB_COM_WRITE and SMB_COM_READ commands which
+  cannot be used safely with files larger than 4 Gigabytes.
+
+- Changed the command template: the debug options are now at the
+  end of the list.
+
+- The use of the DEBUGFILE option would pretty reliably trigger
+  an Enforcer hit, followed by a system crash. Note to self:
+  don't leave dangling BPTRs behind.
+
+- If no modification time is provided for a directory entry,
+  the creation time will be substituted for it.

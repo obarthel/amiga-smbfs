@@ -1284,3 +1284,138 @@ smb_trans2_request (struct smb_server *server, int command, int *data_len, int *
 
 	return result;
 }
+
+int
+smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_len, int * error_ptr)
+{
+	unsigned char *buffer = server->transmit_buffer;
+	int sock_fd = server->mount_data.fd;
+	int len, result;
+
+	ASSERT( error_ptr != NULL );
+
+	if (server->state != CONN_VALID)
+	{
+		LOG (("Connection state is invalid\n"));
+
+		(*error_ptr) = error_server_connection_invalid;
+
+		result = -1;
+		goto out;
+	}
+
+	/* Length includes the NetBIOS session header (4 bytes), which
+	 * is prepended to the packet to be sent.
+	 */
+	len = NETBIOS_HEADER_SIZE + smb_len (buffer);
+
+	LOG (("len = %ld cmd = 0x%02lx\n", len, buffer[8]));
+	LOG (("target=%lx, max_len=%ld\n", (unsigned int) target, max_len));
+	LOG (("buffer=%lx, sock=%lx\n", (unsigned int) buffer, (unsigned int) sock_fd));
+
+	#if defined(DUMP_SMB)
+	dump_netbios_header(__FILE__,__LINE__,buffer,NULL,0);
+	dump_smb(__FILE__,__LINE__,0,buffer+NETBIOS_HEADER_SIZE,len-NETBIOS_HEADER_SIZE,smb_packet_from_consumer,server->max_recv);
+	#endif /* defined(DUMP_SMB) */
+
+	/* Request that data should be read in raw mode. */
+	result = send (sock_fd, (void *) buffer, len, 0);
+	if (result < 0)
+	{
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
+
+		(*error_ptr) = errno;
+
+		goto out;
+	}
+
+	/* Wait for the raw data to be sent by the server. */
+	result = smb_receive_raw (server, SMBreadbraw, sock_fd, target, max_len, NULL, 0, FALSE, error_ptr);
+
+ out:
+
+	if (result < 0)
+		smb_check_server_connection(server,(*error_ptr));
+
+	LOG (("result = %ld\n", result));
+
+	return result;
+}
+
+/* smb_request_write_raw assumes that the request SMBwriteBraw has been
+ * completed successfully, so that we can send the raw data now.
+ */
+int
+smb_request_write_raw (struct smb_server *server, unsigned const char *source, int length, int * error_ptr)
+{
+	byte nb_header[NETBIOS_HEADER_SIZE];
+	int sock_fd = server->mount_data.fd;
+	int result;
+
+	if (server->state != CONN_VALID)
+	{
+		LOG (("Connection state is invalid\n"));
+
+		(*error_ptr) = error_server_connection_invalid;
+
+		result = -1;
+		goto out;
+	}
+
+	ASSERT( length <= 65535 );
+
+	/* Send the NetBIOS header. */
+	smb_encode_smb_length (nb_header, length);
+
+	#if defined(DUMP_SMB)
+	dump_netbios_header(__FILE__,__LINE__,nb_header,NULL,0);
+	#endif /* defined(DUMP_SMB) */
+
+	result = send (sock_fd, nb_header, NETBIOS_HEADER_SIZE, 0);
+	if(result < 0)
+	{
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", NETBIOS_HEADER_SIZE, errno));
+
+		(*error_ptr) = errno;
+
+		goto out;
+	}
+
+	#if defined(DUMP_SMB)
+	dump_smb(__FILE__,__LINE__,0,source,length,smb_packet_from_consumer,server->max_recv);
+	#endif /* defined(DUMP_SMB) */
+
+	/* Now send the data to be written. */
+	result = send (sock_fd, (void *)source, length, 0);
+	if(result < 0)
+	{
+		LOG(("send() for %ld bytes failed (errno=%ld)\n", length, errno));
+
+		(*error_ptr) = errno;
+
+		goto out;
+	}
+
+	/* Wait for the server to respond. */
+	if(!server->write_behind)
+	{
+		result = smb_receive (server, SMBwritebraw, sock_fd, NULL, 0, error_ptr);
+		if(result < 0)
+			goto out;
+	}
+	else
+	{
+		LOG(("not waiting for server to respond\n"));
+	}
+
+	result = length;
+
+ out:
+
+	if (result < 0)
+		smb_check_server_connection(server,(*error_ptr));
+
+	LOG (("result = %ld\n", result));
+
+	return result;
+}

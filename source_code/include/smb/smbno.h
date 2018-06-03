@@ -5,14 +5,6 @@
 #ifndef _SMBNO_H_
 #define _SMBNO_H_
 
-/* these define the attribute byte as seen by DOS */
-#define aRONLY	(1L<<0)
-#define aHIDDEN	(1L<<1)
-#define aSYSTEM	(1L<<2)
-#define aVOLID	(1L<<3)
-#define aDIR	(1L<<4)
-#define aARCH	(1L<<5)
-
 /* error classes */
 #define SUCCESS	0		/* The request was successful. */
 #define ERRDOS	0x01	/* Error is from the core DOS operating system set. */
@@ -62,37 +54,37 @@
 
 /* Error codes for the ERRSRV class */
 
-#define ERRerror		1		/* Non specific error code */
-#define ERRbadpw		2		/* Bad password */
-#define ERRbadtype		3		/* reserved */
-#define ERRaccess		4		/* No permissions to do the requested operation */
-#define ERRinvnid		5		/* tid invalid */
-#define ERRinvnetname	6		/* Invalid servername */
-#define ERRinvdevice	7		/* Invalid device */
-#define ERRqfull		49		/* Print queue full */
-#define ERRqtoobig		50		/* Queued item too big */
-#define ERRqeof			51
-#define ERRinvpfid		52		/* Invalid print file in smb_fid */
-#define ERRsmbcmd		64		/* Unrecognised command */
-#define ERRsrverror		65		/* smb server internal error */
-#define ERRbadBID		66
-#define ERRfilespecs	67		/* fid and pathname invalid combination */
-#define ERRbadlink		68		/* reserved */
-#define ERRbadpermits	69		/* Access specified for a file is not valid */
-#define ERRbadpid		70		/* reserved */
-#define ERRsetattrmode	71		/* attribute mode invalid */
-#define ERRpaused		81		/* Message server paused */
-#define ERRmsgoff		82		/* Not receiving messages */
-#define ERRnoroom		83		/* No room for message */
-#define ERRrmuns		87		/* too many remote usernames */
-#define ERRtimeout		88		/* operation timed out */
-#define ERRnoresource	89		/* No resources currently available for request. */
-#define ERRtoomanyuids	90		/* too many userids */
-#define ERRbaduid		91		/* bad userid */
-#define ERRuseMPX		250		/* temporarily unable to use raw mode, use MPX mode */
-#define ERRuseSTD		251		/* temporarily unable to use raw mode, use std.mode */
-#define ERRcontMPX		252		/* resume MPX mode */
-#define ERRbadPW		254
+#define ERRerror			1		/* Non specific error code */
+#define ERRbadpw			2		/* Bad password */
+#define ERRbadtype			3		/* reserved */
+#define ERRaccess			4		/* No permissions to do the requested operation */
+#define ERRinvnid			5		/* tid invalid */
+#define ERRinvnetname		6		/* Invalid servername */
+#define ERRinvdevice		7		/* Invalid device */
+#define ERRqfull			49		/* Print queue full */
+#define ERRqtoobig			50		/* Queued item too big */
+#define ERRqeof				51
+#define ERRinvpfid			52		/* Invalid print file in smb_fid */
+#define ERRsmbcmd			64		/* Unrecognised command */
+#define ERRsrverror			65		/* smb server internal error */
+#define ERRbadBID			66
+#define ERRfilespecs		67		/* fid and pathname invalid combination */
+#define ERRbadlink			68		/* reserved */
+#define ERRbadpermits		69		/* Access specified for a file is not valid */
+#define ERRbadpid			70		/* reserved */
+#define ERRsetattrmode		71		/* attribute mode invalid */
+#define ERRpaused			81		/* Message server paused */
+#define ERRmsgoff			82		/* Not receiving messages */
+#define ERRnoroom			83		/* No room for message */
+#define ERRrmuns			87		/* too many remote usernames */
+#define ERRtimeout			88		/* operation timed out */
+#define ERRnoresource		89		/* No resources currently available for request. */
+#define ERRtoomanyuids		90		/* too many userids */
+#define ERRbaduid			91		/* bad userid */
+#define ERRuseMPX			250		/* temporarily unable to use raw mode, use MPX mode */
+#define ERRuseSTD			251		/* temporarily unable to use raw mode, use std.mode */
+#define ERRcontMPX			252		/* resume MPX mode */
+#define ERRbadPW			254
 #define ERRnotifyEnumDir	1024
 #define ERRaccountExpired	2239
 #define ERRbadClient		2240
@@ -420,13 +412,13 @@
 #define SMB_OPEN_WRITE_THROUGH_ENABLED		0x4000
 
 /* SMB header flags (which go into the "flags" field). */
-#define SMB_FLG_SERVER_TO_REDIR		0x80
+#define SMB_FLG_SERVER_TO_REDIR			0x80
 #define SMB_FLG_REQUEST_BATCH_OPLOCK	0x40
-#define SMB_FLG_REQUEST_OPLOCK		0x20
-#define SMB_FLG_CANONICAL_PATHNAMES	0x10
-#define SMB_FLG_CASELESS_PATHNAMES	0x08
+#define SMB_FLG_REQUEST_OPLOCK			0x20
+#define SMB_FLG_CANONICAL_PATHNAMES		0x10
+#define SMB_FLG_CASELESS_PATHNAMES		0x08
 #define SMB_FLG_CLIENT_BUF_AVAIL		0x02
-#define SMB_FLG_SUPPORT_LOCKREAD		0x0
+#define SMB_FLG_SUPPORT_LOCKREAD		0x01
 
 /* More SMB header flags (which go into the "flags2" field). */
 #define SMB_FLG2_UNICODE_STRINGS	0x8000

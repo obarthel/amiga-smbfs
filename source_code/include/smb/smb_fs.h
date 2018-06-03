@@ -79,6 +79,8 @@ int smb_proc_setattr_core(struct smb_server *server, const char *path, int len, 
 int smb_proc_setattrE(struct smb_server *server, word fid, struct smb_dirent *new_entry, int * error_ptr);
 int smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * error_ptr);
 int smb_proc_connect(struct smb_server *server, int * error_ptr);
+int smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, char *data, int * error_ptr);
+int smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, const char *data, int * error_ptr);
 
 /* sock.c */
 int smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_ptr);
@@ -87,5 +89,7 @@ void smb_release(struct smb_server *server);
 int smb_connect(struct smb_server *server, int * error_ptr);
 int smb_request(struct smb_server *server, int command, void * input_payload,const void * output_payload,int payload_size, int * error_ptr);
 int smb_trans2_request(struct smb_server *server, int command, int *data_len, int *param_len, char **data, char **param, int * error_ptr);
+int smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_len, int * error_ptr);
+int smb_request_write_raw (struct smb_server *server, unsigned const char *source, int length, int * error_ptr);
 
 #endif /* _SMB_FS_H_SMB_H */

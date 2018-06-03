@@ -49,6 +49,9 @@ smba_connect (
 	int							timeout,
 	int							opt_raw_smb,
 	int							opt_unicode,
+	int							opt_prefer_write_raw,
+	int							opt_write_behind,
+	int							opt_prefer_read_raw,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
 	int *						smb_error_ptr,
@@ -75,15 +78,24 @@ smba_connect (
 	memset (&data, 0, sizeof (data));
 	memset (hostname, 0, sizeof (hostname));
 
-	/* Olaf (2012-12-10): force raw SMB over TCP rather than NetBIOS. */
+	/* Use raw SMB over TCP rather than NetBIOS. */
 	if(opt_raw_smb)
 		res->server.raw_smb = TRUE;
 
-	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
+	/* Timeout for send/receive operations in seconds. */
 	res->server.timeout = timeout;
 
-	/* olsen (2018-06-01): Enable Unicode support if the server supports it. */
+	/* Enable Unicode support if the server supports it, too. */
 	res->server.use_unicode = opt_unicode;
+
+	/* Prefer SMB_COM_WRITE_RAW over SMB_COM_WRITE_ANDX? */
+	res->server.prefer_write_raw = opt_prefer_write_raw;
+
+	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
+	res->server.write_behind = opt_write_behind;
+
+	/* Prefer SMB_COM_READ_RAW over SMB_COM_READ_ANDX? */
+	res->server.prefer_read_raw = opt_prefer_read_raw;
 
 	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
 	{
@@ -97,6 +109,7 @@ smba_connect (
 
 	gethostname (hostname, MAXHOSTNAMELEN);
 
+	/* Only retain the host name, drop any domain names following it. */
 	if ((s = strchr (hostname, '.')) != NULL)
 		(*s) = '\0';
 
@@ -405,38 +418,59 @@ write_attr (smba_file_t * f, int * error_ptr)
 /*****************************************************************************/
 
 void
-smba_close (smba_file_t * f, int * error_ptr)
+smba_close (smba_server_t * s, smba_file_t * f)
 {
-	if(f != NULL)
+	smba_file_t * found;
+	smba_file_t * file;
+
+	found = NULL;
+
+	for(file = (smba_file_t *)s->open_files.mlh_Head ;
+	    file->node.mln_Succ != NULL ;
+	    file = (smba_file_t *)file->node.mln_Succ)
 	{
-		if(f->node.mln_Succ != NULL || f->node.mln_Pred != NULL)
-			Remove((struct Node *)f);
-
-		if(f->attr_dirty)
-			write_attr(f, error_ptr);
-
-		if (f->dirent.opened)
+		if(file == f)
 		{
-			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
+			found = f;
+			break;
+		}
+	}
+
+	if(found != NULL)
+	{
+		int ignored_error;
+
+		Remove((struct Node *)found);
+
+		if(found->attr_dirty)
+			write_attr(found, &ignored_error);
+
+		if (found->dirent.opened)
+		{
+			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(found->dirent.complete_path), found->dirent.fileid));
 
 			/* Don't change the modification time unless the contents
 			 * of the file were changed.
 			 */
-			smb_proc_close (&f->server->server, f->dirent.fileid, f->modified ? f->dirent.mtime : 0, error_ptr);
+			smb_proc_close (&found->server->server, found->dirent.fileid, found->modified ? found->dirent.mtime : 0, &ignored_error);
 		}
 
-		if (f->dircache != NULL)
+		if (found->dircache != NULL)
 		{
-			f->dircache->cache_for = NULL;
-			f->dircache->len = 0;
-			f->dircache = NULL;
+			found->dircache->cache_for = NULL;
+			found->dircache->len = 0;
+			found->dircache = NULL;
 		}
 
-		f->server->num_open_files--;
+		found->server->num_open_files--;
 		
-		LOG(("file closed, number of open files = %ld\n",f->server->num_open_files));
+		LOG(("file closed, number of open files = %ld\n",found->server->num_open_files));
 
-		free (f);
+		free (found);
+	}
+	else
+	{
+		LOG(("file seems to be invalid\n"));
 	}
 }
 
@@ -455,7 +489,8 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 
 	D(("read %ld bytes from offset %ld",len,offset));
 
-	if (f->server->server.protocol >= PROTOCOL_LANMAN1)
+	/* SMB_COM_READ_ANDX supported? */
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_read_raw)
 	{
 		QUAD position_quad = (*offset);
 		int max_readx_size;
@@ -516,6 +551,48 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 			}
 		}
 		while (len > 0);
+	}
+	/* SMB_COM_READ_RAW and SMB_COM_WRITE_RAW supported? */
+	else if ((f->server->server.capabilities & CAP_RAW_MODE) != 0)
+	{
+		int max_raw_size = f->server->server.max_raw_size;
+		QUAD position_quad = (*offset);
+		int n;
+
+		do
+		{
+			/* SMB_COM_READ_RAW can only read up to 65535 bytes. */
+			n = min(len, 65535);
+
+			/* The maximum number of bytes to be read in raw
+			 * mode may be limited, too.
+			 */
+			if(n > max_raw_size)
+				n = max_raw_size;
+
+			/* Limit how much data we are prepared to receive? */
+			if(n > max_receive)
+				n = max_receive;
+
+			result = smb_proc_read_raw (&f->server->server, &f->dirent, &position_quad, n, data, error_ptr);
+			if(result <= 0)
+			{
+				D(("!!! wanted to read %ld bytes, got %ld",n,result));
+				break;
+			}
+
+			num_bytes_read += result;
+			len -= result;
+			add_64_plus_32_to_64(&position_quad,result,&position_quad);
+			data += result;
+
+			if(result < n)
+			{
+				D(("read returned fewer characters than expected (%ld < %ld)",result,n));
+				break;
+			}
+		}
+		while(len > 0);
 	}
 	else
 	{
@@ -611,7 +688,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 	max_buffer_size = f->server->server.max_buffer_size;
 
 	/* SMB_COM_WRITE_ANDX supported? */
-	if (f->server->server.protocol >= PROTOCOL_LANMAN1)
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_write_raw)
 	{
 		QUAD position_quad = (*offset);
 		int max_writex_size;
@@ -664,6 +741,62 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 				goto out;
 
 			LOG(("number of bytes written = %ld\n", result));
+
+			data += result;
+			add_64_plus_32_to_64(&position_quad,result,&position_quad);
+			len -= result;
+			num_bytes_written += result;
+		}
+		while(len > 0);
+	}
+	else if ((f->server->server.capabilities & CAP_RAW_MODE) != 0)
+	{
+		int max_raw_size = f->server->server.max_raw_size;
+		int max_size_smb_com_write_raw;
+		QUAD position_quad = (*offset);
+		int n;
+
+		/* Try to send the maximum number of bytes with the two SMBwritebraw packets.
+		 * This is how it breaks down:
+		 *
+		 * The message header accounts for
+		 * 4(protocol)+1(command)+4(status)+1(flags)+2(flags2)+2(pidhigh)+
+		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
+		 * = 32 bytes
+		 *
+		 * The parameters of a SMB_COM_WRITE_RAW command account for
+		 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
+		 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+
+		 * 2(dataoffset) = 25 bytes
+		 *
+		 * The data part of a SMB_COM_WRITE_RAW command accounts for
+		 * 2(bytecount) = 2 bytes
+		 *
+		 * This leaves 'max_buffer_size' - 59 for the payload.
+		 */
+		/*max_size_smb_com_write_raw = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
+		max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 59;
+
+		/* SMB_COM_WRITE_RAW cannot transmit more than 65535 bytes. */
+		if(max_size_smb_com_write_raw > 65535)
+			max_size_smb_com_write_raw = 65535;
+
+		LOG (("len = %ld, max_size_smb_com_write_raw = %ld\n", len, max_size_smb_com_write_raw));
+
+		do
+		{
+			n = min(len, max_size_smb_com_write_raw);
+
+			ASSERT( n > 0 );
+
+			if(n > max_raw_size)
+				n = max_raw_size;
+
+			ASSERT( n <= 65535 );
+
+			result = smb_proc_write_raw (&f->server->server, &f->dirent, &position_quad, n, data, error_ptr);
+			if(result < 0)
+				goto out;
 
 			data += result;
 			add_64_plus_32_to_64(&position_quad,result,&position_quad);
@@ -1053,56 +1186,23 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int
 /*****************************************************************************/
 
 static void
-invalidate_dircache (struct smba_server * server, const char * path)
+invalidate_dircache (struct smba_server * server)
 {
 	dircache_t * dircache = server->dircache;
-	char other_path[SMB_MAXNAMELEN + 1];
 
 	ENTER();
-
-	if(path != NULL)
-	{
-		int len,i;
-
-		strlcpy(other_path,path,sizeof(other_path));
-
-		len = strlen(other_path);
-		for(i = len-1 ; i >= 0 ; i--)
-		{
-			if(i == 0)
-			{
-				other_path[0] = DOS_PATHSEP;
-				other_path[1] = '\0';
-			}
-			else if (other_path[i] == DOS_PATHSEP)
-			{
-				other_path[i] = '\0';
-				break;
-			}
-		}
-	}
-	else
-	{
-		other_path[0] = '\0';
-	}
-
-	D(("other_path = '%s'", escape_name(other_path)));
 
 	if(dircache->cache_for != NULL)
 		D(("dircache->cache_for->dirent.complete_path = '%s'", escape_name(dircache->cache_for->dirent.complete_path)));
 	else
 		SHOWMSG("-- directory cache is empty --");
 
-	if(path == NULL || (dircache->cache_for != NULL && CompareNames(other_path,dircache->cache_for->dirent.complete_path) == SAME))
-	{
-		SHOWMSG("clearing directory cache");
+	dircache->eof = dircache->len = dircache->base = 0;
 
-		dircache->eof = dircache->len = dircache->base = 0;
-		if(dircache->cache_for != NULL)
-		{
-			dircache->cache_for->dircache = NULL;
-			dircache->cache_for = NULL;
-		}
+	if(dircache->cache_for != NULL)
+	{
+		dircache->cache_for->dircache = NULL;
+		dircache->cache_for = NULL;
 	}
 
 	LEAVE();
@@ -1161,8 +1261,6 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 			goto out;
 	}
 
-	/* invalidate_dircache (dir->server, path); */
-
  out:
 
 	if(path != NULL)
@@ -1177,13 +1275,18 @@ int
 smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 {
 	char *path = NULL;
+	int path_len;
+	int name_len;
 	int result;
 
 	result = make_open (dir, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
-	path = malloc (strlen (name) + dir->dirent.len + 2);
+	name_len = strlen (name);
+	path_len = dir->dirent.len + 1 + name_len;
+
+	path = malloc (path_len + 1);
 	if(path == NULL)
 	{
 		(*error_ptr) = ENOMEM;
@@ -1194,13 +1297,12 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 
 	memcpy (path, dir->dirent.complete_path, dir->dirent.len);
 	path[dir->dirent.len] = DOS_PATHSEP;
-	strcpy (&path[dir->dirent.len + 1], name);
+	memcpy (&path[dir->dirent.len + 1], name, name_len);
+	path[path_len] = '\0';
 
-	result = smb_proc_mkdir (&dir->server->server, path, strlen (path), error_ptr);
+	result = smb_proc_mkdir (&dir->server->server, path, path_len, error_ptr);
 	if(result < 0)
 		goto out;
-
-	/* invalidate_dircache (dir->server, path); */
 
  out:
 
@@ -1259,8 +1361,6 @@ smba_remove (smba_server_t * s, const char *path, int * error_ptr)
 	if(result < 0)
 		goto out;
 
-	/* invalidate_dircache (s, path); */
-
  out:
 
 	return result;
@@ -1281,8 +1381,6 @@ smba_rmdir (smba_server_t * s, const char *path, int * error_ptr)
 	if(result < 0)
 		goto out;
 
-	/* invalidate_dircache (s, path); */
-
  out:
 
 	return result;
@@ -1302,8 +1400,6 @@ smba_rename (smba_server_t * s, const char *from, const char *to, int * error_pt
 	result = smb_proc_mv (&s->server, from, strlen (from), to, strlen (to), error_ptr);
 	if(result < 0)
 		goto out;
-
-	/* invalidate_dircache (s, from); */
 
  out:
 
@@ -1340,7 +1436,7 @@ smb_invalidate_all_inodes (struct smb_server *server)
 
 	ENTER();
 
-	invalidate_dircache (server->abstraction, NULL);
+	invalidate_dircache (server->abstraction);
 
 	for (f = (smba_file_t *)server->abstraction->open_files.mlh_Head;
 	     f->node.mln_Succ != NULL;
@@ -1512,6 +1608,9 @@ smba_start(
 	int					opt_timeout,
 	int					opt_raw_smb,
 	int					opt_unicode,
+	int					opt_prefer_write_raw,
+	int					opt_write_behind,
+	int					opt_prefer_read_raw,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,
@@ -1574,12 +1673,13 @@ smba_start(
 		}
 
 		/* Brian Willette: Now we will set the server name to the DNS
-		   hostname, hopefully this will be the same as the NetBIOS name for
-		   the server.
-		   We do this because the user supplied no hostname, and we
-		   need one for NetBIOS, this is the best guess choice we have
-		   NOTE: If the names are different between DNS and NetBIOS on
-		   the windows side, the user MUST use the -s option. */
+		 * hostname, hopefully this will be the same as the NetBIOS name for
+		 * the server.
+		 * We do this because the user supplied no hostname, and we
+		 * need one for NetBIOS, this is the best guess choice we have
+		 * NOTE: If the names are different between DNS and NetBIOS on
+		 * the windows side, the user MUST use the -s option.
+		 */
 		for (i = 0; h->h_name[i] != '.' && h->h_name[i] != '\0' && i < 255; i++)
 			hostName[i] = h->h_name[i];
 
@@ -1683,6 +1783,9 @@ smba_start(
 		opt_timeout,
 		opt_raw_smb,
 		opt_unicode,
+		opt_prefer_write_raw,
+		opt_write_behind,
+		opt_prefer_read_raw,
 		error_ptr,
 		smb_error_class_ptr,
 		smb_error_ptr,
@@ -1800,7 +1903,7 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 		}
 	}
 
-	invalidate_dircache(server, NULL);
+	invalidate_dircache(server);
 
 	free_dircache(old_dircache);
 
