@@ -608,7 +608,7 @@ main(VOID)
 	TEXT program_name[MAX_FILENAME_LEN+1];
 	LONG result = RETURN_FAIL;
 	LONG number;
-	LONG other_number;
+	LONG tz_number, dst_number;
 	LONG cache_size = 0;
 	LONG max_transmit = -1;
 	LONG timeout = 0;
@@ -808,13 +808,28 @@ main(VOID)
 
 		if(str != NULL)
 		{
-			if(StrToLong(str,&other_number) == -1)
+			if(StrToLong(str,&tz_number) == -1)
 			{
 				ReportError("Invalid number '%s' for 'TIMEZONEOFFSET' parameter.",str);
 				goto out;
 			}
 
-			args.TimeZoneOffset = &other_number;
+			args.TimeZoneOffset = &tz_number;
+		}
+
+		str = FindToolType(Icon->do_ToolTypes,"DST");
+		if(str == NULL)
+			str = FindToolType(Icon->do_ToolTypes,"DSTOFFSET");
+
+		if(str != NULL)
+		{
+			if(StrToLong(str,&dst_number) == -1)
+			{
+				ReportError("Invalid number '%s' for 'DSTOFFSET' parameter.",str);
+				goto out;
+			}
+
+			args.DSTOffset = &dst_number;
 		}
 
 		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
@@ -847,21 +862,6 @@ main(VOID)
 				args.CP437 = TRUE;
 			else if (FindToolType(Icon->do_ToolTypes,"CP850") != NULL)
 				args.CP850 = TRUE;
-		}
-
-		str = FindToolType(Icon->do_ToolTypes,"DST");
-		if(str == NULL)
-			str = FindToolType(Icon->do_ToolTypes,"DSTOFFSET");
-
-		if(str != NULL)
-		{
-			if(StrToLong(str,&other_number) == -1)
-			{
-				ReportError("Invalid number '%s' for 'DSTOFFSET' parameter.",str);
-				goto out;
-			}
-
-			args.DSTOffset = &other_number;
 		}
 
 		str = FindToolType(Icon->do_ToolTypes,"CACHE");
@@ -2714,6 +2714,7 @@ Setup(
 	struct DosList * dl;
 	int error = 0;
 	int smb_error_class = 0, smb_error = 0;
+	BOOL volume_name_is_sound;
 	const TEXT * actual_volume_name;
 	int actual_volume_name_len;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -2905,27 +2906,37 @@ Setup(
 	 */
 	if(device_name != NULL)
 	{
-		len = strlen(device_name);
-		if(len > 255)
-			len = 255;
+		BOOL device_name_is_sound;
 
-		for(i = 0 ; i < len ; i++)
+		len = strlen(device_name);
+
+		/* Lose the trailing ':' character, if any. */
+		if(len > 0 && device_name[len-1] == ':')
+			len--;
+
+		device_name_is_sound = TRUE;
+
+		if(len == 0 || len > 255)
 		{
-			if(device_name[i] == '/')
+			device_name_is_sound = FALSE;
+		}
+		else
+		{
+			int c;
+
+			for(i = 0 ; i < len ; i++)
 			{
-				ReportError("Device name '%s' cannot be used with AmigaDOS.",device_name);
-				goto out;
+				c = device_name[i];
+
+				if(c == '/' || c == ':' || (c < ' ' && c != '\t') || (128 <= c && c < 160))
+				{
+					device_name_is_sound = FALSE;
+					break;
+				}
 			}
 		}
 
-		/* Lose any trailing colon characters. */
-		for(i = len-1 ; i >= 0 ; i--)
-		{
-			if(device_name[i] == ':')
-				len = i;
-		}
-
-		if(len == 0)
+		if(NOT device_name_is_sound)
 		{
 			ReportError("Device name '%s' cannot be used with AmigaDOS.",device_name);
 			goto out;
@@ -2986,28 +2997,32 @@ Setup(
 		actual_volume_name = volume_name;
 
 	actual_volume_name_len = strlen(actual_volume_name);
-	if(actual_volume_name_len > 255)
-		actual_volume_name_len = 255;
+	if(actual_volume_name_len > 0 && actual_volume_name[actual_volume_name_len-1] == ':')
+		actual_volume_name_len--;
 
-	for(i = 0 ; i < actual_volume_name_len ; i++)
+	volume_name_is_sound = TRUE;
+
+	if(actual_volume_name_len == 0 || actual_volume_name_len > 255)
 	{
-		if(actual_volume_name[i] == '/')
-		{
-			UnLockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
+		volume_name_is_sound = FALSE;
+	}
+	else
+	{
+		int c;
 
-			ReportError("Volume name '%s' cannot be used with AmigaDOS.",actual_volume_name);
-			goto out;
+		for(i = 0 ; i < actual_volume_name_len ; i++)
+		{
+			c = actual_volume_name[i];
+
+			if(c == '/' || c == ':' || (c < ' ' && c != '\t') || (128 <= c && c < 160))
+			{
+				volume_name_is_sound = FALSE;
+				break;
+			}
 		}
 	}
 
-	/* Lose any trailing colon characters. */
-	for(i = actual_volume_name_len-1 ; i >= 0 ; i--)
-	{
-		if(actual_volume_name[i] == ':')
-			actual_volume_name_len = i;
-	}
-
-	if(actual_volume_name_len == 0)
+	if(NOT volume_name_is_sound)
 	{
 		UnLockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
 
@@ -3262,6 +3277,91 @@ ConvertCString(void * bstring,int max_len,const TEXT * cstring,int len)
 
 /****************************************************************************/
 
+/* Remove any double '\' in the path, which for AmigaDOS path name
+ * semantics would mean "move up one directory level", but which is
+ * either ambiguous or has no meaning for SMB and the file system
+ * layer it sits upon.
+ *
+ * Hence "foo\bar\\baz" becomes "foo\baz", "foo\\bar", becomes "bar",
+ * and "\foo" is not permitted and will result in an error.
+ */
+static int
+reduce_path_name(TEXT * name,int len,int * new_len_ptr)
+{
+	int error = ERROR_INVALID_COMPONENT_NAME;
+	int position;
+
+	ENTER();
+
+	ASSERT( name != NULL );
+
+	SHOWSTRING(name);
+
+	position = len;
+
+	while(len > 1)
+	{
+		position--;
+		if(position == 0)
+			break;
+
+		/* Do we have to remove the path component preceding
+		 * this separator character?
+		 */
+		if(position > 1 &&
+		   name[position] == SMB_PATH_SEPARATOR &&
+		   name[position - 1] == SMB_PATH_SEPARATOR &&
+		   name[position - 2] != SMB_PATH_SEPARATOR)
+		{
+			int start, component_len;
+
+			start = position;
+
+			position -= 2;
+
+			/* Find the position of the path component we
+			 * will have to remove.
+			 */
+			while(position > 0 && name[position] != SMB_PATH_SEPARATOR)
+				position--;
+
+			if(name[position] == SMB_PATH_SEPARATOR)
+				position++;
+
+			/* How many characters do we have to remove? */
+			component_len = start - position + 1;
+
+			/* Remove the path component from the path. */
+			memmove(&name[position],&name[position + component_len],len - (position + component_len));
+
+			len -= component_len;
+
+			position = len;
+		}
+	}
+
+	/* "\foo" is not permitted. */
+	if(len > 0 && name[0] == SMB_PATH_SEPARATOR)
+	{
+		D(("leading '%lc' not permitted", SMB_PATH_SEPARATOR));
+		goto out;
+	}
+
+	name[len] = '\0';
+
+	if(new_len_ptr != NULL)
+		(*new_len_ptr) = len;
+
+	error = OK;
+
+ out:
+
+	RETURN(error);
+	return(error);
+}
+
+/****************************************************************************/
+
 /* Build the fully qualified name of a file or directory in reference
  * to the name of the parent directory. This takes care of all the
  * special cases, such as the root directory. The result will be converted
@@ -3275,8 +3375,8 @@ ConvertCString(void * bstring,int max_len,const TEXT * cstring,int len)
  * failed, and ERROR_INVALID_COMPONENT_NAME if the combination of the
  * parent name and the name wound up referring to the root directory.
  */
-STATIC LONG
-BuildFullName(
+static int
+build_full_path_name(
 	const TEXT *	parent_name,
 	const TEXT *	name,
 	STRPTR *		result_ptr)
@@ -3284,9 +3384,9 @@ BuildFullName(
 	int error = OK;
 	int parent_name_len;
 	int name_len;
-	int buffer_len;
 	STRPTR buffer;
-	int len,size;
+	int size;
+	int len;
 	int i;
 
 	ENTER();
@@ -3300,17 +3400,24 @@ BuildFullName(
 
 	(*result_ptr) = NULL;
 
-	/* Throw everything left of the colon away. */
 	if(name != NULL)
 	{
 		name_len = strlen(name);
 
+		/* Throw everything left of the colon away. */
 		for(i = 0 ; i < name_len ; i++)
 		{
+			/* A colon character is permitted in
+			 * path components, but is not
+			 * necessarily useful...
+			 */
+			if(name[i] == '/')
+				break;
+
 			if(name[i] == ':')
 			{
-				name = &name[i+1];
-				name_len -= i + 1;
+				name = &name[i];
+				name_len -= i;
 
 				break;
 			}
@@ -3321,175 +3428,131 @@ BuildFullName(
 		name_len = 0;
 	}
 
-	/* Now, how much room is needed for the complete
-	 * path to fit into a buffer?
-	 */
-	len = 2;
-
 	if(parent_name != NULL)
 	{
-		/* Skip any excess delimiters. */
+		/* Skip any leading delimiters. */
 		while((*parent_name) == SMB_PATH_SEPARATOR)
 			parent_name++;
 
 		parent_name_len = strlen(parent_name);
 
-		len += 1 + parent_name_len;
+		/* Ignore any trailing delimiters. */
+		while(parent_name_len > 0 && parent_name[parent_name_len-1] == SMB_PATH_SEPARATOR)
+			parent_name_len--;
 	}
 	else
 	{
-		len += strlen(SMB_ROOT_DIR_NAME);
-
 		parent_name_len = 0;
 	}
 
-	if(name != NULL)
-		len += 1 + name_len;
-
-	size = len + 3;
-
-	buffer = AllocateMemory(size);
-	if(buffer == NULL)
+	/* Is the path to be added absolute? If so,
+	 * it will replace the parent name.
+	 */
+	if(name_len > 0 && (*name) == ':')
 	{
-		error = ERROR_NO_FREE_STORE;
-		goto out;
-	}
+		int c;
 
-	/* Start by filling in the path name. */
-	if(parent_name != NULL)
-	{
+		name++;
+		name_len--;
+
+		size = 1 + name_len + 1;
+
+		buffer = AllocateMemory(size);
+		if(buffer == NULL)
+		{
+			error = ERROR_NO_FREE_STORE;
+			goto out;
+		}
+
 		buffer[0] = SMB_PATH_SEPARATOR;
 
-		memcpy(&buffer[1],parent_name,parent_name_len);
+		/* Copy the name, replacing the path name
+		 * separator characters.
+		 */
+		for(i = 0 ; i < name_len ; i++)
+		{
+			c = name[i];
+			if(c == '/')
+				c = SMB_PATH_SEPARATOR;
 
-		buffer_len = 1 + parent_name_len;
+			buffer[1 + i] = c;
+		}
+
+		len = 1 + name_len;
 	}
+	/* Add the path name to the parent path. */
 	else
 	{
-		ASSERT( (int)strlen(SMB_ROOT_DIR_NAME) < size );
+		size = 1 + parent_name_len + 1 + name_len + 1;
 
-		strcpy(buffer,SMB_ROOT_DIR_NAME);
-
-		buffer_len = strlen(buffer);
-	}
-
-	/* If there's a name to add, do just that. */
-	if(name != NULL)
-	{
-		int segment_start;
-		int segment_len;
-
-		segment_start = 0;
-
-		while(TRUE)
+		buffer = AllocateMemory(size);
+		if(buffer == NULL)
 		{
-			segment_len = 0;
+			error = ERROR_NO_FREE_STORE;
+			goto out;
+		}
 
-			/* Extract the next path name segment. */
-			for(i = segment_start ; i <= name_len ; i++)
-			{
-				if(i == name_len)
-				{
-					segment_len = i - segment_start;
-					break;
-				}
-				else if (name[i] == '/')
-				{
-					segment_len = i - segment_start + 1;
-					break;
-				}
-			}
+		buffer[0] = SMB_PATH_SEPARATOR;
+		len = 1;
 
-			/* We're finished if there are no further
-			 * path name segments to take care of.
+		/* Add the parent path, if any. */
+		if(parent_name_len > 0)
+		{
+			memcpy(&buffer[len],parent_name,parent_name_len);
+			len += parent_name_len;
+		}
+
+		/* Add the path, if any. */
+		if(name_len > 0)
+		{
+			int c;
+
+			/* Add a path separator, if necessary. */
+			if(parent_name_len > 0)
+				buffer[len++] = SMB_PATH_SEPARATOR;
+
+			/* Copy the name, replacing the path name
+			 * separator characters.
 			 */
-			if(segment_len == 0)
+			for(i = 0 ; i < name_len ; i++)
 			{
-				buffer[buffer_len] = '\0';
-				break;
+				c = name[i];
+				if(c == '/')
+					c = SMB_PATH_SEPARATOR;
+
+				buffer[len+i] = c;
 			}
 
-			/* A single slash indicates that we need to move up
-			 * to the parent directory, if any.
-			 */
-			if(segment_len == 1 && name[segment_start] == '/')
-			{
-				/* Is this already the root directory name? */
-				if(buffer_len <= 1)
-				{
-					error = ERROR_INVALID_COMPONENT_NAME;
-					goto out;
-				}
-				else
-				{
-					/* Skip the last path component. */
-					for(i = 1 ; i <= buffer_len ; i++)
-					{
-						if(i == buffer_len)
-						{
-							/* We just skipped the first path
-							 * component following the root
-							 * directory name. We preserve
-							 * the first character since it
-							 * refers to the root directory.
-							 */
-							buffer_len = 1;
-							break;
-						}
-						else if (buffer[buffer_len-i] == SMB_PATH_SEPARATOR)
-						{
-							/* This removes both the path separator and
-							 * the name following it.
-							 */
-							buffer_len -= i;
-							break;
-						}
-					}
-				}
-			}
-			else
-			{
-				/* Add a proper separator character if
-				 * necessary.
-				 */
-				if(buffer_len > 0 && buffer[buffer_len-1] != SMB_PATH_SEPARATOR)
-				{
-					if(buffer_len+1 > size)
-					{
-						error = ERROR_NO_FREE_STORE;
-						goto out;
-					}
-
-					buffer[buffer_len++] = SMB_PATH_SEPARATOR;
-				}
-
-				/* Find out how many characters are in that name; this
-				 * excludes the terminating slash.
-				 */
-				if(name[segment_start + segment_len - 1] == '/')
-					len = segment_len - 1;
-				else
-					len = segment_len;
-
-				if(buffer_len+len+1 > size)
-				{
-					error = ERROR_NO_FREE_STORE;
-					goto out;
-				}
-
-				memcpy(&buffer[buffer_len],&name[segment_start],len);
-				buffer_len += len;
-			}
-
-			segment_start += segment_len;
+			len += name_len;
 		}
 	}
 
-	ASSERT( buffer_len < size );
+	ASSERT( len < size );
 
-	buffer[buffer_len] = '\0';
+	buffer[len] = '\0';
 
 	D(("buffer = '%s'",escape_name(buffer)));
+	SHOWVALUE(size);
+	SHOWVALUE(len);
+
+	/* Remove any double '\' in the path, which for AmigaDOS path name
+	 * semantics would mean "move up one directory level", but which is
+	 * either ambiguous or has no meaning for SMB and the file system
+	 * layer it sits upon.
+	 */
+	if(len > 1)
+	{
+		int new_len;
+
+		error = reduce_path_name(&buffer[1],len-1,&new_len);
+		if(error != OK)
+			goto out;
+
+		ASSERT( new_len <= len-1 );
+
+		if(new_len < len-1)
+			D(("reduced buffer = '%s'",escape_name(buffer)));
+	}
 
 	(*result_ptr) = buffer;
 	buffer = NULL;
@@ -3508,11 +3571,11 @@ BuildFullName(
  * last part of the name, e.g. translating "\foo" into "\" and "\foo\bar"
  * into "\foo". There is no parent for the root directory ("\").
  */
-STATIC LONG
-GetParentDirName(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
+static int
+get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 {
 	STRPTR parent_name = NULL;
-	LONG error;	int i;
+	int error;	int i;
 
 	ENTER();
 
@@ -3669,7 +3732,7 @@ Action_Parent(
 		parent_name = NULL;
 	}
 
-	error = BuildFullName(parent_name,"/",&full_name);
+	error = build_full_path_name(parent_name,"/",&full_name);
 	if(error != OK)
 	{
 		/* Check if we ended up having to return the parent of
@@ -3819,7 +3882,7 @@ Action_DeleteObject(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
 	{
 		/* Trying to delete the root directory, are you kidding? */
@@ -3847,7 +3910,7 @@ Action_DeleteObject(
 	 * in case the directory contents are currently being
 	 * examined, that process is restarted.
 	 */
-	error = GetParentDirName(full_name,strlen(full_name),&full_parent_name);
+	error = get_parent_dir_name(full_name,strlen(full_name),&full_parent_name);
 	if(error != OK)
 		goto out;
 
@@ -4030,7 +4093,7 @@ Action_CreateDir(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
 	{
 		/* Trying to overwrite the root directory, are you kidding? */
@@ -4221,14 +4284,14 @@ Action_LocateObject(
 		goto out;
 	}
 
-	error = BuildFullName(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
 	{
 		/* Trying to get a lock on the root directory's parent?
 		 * My pleasure.
 		 */
 		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = OK;
+			error = ERROR_OBJECT_NOT_FOUND;
 
 		goto out;
 	}
@@ -4607,7 +4670,7 @@ Action_SetProtect(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
 	{
 		/* Trying to change the protection bits of the root
@@ -4753,7 +4816,7 @@ Action_RenameObject(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_source_name);
+	error = build_full_path_name(parent_name,name,&full_source_name);
 	if(error != OK)
 	{
 		/* Trying to rename the root directory, are you kidding? */
@@ -4815,7 +4878,7 @@ Action_RenameObject(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_destination_name);
+	error = build_full_path_name(parent_name,name,&full_destination_name);
 	if(error != OK)
 	{
 		/* Trying to rename the root directory, are you kidding? */
@@ -4846,8 +4909,8 @@ Action_RenameObject(
 		goto out;
 	}
 
-	GetParentDirName(full_source_name,strlen(full_source_name),&parent_source_name);
-	GetParentDirName(full_destination_name,strlen(full_destination_name),&parent_destination_name);
+	get_parent_dir_name(full_source_name,strlen(full_source_name),&parent_source_name);
+	get_parent_dir_name(full_destination_name,strlen(full_destination_name),&parent_destination_name);
 
 	/* Restart directory scanning in the source directory from which
 	 * the entry was removed unless entry just changed name, but did
@@ -6173,7 +6236,7 @@ Action_Find(
 		goto out;
 	}
 
-	error = BuildFullName(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
 	{
 		/* Trying to open the root directory? */
@@ -6803,7 +6866,7 @@ Action_SetDate(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
 	{
 		/* Trying to change the date of the root directory? */
@@ -7616,7 +7679,7 @@ Action_SetComment(
 		}
 	}
 
-	error = BuildFullName(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
 	{
 		/* Trying to change the comment of the root directory? */

@@ -33,6 +33,10 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+#if defined(__amigaos4__)
+#include <dos/obsolete.h>
+#endif /* __amigaos4__ */
+
 #include <string.h>
 
 /****************************************************************************/
@@ -236,9 +240,14 @@ _SHOWVALUE(
 		}
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf("\n");
+		}
 		else
+		{
 			FPrintf(debug_file,"\n");
+			Flush(debug_file);
+		}
 	}
 }
 
@@ -263,9 +272,14 @@ _SHOWPOINTER(
 			fmt = "%s:%ld:%s = NULL\n";
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf(fmt,file,line,name,pointer);
+		}
 		else
+		{
 			FPrintf(debug_file,fmt,file,line,name,pointer);
+			Flush(debug_file);
+		}
 	}
 }
 
@@ -283,9 +297,14 @@ _SHOWSTRING(
 		_INDENT();
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf("%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+		}
 		else
+		{
 			FPrintf(debug_file,"%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+			Flush(debug_file);
+		}
 	}
 }
 
@@ -302,9 +321,14 @@ _SHOWMSG(
 		_INDENT();
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf("%s:%ld:%s\n",file,line,string);
+		}
 		else
+		{
 			FPrintf(debug_file,"%s:%ld:%s\n",file,line,string);
+			Flush(debug_file);
+		}
 	}
 }
 
@@ -369,9 +393,14 @@ _DPRINTF(const char *fmt,...)
 		va_end(args);
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf("\n");
+		}
 		else
+		{
 			FPrintf(debug_file,"\n");
+			Flush(debug_file);
+		}
 	}
 }
 
@@ -385,9 +414,14 @@ _DLOG(const char *fmt,...)
 		va_start(args,fmt);
 
 		if(debug_file == (BPTR)NULL)
+		{
 			RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
+		}
 		else
+		{
 			VFPrintf(debug_file,fmt,args);
+			Flush(debug_file);
+		}
 
 		va_end(args);
 	}
@@ -406,9 +440,14 @@ _ENTER(
 		_INDENT();
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf("%s:%ld:Entering %s\n",file,line,function);
+		}
 		else
+		{
 			FPrintf(debug_file,"%s:%ld:Entering %s\n",file,line,function);
+			Flush(debug_file);
+		}
 	}
 
 	indent_level++;
@@ -427,9 +466,14 @@ _LEAVE(
 		_INDENT();
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf("%s:%ld: Leaving %s\n",file,line,function);
+		}
 		else
+		{
 			FPrintf(debug_file,"%s:%ld: Leaving %s\n",file,line,function);
+			Flush(debug_file);
+		}
 	}
 }
 
@@ -447,9 +491,14 @@ _RETURN(
 		_INDENT();
 
 		if(debug_file == (BPTR)NULL)
+		{
 			kprintf("%s:%ld: Leaving %s (result 0x%08lx, %ld)\n",file,line,function,result,result);
+		}
 		else
+		{
 			FPrintf(debug_file,"%s:%ld: Leaving %s (result 0x%08lx, %ld)\n",file,line,function,result,result);
+			Flush(debug_file);
+		}
 	}
 }
 
@@ -531,6 +580,8 @@ _ASSERT(
 				        line,
 				        xs,
 				        function);
+
+				Flush(debug_file);
 			}
 		}
 	}

@@ -1916,3 +1916,16 @@ smbfs 1.146 (3.6.2018)
 
 - If no modification time is provided for a directory entry,
   the creation time will be substituted for it.
+
+
+smbfs 1.147 (5.6.2018)
+
+- When processing the icon tool types, the values given for
+  TZ/TIMEZONEOFFSET and DST/DSTOFFSET would override each other.
+  Fixed.
+
+- Path names which carry meaning within the AmigaDOS semantics (e.g.
+  "dev:foo/bar//baz", which is the same as "dev:foo/baz") but do not
+  necessarily have the same meaning or any meaning at all within SMB
+  path names are now preprocessed so that they always come out as the
+  proper absolute SMB path names required.
