@@ -135,16 +135,16 @@ extern int h_errno;
 /****************************************************************************/
 
 extern int BroadcastNameQuery(const char *name, const char *scope, UBYTE *address);
-extern LONG CompareNames(const TEXT * a,const TEXT * b);
-extern LONG GetTimeZoneDelta(VOID);
+extern LONG compare_names(const TEXT * a,const TEXT * b);
+extern LONG get_time_zone_delta(void);
 extern STRPTR posix_strerror(int error);
 extern STRPTR host_strerror(int error);
-extern time_t MakeTime(const struct tm * const tm);
-extern ULONG GetCurrentTime(VOID);
-extern VOID GMTime(time_t seconds,struct tm * tm);
-extern VOID VARARGS68K ReportError(const TEXT * fmt,...);
-extern VOID StringToUpper(STRPTR s);
-extern VOID VARARGS68K SPrintf(STRPTR buffer, const TEXT * formatString,...);
+extern time_t tm_to_seconds(const struct tm * const tm);
+extern ULONG get_current_time(void);
+extern void seconds_to_tm(time_t seconds,struct tm * tm);
+extern void VARARGS68K report_error(const TEXT * fmt,...);
+extern void string_toupper(STRPTR s);
+extern void VARARGS68K SPrintf(STRPTR buffer, const TEXT * formatString,...);
 extern TEXT * escape_name(const TEXT * name);
 extern const char * convert_quad_to_string(const QUAD * const number);
 
@@ -160,11 +160,11 @@ extern void smb_nt_encrypt(unsigned char *passwd, unsigned char *c8, unsigned ch
 
 /****************************************************************************/
 
-extern VOID FreeMemory(APTR address);
-extern APTR AllocateMemory(LONG size);
+extern void free_memory(APTR address);
+extern APTR allocate_memory(LONG size);
 
-#define malloc(s) AllocateMemory(s)
-#define free(m) FreeMemory(m)
+#define malloc(s) allocate_memory(s)
+#define free(m) free_memory(m)
 
 /****************************************************************************/
 

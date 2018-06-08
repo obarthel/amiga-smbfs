@@ -68,7 +68,7 @@ static ULONG mulhu (ULONG u, ULONG v)
 }
 
 /* Multiply two 32 bit numbers, yielding a 64 bit result value. */
-VOID
+void
 multiply_32_by_32_to_64(ULONG ab,ULONG cd,QUAD * product)
 {
 	product->High	= mulhu(ab,cd);

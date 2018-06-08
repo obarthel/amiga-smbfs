@@ -533,15 +533,16 @@ smb_name_mangle (byte * p, const byte * name)
 }
 
 /* According to the core protocol documentation times are
-   expressed as seconds past January 1st, 1970, local
-   time zone. */
+ * expressed as seconds past January 1st, 1970, local
+ * time zone.
+ */
 static INLINE int
 utc2local (int time_value)
 {
 	int result;
 
 	if(time_value > 0)
-		result = time_value - GetTimeZoneDelta();
+		result = time_value - get_time_zone_delta();
 	else
 		result = time_value;
 
@@ -554,7 +555,7 @@ local2utc (int time_value)
 	int result;
 
 	if(time_value > 0)
-		result = time_value + GetTimeZoneDelta();
+		result = time_value + get_time_zone_delta();
 	else
 		result = time_value;
 
@@ -577,7 +578,7 @@ date_dos2unix (unsigned short time_value, unsigned short date)
 	tm.tm_mon = ((date >> 5) & 0xF) - 1;
 	tm.tm_year = ((date >> 9) & 0x7F) + 80;
 
-	seconds = MakeTime(&tm);
+	seconds = tm_to_seconds(&tm);
 
 	return(seconds);
 }
@@ -588,7 +589,7 @@ date_unix2dos (int unix_date, unsigned short *time_value, unsigned short *date)
 {
 	struct tm tm;
 
-	GMTime(unix_date,&tm);
+	seconds_to_tm(unix_date,&tm);
 
 	(*time_value) = (tm.tm_hour << 11) | (tm.tm_min << 5) | (tm.tm_sec / 2);
 	(*date) = ((tm.tm_year - 80) << 9) | ((tm.tm_mon + 1) << 5) | tm.tm_mday;
@@ -2256,7 +2257,7 @@ smb_decode_dirent (const char *p, struct smb_dirent *entry)
 	{
 		struct tm tm;
 
-		GMTime(entry->mtime,&tm);
+		seconds_to_tm(entry->mtime,&tm);
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 	}
 	#endif /* DEBUG */
@@ -3131,7 +3132,7 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	{
 		struct tm tm;
 
-		GMTime(entry->mtime,&tm);
+		seconds_to_tm(entry->mtime,&tm);
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 	}
 	#endif /* DEBUG */
@@ -3273,7 +3274,7 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 		entry_size_quad.Low		= entry->size_low;
 		entry_size_quad.High	= entry->size_high;
 
-		GMTime(entry->mtime,&tm);
+		seconds_to_tm(entry->mtime,&tm);
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 		LOG(("size = %s (0x%08lx:0x%08lx)\n",convert_quad_to_string(&entry_size_quad),entry->size_high,entry->size_low));
 		LOG(("attr = 0x%08lx\n",entry->attr));
@@ -3321,16 +3322,16 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry, int * er
 	{
 		struct tm tm;
 
-		GMTime(entry->ctime,&tm);
+		seconds_to_tm(entry->ctime,&tm);
 		LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-		GMTime(entry->atime,&tm);
+		seconds_to_tm(entry->atime,&tm);
 		LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-		GMTime(entry->mtime,&tm);
+		seconds_to_tm(entry->mtime,&tm);
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 
-		GMTime(entry->wtime,&tm);
+		seconds_to_tm(entry->wtime,&tm);
 		LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 	}
 	#endif /* DEBUG */
@@ -4167,7 +4168,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 				share_name[i] = '\\';
 		}
 
-		StringToUpper(share_name);
+		string_toupper(share_name);
 
 		D(("share_name = '%s'", escape_name(share_name)));
 
@@ -4348,7 +4349,7 @@ smb_printerr (int class, int num)
 
 		if (!err_classes[i].err_msgs)
 		{
-			ReportError("%s - %ld.", err_classes[i].class, num);
+			report_error("%s - %ld.", err_classes[i].class, num);
 
 			LOG (("%s - %ld\n", err_classes[i].class, num));
 			return;
@@ -4361,14 +4362,14 @@ smb_printerr (int class, int num)
 			if (num != err[j].code)
 				continue;
 
-			ReportError ("%s - %s (%s).", err_classes[i].class, err[j].name, err[j].message);
+			report_error ("%s - %s (%s).", err_classes[i].class, err[j].name, err[j].message);
 
 			LOG (("%s - %s (%s)\n",err_classes[i].class, err[j].name,err[j].message));
 			return;
 		}
 	}
 
-	ReportError ("Unknown error - (%ld, %ld).", class, num);
+	report_error ("Unknown error - (%ld, %ld).", class, num);
 
 	LOG (("Unknown error - (%ld, %ld)\n", class, num));
 }

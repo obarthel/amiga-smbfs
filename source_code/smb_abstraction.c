@@ -68,7 +68,7 @@ smba_connect (
 	res = malloc (sizeof(*res));
 	if(res == NULL)
 	{
-		ReportError("Not enough memory.");
+		report_error("Not enough memory.");
 
 		(*error_ptr) = ENOMEM;
 		goto error_occured;
@@ -99,7 +99,7 @@ smba_connect (
 
 	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
 	{
-		ReportError("Directory cache initialization failed (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
+		report_error("Directory cache initialization failed (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
 		goto error_occured;
 	}
 
@@ -136,14 +136,14 @@ smba_connect (
 	data.fd = socket (AF_INET, SOCK_STREAM, 0);
 	if (data.fd < 0)
 	{
-		ReportError("socket() call failed (%ld, %s).", errno, posix_strerror(errno));
+		report_error("socket() call failed (%ld, %s).", errno, posix_strerror(errno));
 
 		(*error_ptr) = errno;
 		goto error_occured;
 	}
 
 	strlcpy (data.service, p->service, sizeof(data.service));
-	StringToUpper (data.service);
+	string_toupper (data.service);
 	strlcpy (data.username, p->username, sizeof(data.username));
 	strlcpy (data.password, p->password, sizeof(data.password));
 
@@ -156,7 +156,7 @@ smba_connect (
 	{
 		if (!res->server.raw_smb && strlen (p->server_ipname) > 16)
 		{
-			ReportError("Server name '%s' is too long for NetBIOS (max %ld characters).",p->server_ipname,16);
+			report_error("Server name '%s' is too long for NetBIOS (max %ld characters).",p->server_ipname,16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto error_occured;
@@ -165,20 +165,20 @@ smba_connect (
 		strlcpy (data.server_name, p->server_ipname, sizeof(data.server_name));
 	}
 
-	StringToUpper (data.server_name);
+	string_toupper (data.server_name);
 
 	if (data.client_name[0] == '\0')
 	{
 		if (!res->server.raw_smb && strlen (hostname) > 16)
 		{
-			ReportError("Local host name '%s' is too long for NetBIOS (max %ld characters).", hostname, 16);
+			report_error("Local host name '%s' is too long for NetBIOS (max %ld characters).", hostname, 16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto error_occured;
 		}
 
 		strlcpy (data.client_name, hostname, sizeof(data.client_name));
-		StringToUpper (data.client_name);
+		string_toupper (data.client_name);
 	}
 
 	res->server.mount_data = data;
@@ -233,7 +233,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 
 	if (!f->is_valid || (need_fid && !f->dirent.opened))
 	{
-		ULONG now = GetCurrentTime();
+		ULONG now = get_current_time();
 
 		s = f->server;
 
@@ -312,7 +312,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 			}
 		}
 
-		f->attr_time	= GetCurrentTime();
+		f->attr_time	= get_current_time();
 		f->is_valid		= TRUE;
 	}
 
@@ -879,7 +879,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		QUAD new_position_quad;
 
 		/* This file was modified. */
-		f->dirent.mtime = GetCurrentTime();
+		f->dirent.mtime = get_current_time();
 		f->modified = TRUE;
 
 		size_quad.Low	= f->dirent.size_low;
@@ -947,7 +947,7 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 	if (result < 0)
 		goto out;
 
-	now = GetCurrentTime();
+	now = get_current_time();
 
 	if (f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 	{
@@ -1086,7 +1086,7 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int
 	if (result < 0)
 		goto out;
 
-	now = GetCurrentTime();
+	now = get_current_time();
 
 	if (f->dircache == NULL) /* get a cache */
 	{
@@ -1224,7 +1224,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 
 	memset (&entry, 0, sizeof (entry));
 
-	entry.atime = entry.mtime = entry.ctime = GetCurrentTime();
+	entry.atime = entry.mtime = entry.ctime = get_current_time();
 
 	len = strlen(name);
 
@@ -1324,7 +1324,7 @@ close_path (smba_server_t * s, const char *path, int * error_ptr)
 	     p->node.mln_Succ != NULL;
 	     p = (smba_file_t *)p->node.mln_Succ)
 	{
-		if (p->is_valid && CompareNames(p->dirent.complete_path, path) == SAME)
+		if (p->is_valid && compare_names(p->dirent.complete_path, path) == SAME)
 		{
 			if (p->dirent.opened)
 			{
@@ -1535,7 +1535,7 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 	service_copy = malloc(strlen(service)+1);
 	if(service_copy == NULL)
 	{
-		ReportError("Not enough memory.");
+		report_error("Not enough memory.");
 
 		(*error_ptr) = ENOMEM;
 
@@ -1547,7 +1547,7 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 
 	if (strlen (complete_service) < 4 || complete_service[0] != '/')
 	{
-		ReportError("Invalid service name '%s'.",complete_service);
+		report_error("Invalid service name '%s'.",complete_service);
 
 		(*error_ptr) = EINVAL;
 
@@ -1560,7 +1560,7 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 	share_start = strchr (complete_service, '/');
 	if (share_start == NULL)
 	{
-		ReportError("Invalid share name '%s'.",complete_service);
+		report_error("Invalid share name '%s'.",complete_service);
 
 		(*error_ptr) = EINVAL;
 
@@ -1575,7 +1575,7 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 
 	if ((strlen (complete_service) > 63) || (strlen (share_start) > 63))
 	{
-		ReportError("Server or share name is too long in '%s' (max %ld characters).",service,63);
+		report_error("Server or share name is too long in '%s' (max %ld characters).",service,63);
 
 		(*error_ptr) = ENAMETOOLONG;
 
@@ -1653,7 +1653,7 @@ smba_start(
 		}
 		else if (strlen(server) >= 16 || BroadcastNameQuery(server,"",(UBYTE *)&ipAddr) != 0)
 		{
-			ReportError("Unknown host '%s' (%ld, %s).",server,lookup_error,host_strerror(lookup_error));
+			report_error("Unknown host '%s' (%ld, %s).",server,lookup_error,host_strerror(lookup_error));
 
 			(*error_ptr) = ENOENT;
 			goto out;
@@ -1666,7 +1666,7 @@ smba_start(
 		h = gethostbyaddr ((char *) &ipAddr, sizeof (ipAddr), AF_INET);
 		if (h == NULL)
 		{
-			ReportError("Unknown host '%s' (%ld, %s).",server,h_errno,host_strerror(errno));
+			report_error("Unknown host '%s' (%ld, %s).",server,h_errno,host_strerror(errno));
 
 			(*error_ptr) = ENOENT;
 			goto out;
@@ -1688,7 +1688,7 @@ smba_start(
 		/* Make sure the hostname is 16 characters or less (for NetBIOS) */
 		if (!opt_raw_smb && strlen (hostName) > 16)
 		{
-			ReportError("Server host name '%s' is too long (max %ld characters).", hostName, 16);
+			report_error("Server host name '%s' is too long (max %ld characters).", hostName, 16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;
@@ -1701,7 +1701,7 @@ smba_start(
 	{
 		if(strlen(opt_password) >= sizeof(password))
 		{
-			ReportError("Password is too long (max %ld characters).", sizeof(password)-1);
+			report_error("Password is too long (max %ld characters).", sizeof(password)-1);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;
@@ -1712,19 +1712,19 @@ smba_start(
 
 	if(strlen(opt_username) >= sizeof(username))
 	{
-		ReportError("User name '%s' is too long (max %ld characters).", username,sizeof(username)-1);
+		report_error("User name '%s' is too long (max %ld characters).", username,sizeof(username)-1);
 
 		(*error_ptr) = ENAMETOOLONG;
 		goto out;
 	}
 
 	strlcpy(username,opt_username,sizeof(username));
-	StringToUpper(username);
+	string_toupper(username);
 
 	/*
 	if (strlen(opt_workgroup) > 15)
 	{
-		ReportError("Workgroup/domain name '%s' is too long (max %ld characters).", opt_workgroup,15);
+		report_error("Workgroup/domain name '%s' is too long (max %ld characters).", opt_workgroup,15);
 
 		(*error_ptr) = ENAMETOOLONG;
 		goto out;
@@ -1732,13 +1732,13 @@ smba_start(
 	*/
 
 	strlcpy (workgroup, opt_workgroup, sizeof(workgroup));
-	StringToUpper (workgroup);
+	string_toupper (workgroup);
 
 	if(opt_servername != NULL)
 	{
 		if (!opt_raw_smb && strlen (opt_servername) > 16)
 		{
-			ReportError("Server name '%s' is too long (max %ld characters).", opt_servername,16);
+			report_error("Server name '%s' is too long (max %ld characters).", opt_servername,16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;
@@ -1751,7 +1751,7 @@ smba_start(
 	{
 		if (!opt_raw_smb && strlen (opt_clientname) > 16)
 		{
-			ReportError("Client name '%s' is too long (max %ld characters).", opt_clientname,16);
+			report_error("Client name '%s' is too long (max %ld characters).", opt_clientname,16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;
@@ -1798,11 +1798,11 @@ smba_start(
 
 			smb_translate_error_class_and_code((*smb_error_class_ptr),(*smb_error_ptr),&smb_class_name,&smb_code_text);
 
-			ReportError("Could not connect to server (%ld/%ld, %s/%s).",(*smb_error_class_ptr),(*smb_error_ptr),smb_class_name,smb_code_text);
+			report_error("Could not connect to server (%ld/%ld, %s/%s).",(*smb_error_class_ptr),(*smb_error_ptr),smb_class_name,smb_code_text);
 		}
 		else
 		{
-			ReportError("Could not connect to server (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
+			report_error("Could not connect to server (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
 		}
 
 		goto out;

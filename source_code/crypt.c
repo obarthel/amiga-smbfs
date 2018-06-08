@@ -444,7 +444,7 @@ smb_encrypt (unsigned char *passwd, unsigned char *c8, unsigned char *p24)
 
 	memcpy (p14, passwd, len);
 
-	StringToUpper ((char *) p14);
+	string_toupper ((char *) p14);
 	E_P16 (p14, p21);
 
 	smb_owf_encrypt (p21, c8, p24);

@@ -1929,3 +1929,33 @@ smbfs 1.147 (5.6.2018)
   necessarily have the same meaning or any meaning at all within SMB
   path names are now preprocessed so that they always come out as the
   proper absolute SMB path names required.
+
+
+smbfs 1.148 (7.6.2018)
+
+- Changed how the TZ/TIMEZONEOFFSET parameter works: for time zones
+  east of GMT (such as CET) the number of minutes given now has to be
+  positive (e.g. CET -> TZ=60). This follows the practice of describing
+  a time zone relative to GMT, rather than how many minutes need to be
+  added to current time to bring it to GMT. Hence, with TZ=60 you now
+  state that your local time zone is 60 Minutes ahead of GMT.
+
+- If the server shuts down the network connection smbfs should no
+  longer wind up discovering that no more data would be forthcoming
+  from the server, over and over again in a loop.
+
+- When creating directories or files, smbfs now requests write access
+  to the parent directory of the object to create.
+
+- Consolidated all the SMB path name parsing and processing code into
+  a set of functions which should (hopefully) be more robust than what
+  was previously available. This simplified the code which needed to
+  know the parent directory of a file/directory.
+
+- Moved the file and path name conversion which deals with the
+  translation from Amiga (ISO-8859-1) to SMB (UTF-8, CP437, CP850,
+  etc.) into two functions (encoding and decoding) instead of replicating
+  essentially the same code in almost all the packet handling functions
+  which deal with names.
+
+- Cleaned up the naming of functions and data structures a bit.

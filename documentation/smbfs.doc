@@ -343,7 +343,7 @@ The individual options serve the following purposes:
       using the 'TIMEZONEOFFSET' options. The number you provide must
       be the number of minutes to add to the local time in order to
       translate it into the corresponding GMT value. For example, in
-      central Europe using CET, you would use "TZ=-60" since CET is
+      central Europe using CET, you would use "TZ=60" since CET is
       one hour ahead of GMT.
 
    DST=DSTOFFSET/N/K

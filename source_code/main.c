@@ -88,6 +88,8 @@ struct FileNode
 	STRPTR				fn_FullName;
 };
 
+/****************************************************************************/
+
 struct LockNode
 {
 	struct MinNode			ln_MinNode;
@@ -128,9 +130,9 @@ struct LockNode
 
 /* These are in amiga.lib */
 APTR ASM AsmCreatePool(REG(d0,ULONG memFlags),REG(d1,ULONG puddleSize),REG(d2,ULONG threshSize),REG(a6,struct Library * SysBase));
-VOID ASM AsmDeletePool(REG(a0,APTR poolHeader),REG(a6,struct Library * SysBase));
+void ASM AsmDeletePool(REG(a0,APTR poolHeader),REG(a6,struct Library * SysBase));
 APTR ASM AsmAllocPooled(REG(a0,APTR poolHeader),REG(d0,ULONG memSize),REG(a6,struct Library * SysBase));
-VOID ASM AsmFreePooled(REG(a0,APTR poolHeader),REG(a1,APTR memory),REG(d0,ULONG memSize),REG(a6,struct Library * SysBase));
+void ASM AsmFreePooled(REG(a0,APTR poolHeader),REG(a1,APTR memory),REG(d0,ULONG memSize),REG(a6,struct Library * SysBase));
 
 #define CreatePool(memFlags,puddleSize,threshSize) AsmCreatePool((memFlags),(puddleSize),(threshSize),SysBase)
 #define DeletePool(poolHeader) AsmDeletePool((poolHeader),SysBase)
@@ -142,15 +144,15 @@ VOID ASM AsmFreePooled(REG(a0,APTR poolHeader),REG(a1,APTR memory),REG(d0,ULONG 
 /****************************************************************************/
 
 /* Forward declarations for local routines. */
-STATIC LONG main(VOID);
-STATIC ULONG get_stack_size(VOID);
-STATIC VOID stack_usage_init(struct StackSwapStruct * stk);
-STATIC ULONG stack_usage_exit(const struct StackSwapStruct * stk);
-STATIC LONG CVSPrintf(const TEXT * format_string, APTR args);
-STATIC VOID VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
-STATIC VOID Cleanup(VOID);
-STATIC BOOL Setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_write_raw, BOOL opt_write_behind, BOOL opt_prefer_read_raw, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
-STATIC VOID HandleFileSystem(const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
+static LONG main(void);
+static ULONG get_stack_size(void);
+static void stack_usage_init(struct StackSwapStruct * stk);
+static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
+static LONG CVSPrintf(const TEXT * format_string, APTR args);
+static void VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
+static void cleanup(void);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_write_raw, BOOL opt_write_behind, BOOL opt_prefer_read_raw, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
+static void file_system_handler(const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
 
@@ -197,46 +199,47 @@ int							h_errno;
 
 /****************************************************************************/
 
-STATIC struct DosList *		DeviceNode;
-STATIC BOOL					DeviceNodeAdded;
-STATIC struct DosList *		VolumeNode;
-STATIC BOOL					VolumeNodeAdded;
-STATIC struct MsgPort *		FileSystemPort;
+static struct DosList *		DeviceNode;
+static BOOL					DeviceNodeAdded;
+static struct DosList *		VolumeNode;
+static BOOL					VolumeNodeAdded;
+static struct MsgPort *		FileSystemPort;
 
-STATIC smba_server_t *		ServerData;
+static smba_server_t *		ServerData;
 
-STATIC BOOL					Quit;
-STATIC BOOL					Quiet;
-STATIC BOOL					CaseSensitive;
-STATIC BOOL					OmitHidden;
-STATIC BOOL					TranslateUTF8;
+static BOOL					Quit;
+static BOOL					Quiet;
+static BOOL					CaseSensitive;
+static BOOL					OmitHidden;
+static BOOL					TranslateUTF8;
 
-STATIC LONG					DSTOffset;
-STATIC LONG					TimeZoneOffset;
-STATIC BOOL					OverrideLocaleTimeZone;
+static LONG					DSTOffset;
+static LONG					TimeZoneOffset;
+static BOOL					OverrideLocaleTimeZone;
 
-STATIC BOOL					WriteProtected;
-STATIC ULONG				WriteProtectKey;
+static BOOL					WriteProtected;
+static ULONG				WriteProtectKey;
 
-STATIC struct MinList		FileList;
-STATIC struct MinList		LockList;
+static struct MinList		FileList;
+static struct MinList		LockList;
 
-STATIC APTR					MemoryPool;
-STATIC ULONG				total_memory_allocated;
-STATIC ULONG				max_memory_allocated;
+static APTR					MemoryPool;
+static ULONG				total_memory_allocated;
+static ULONG				max_memory_allocated;
 
-STATIC struct RDArgs *		Parameters;
-STATIC struct DiskObject *	Icon;
+static struct RDArgs *		Parameters;
+static struct DiskObject *	Icon;
 
-STATIC struct WBStartup *	WBStartup;
+static struct WBStartup *	WBStartup;
 
-STATIC struct MinList		ErrorList;
+static struct MinList		ErrorList;
 
-STATIC STRPTR				NewProgramName;
+static STRPTR				NewProgramName;
 
-STATIC BOOL					TranslateNames;
-STATIC TEXT					A2M[256];
-STATIC TEXT					M2A[256];
+static BOOL					TranslateNames;
+
+static TEXT					map_amiga_to_smb_name[256];
+static TEXT					map_smb_to_amiga_name[256];
 
 /****************************************************************************/
 
@@ -462,8 +465,8 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 /* Figure out how much stack size is available to the running
  * Task. Returns the size in bytes.
  */
-STATIC ULONG
-get_stack_size(VOID)
+static ULONG
+get_stack_size(void)
 {
 	struct Task * tc = FindTask(NULL);
 	ULONG upper,lower;
@@ -491,7 +494,7 @@ get_stack_size(VOID)
  * be used to figure out how much stack space was used by the program.
  * This is needed by stack_usage_exit().
  */
-STATIC VOID
+static void
 stack_usage_init(struct StackSwapStruct * stk)
 {
 	size_t stack_size = ((ULONG)stk->stk_Upper - (ULONG)stk->stk_Lower);
@@ -503,7 +506,7 @@ stack_usage_init(struct StackSwapStruct * stk)
  * the test pattern previously written to the stack memory was
  * overwritten. Returns how much space was used (in bytes).
  */
-STATIC ULONG
+static ULONG
 stack_usage_exit(const struct StackSwapStruct * stk)
 {
 	const UBYTE * m = (const UBYTE *)stk->stk_Lower;
@@ -532,8 +535,8 @@ stack_usage_exit(const struct StackSwapStruct * stk)
 /****************************************************************************/
 
 /* This is the traditional main() program. */
-STATIC LONG
-main(VOID)
+static LONG
+main(void)
 {
 	struct
 	{
@@ -619,7 +622,7 @@ main(VOID)
 	/* Don't emit any debugging output before we are ready. */
 	SETDEBUGLEVEL(0);
 
-	/* This needs to be set up properly for ReportError()
+	/* This needs to be set up properly for report_error()
 	 * to work.
 	 */
 	NewList((struct List *)&ErrorList);
@@ -666,7 +669,7 @@ main(VOID)
 
 		if(IconBase == NULL)
 		{
-			ReportError("Could not open 'icon.library'.");
+			report_error("Could not open 'icon.library'.");
 			goto out;
 		}
 
@@ -676,7 +679,7 @@ main(VOID)
 
 		if(Icon == NULL)
 		{
-			ReportError("Icon not found.");
+			report_error("Icon not found.");
 			goto out;
 		}
 
@@ -700,7 +703,7 @@ main(VOID)
 			}
 			else
 			{
-				ReportError("Required 'WORKGROUP' parameter was not provided.");
+				report_error("Required 'WORKGROUP' parameter was not provided.");
 				goto out;
 			}
 		}
@@ -791,7 +794,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'DEBUG' parameter.",str);
+				report_error("Invalid number '%s' for 'DEBUG' parameter.",str);
 				goto out;
 			}
 
@@ -810,7 +813,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&tz_number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'TIMEZONEOFFSET' parameter.",str);
+				report_error("Invalid number '%s' for 'TIMEZONEOFFSET' parameter.",str);
 				goto out;
 			}
 
@@ -825,7 +828,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&dst_number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'DSTOFFSET' parameter.",str);
+				report_error("Invalid number '%s' for 'DSTOFFSET' parameter.",str);
 				goto out;
 			}
 
@@ -872,7 +875,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'CACHE' parameter.",str);
+				report_error("Invalid number '%s' for 'CACHE' parameter.",str);
 				goto out;
 			}
 
@@ -884,7 +887,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1)
 			{
-				ReportError("Invalid number '%s' for 'MAXTRANSMIT' parameter.",str);
+				report_error("Invalid number '%s' for 'MAXTRANSMIT' parameter.",str);
 				goto out;
 			}
 
@@ -896,7 +899,7 @@ main(VOID)
 		{
 			if(StrToLong(str,&number) == -1 || number < 0)
 			{
-				ReportError("Invalid number '%s' for 'TIMEOUT' parameter.",str);
+				report_error("Invalid number '%s' for 'TIMEOUT' parameter.",str);
 				goto out;
 			}
 
@@ -905,13 +908,13 @@ main(VOID)
 
 		if(args.Workgroup == NULL)
 		{
-			ReportError("Required 'WORKGROUP' parameter was not provided.");
+			report_error("Required 'WORKGROUP' parameter was not provided.");
 			goto out;
 		}
 
 		if(args.Service == NULL)
 		{
-			ReportError("'SERVICE' parameter needs an argument.");
+			report_error("'SERVICE' parameter needs an argument.");
 			goto out;
 		}
 	}
@@ -938,7 +941,7 @@ main(VOID)
 			}
 			else
 			{
-				ReportError("Required 'WORKGROUP' parameter was not provided.");
+				report_error("Required 'WORKGROUP' parameter was not provided.");
 				goto out;
 			}
 		}
@@ -1006,15 +1009,15 @@ main(VOID)
 	/* Use one of the built-in code page translation tables? */
 	if (args.CP437)
 	{
-		memmove(A2M,unicode_to_cp437,sizeof(unicode_to_cp437));
-		memmove(M2A,cp437_to_unicode,sizeof(cp437_to_unicode));
+		memmove(map_amiga_to_smb_name,unicode_to_cp437,sizeof(unicode_to_cp437));
+		memmove(map_smb_to_amiga_name,cp437_to_unicode,sizeof(cp437_to_unicode));
 
 		TranslateNames = TRUE;
 	}
 	else if (args.CP850)
 	{
-		memmove(A2M,unicode_to_cp850,sizeof(unicode_to_cp850));
-		memmove(M2A,cp850_to_unicode,sizeof(cp850_to_unicode));
+		memmove(map_amiga_to_smb_name,unicode_to_cp850,sizeof(unicode_to_cp850));
+		memmove(map_smb_to_amiga_name,cp850_to_unicode,sizeof(cp850_to_unicode));
 
 		TranslateNames = TRUE;
 	}
@@ -1065,7 +1068,7 @@ main(VOID)
 		#if !DEBUG
 		{
 			if(WBStartup == NULL)
-				ReportError("This version of smbfs cannot create debug output.");
+				report_error("This version of smbfs cannot create debug output.");
 		}
 		#endif /* !DEBUG */
 
@@ -1090,13 +1093,13 @@ main(VOID)
 	#else
 	{
 		if(WBStartup == NULL && (args.DumpSMBLevel != NULL || args.DumpSMB))
-			ReportError("This version of smbfs cannot create SMB debug output.");
+			report_error("This version of smbfs cannot create SMB debug output.");
 	}
 	#endif /* DUMP_SMB */
 
 	D(("%s (%s)",VERS,DATE));
 
-	if(Setup(
+	if(setup(
 		FilePart(program_name),
 		args.Service,
 		args.Workgroup,
@@ -1124,7 +1127,7 @@ main(VOID)
 		if(Locale != NULL)
 			SHOWVALUE(Locale->loc_GMTOffset);
 
-		HandleFileSystem(args.DeviceName,args.VolumeName,args.Service);
+		file_system_handler(args.DeviceName,args.VolumeName,args.Service);
 
 		result = RETURN_WARN;
 	}
@@ -1149,7 +1152,7 @@ main(VOID)
 	}
 	#endif /* DUMP_SMB */
 
-	Cleanup();
+	cleanup();
 
 	if(close_debug_file && debug_file != (BPTR)NULL)
 	{
@@ -1286,7 +1289,7 @@ host_strerror(int error)
  * to be compared.
  */
 LONG
-CompareNames(const TEXT * a,const TEXT * b)
+compare_names(const TEXT * a,const TEXT * b)
 {
 	LONG result;
 
@@ -1301,8 +1304,8 @@ CompareNames(const TEXT * a,const TEXT * b)
 /****************************************************************************/
 
 /* Translate a string into all upper case characters. */
-VOID
-StringToUpper(STRPTR s)
+void
+string_toupper(STRPTR s)
 {
 	TEXT c;
 
@@ -1315,8 +1318,8 @@ StringToUpper(STRPTR s)
 /* Prepare the accumulated list of error messages for display
  * and purge the contents of that list.
  */
-STATIC VOID
-DisplayErrorList(VOID)
+static void
+display_error_message_list(void)
 {
 	struct MinNode * last = NULL;
 	struct MinNode * mn;
@@ -1436,8 +1439,8 @@ DisplayErrorList(VOID)
  * collected so that they may be displayed together when
  * necessary.
  */
-STATIC VOID
-AddError(const TEXT * fmt,APTR args)
+static void
+add_error_message(const TEXT * fmt,APTR args)
 {
 	int size;
 
@@ -1463,8 +1466,8 @@ AddError(const TEXT * fmt,APTR args)
 /* Report an error that has occured; if the program was not launched
  * from Shell, error messages will be accumulated for later display.
  */
-VOID VARARGS68K
-ReportError(const TEXT * fmt,...)
+void VARARGS68K
+report_error(const TEXT * fmt,...)
 {
 	if(NOT Quiet)
 	{
@@ -1475,13 +1478,13 @@ ReportError(const TEXT * fmt,...)
 			#if defined(__amigaos4__)
 			{
 				va_startlinear(args,fmt);
-				AddError(fmt,va_getlinearva(args,APTR));
+				add_error_message(fmt,va_getlinearva(args,APTR));
 				va_end(args);
 			}
 			#else
 			{
 				va_start(args,fmt);
-				AddError(fmt,args);
+				add_error_message(fmt,args);
 				va_end(args);
 			}
 			#endif /* __amigaos4__ */
@@ -1523,8 +1526,8 @@ ReportError(const TEXT * fmt,...)
 /****************************************************************************/
 
 /* Release memory allocated from the global pool. */
-VOID
-FreeMemory(APTR address)
+void
+free_memory(APTR address)
 {
 	if(address != NULL)
 	{
@@ -1546,7 +1549,7 @@ FreeMemory(APTR address)
 
 /* Allocate memory from the global pool. */
 APTR
-AllocateMemory(LONG size)
+allocate_memory(LONG size)
 {
 	APTR result = NULL;
 
@@ -1585,7 +1588,7 @@ AllocateMemory(LONG size)
  * to translate local time into UTC.
  */
 LONG
-GetTimeZoneDelta(VOID)
+get_time_zone_delta(void)
 {
 	LONG seconds;
 
@@ -1616,14 +1619,14 @@ GetTimeZoneDelta(VOID)
  * local time zone.
  */
 ULONG
-GetCurrentTime(VOID)
+get_current_time(void)
 {
 	struct timeval tv;
 	ULONG result;
 
 	GetSysTime((APTR)&tv);
 
-	result = UNIX_TIME_OFFSET + GetTimeZoneDelta() + tv.tv_secs;
+	result = UNIX_TIME_OFFSET + get_time_zone_delta() + tv.tv_secs;
 
 	return(result);
 }
@@ -1634,8 +1637,8 @@ GetCurrentTime(VOID)
  * corresponding to the number of seconds provided. Input is
  * in Unix format.
  */
-VOID
-GMTime(time_t seconds,struct tm * tm)
+void
+seconds_to_tm(time_t seconds,struct tm * tm)
 {
 	struct ClockData clock_data;
 
@@ -1660,7 +1663,7 @@ GMTime(time_t seconds,struct tm * tm)
  * based upon the time specification provided. Output is in Unix format.
  */
 time_t
-MakeTime(const struct tm * const tm)
+tm_to_seconds(const struct tm * const tm)
 {
 	struct ClockData clock_data;
 	time_t seconds;
@@ -1687,47 +1690,47 @@ struct FormatContext
 
 /****************************************************************************/
 
-STATIC VOID ASM
+static void ASM
 CountChar(REG(a3,struct FormatContext * fc))
 {
 	fc->fc_Size++;
 }
 
 /* Count the number of characters SPrintf() would put into a string. */
-STATIC LONG
+static LONG
 CVSPrintf(const TEXT * format_string,APTR args)
 {
 	struct FormatContext fc;
 
 	fc.fc_Size = 0;
 
-	RawDoFmt((STRPTR)format_string,args,(VOID (*)())CountChar,&fc);
+	RawDoFmt((STRPTR)format_string,args,(void (*)())CountChar,&fc);
 
 	return(fc.fc_Size);
 }
 
 /****************************************************************************/
 
-STATIC VOID ASM
+static void ASM
 StuffChar(REG(d0,TEXT c),REG(a3,struct FormatContext * fc))
 {
 	(*fc->fc_Buffer++) = c;
 }
 
-STATIC VOID
+static void
 VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args)
 {
 	struct FormatContext fc;
 
 	fc.fc_Buffer = buffer;
 
-	RawDoFmt(formatString,args,(VOID (*)())StuffChar,&fc);
+	RawDoFmt(formatString,args,(void (*)())StuffChar,&fc);
 }
 
 /****************************************************************************/
 
 /* Format a string for output. */
-VOID VARARGS68K
+void VARARGS68K
 SPrintf(STRPTR buffer, const TEXT * formatString,...)
 {
 	va_list varArgs;
@@ -2009,8 +2012,8 @@ out:
  * by all applications that listen for this kind of event, e.g.
  * Workbench.
  */
-STATIC VOID
-SendDiskChange(ULONG class)
+static void
+send_disk_change_notification(ULONG class)
 {
 	struct IOStdReq * input_request = NULL;
 	struct MsgPort * input_port;
@@ -2062,8 +2065,8 @@ SendDiskChange(ULONG class)
 /* Find the file node corresponding to a given name,
  * skipping a particular entry if necessary.
  */
-STATIC struct FileNode *
-FindFileNode(const TEXT * name,struct FileNode * skip)
+static struct FileNode *
+find_file_node(const TEXT * name,struct FileNode * skip)
 {
 	struct FileNode * result = NULL;
 	struct FileNode * fn;
@@ -2072,7 +2075,7 @@ FindFileNode(const TEXT * name,struct FileNode * skip)
 	    fn->fn_MinNode.mln_Succ != NULL ;
 	    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
 	{
-		if(fn != skip && CompareNames(name,fn->fn_FullName) == SAME)
+		if(fn != skip && compare_names(name,fn->fn_FullName) == SAME)
 		{
 			result = fn;
 			break;
@@ -2085,8 +2088,8 @@ FindFileNode(const TEXT * name,struct FileNode * skip)
 /* Find the lock node corresponding to a given name,
  * skipping a particular entry if necessary.
  */
-STATIC struct LockNode *
-FindLockNode(const TEXT * name,struct LockNode * skip)
+static struct LockNode *
+find_lock_node(const TEXT * name,struct LockNode * skip)
 {
 	struct LockNode * result = NULL;
 	struct LockNode * ln;
@@ -2095,7 +2098,7 @@ FindLockNode(const TEXT * name,struct LockNode * skip)
 	    ln->ln_MinNode.mln_Succ != NULL ;
 	    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 	{
-		if(ln != skip && CompareNames(name,ln->ln_FullName) == SAME)
+		if(ln != skip && compare_names(name,ln->ln_FullName) == SAME)
 		{
 			result = ln;
 			break;
@@ -2112,38 +2115,38 @@ FindLockNode(const TEXT * name,struct LockNode * skip)
  * mode. This is the case which this function is
  * trying to avoid.
  */
-STATIC LONG
-CheckAccessModeCollision(const TEXT * name,LONG mode)
+static int
+check_access_mode_collision(const TEXT * name,LONG mode)
 {
+	int error = ERROR_OBJECT_IN_USE;
 	struct LockNode * ln;
 	struct FileNode * fn;
-	int error = OK;
 
 	ENTER();
 
 	D(("name = '%s'", escape_name(name)));
 
-	fn = FindFileNode(name,NULL);
+	fn = find_file_node(name,NULL);
 	if(fn != NULL)
 	{
 		if(mode != SHARED_LOCK || fn->fn_Mode != SHARED_LOCK)
 		{
-			D(("collides with '%s'",fn->fn_FullName));
-			error = ERROR_OBJECT_IN_USE;
+			D(("collides with '%s'",escape_name(fn->fn_FullName)));
 			goto out;
 		}
 	}
 
-	ln = FindLockNode(name,NULL);
+	ln = find_lock_node(name,NULL);
 	if(ln != NULL)
 	{
 		if(mode != SHARED_LOCK || ln->ln_FileLock.fl_Access != SHARED_LOCK)
 		{
-			D(("collides with '%s'",ln->ln_FullName));
-			error = ERROR_OBJECT_IN_USE;
+			D(("collides with '%s'",escape_name(ln->ln_FullName)));
 			goto out;
 		}
 	}
+
+	error = OK;
 
  out:
 
@@ -2154,35 +2157,23 @@ CheckAccessModeCollision(const TEXT * name,LONG mode)
 /* Find out whether there already exists a reference to a
  * certain file or directory.
  */
-STATIC LONG
-NameAlreadyInUse(const TEXT * name)
+static int
+name_already_in_use(const TEXT * name)
 {
-	int error = OK;
+	int error;
 
-	ENTER();
-
-	if(FindFileNode(name,NULL) != NULL)
-	{
+	if(find_file_node(name,NULL) != NULL || find_lock_node(name,NULL) != NULL)
 		error = ERROR_OBJECT_IN_USE;
-		goto out;
-	}
+	else
+		error = OK;
 
-	if(FindLockNode(name,NULL) != NULL)
-	{
-		error = ERROR_OBJECT_IN_USE;
-		goto out;
-	}
-
- out:
-
-	RETURN(error);
 	return(error);
 }
 
 /* Check whether an Amiga file name uses special characters which
  * should be avoided when used with the SMB file sharing protocol.
  */
-STATIC BOOL
+static BOOL
 is_reserved_name(const TEXT * name)
 {
 	BOOL result = TRUE;
@@ -2209,14 +2200,14 @@ is_reserved_name(const TEXT * name)
 /****************************************************************************/
 
 /* Convert a POSIX error code into an AmigaDOS error code. */
-STATIC LONG
-MapErrnoToIoErr(int error)
+static LONG
+map_errno_to_ioerr(int error)
 {
 	/* Not all of these mappings make good sense; bear in mind that
 	 * POSIX covers more than a hundred different error codes
 	 * whereas with AmigaDOS we're stranded with a measly 48...
 	 */
-	STATIC const int map_posix_to_amigados[][2] =
+	static const int map_posix_to_amigados[][2] =
 	{
 		{ E2BIG,			ERROR_TOO_MANY_ARGS },			/* Argument list too long */
 		{ EACCES,			ERROR_READ_PROTECTED },			/* Permission denied */
@@ -2359,65 +2350,69 @@ MapErrnoToIoErr(int error)
 
 /****************************************************************************/
 
-/* Translate a BCPL style file name (i.e. length is in the first byte)
- * via a mapping table. Returns TRUE if the translation could be performed
- * and FALSE if at least one character cannot be translated.
+/* Check if the name for an AmigaDOS device or volume is not too short,
+ * not too long and does not contain unprintable/unsuitable characters.
  */
-STATIC BOOL
-TranslateBName(TEXT * name,const TEXT * map)
+static BOOL
+is_valid_device_name(const TEXT * name, int len)
 {
-	BOOL success = TRUE;
-	TEXT c;
-	int len;
+	BOOL result = FALSE;
+	int i, c;
 
-	len = (*name++);
+	if(len <= 0 || len > 255)
+		goto out;
 
-	while(len-- > 0)
+	for(i = 0 ; i < len ; i++)
 	{
-		c = map[(*name)];
+		c = name[i];
 
-		/* The NUL means that the respective mapping cannot
-		 * represent the desired character.
-		 */
-		if(c == '\0')
-		{
-			success = FALSE;
-			break;
-		}
-
-		(*name++) = c;
+		if(c == '/' || c == ':' || (c < ' ' && c != '\t') || (128 <= c && c < 160))
+			goto out;
 	}
 
-	return(success);
+	result = TRUE;
+
+ out:
+
+	return(result);
 }
 
-/* Translate a NUL terminated file name via a mapping table. Returns TRUE if
- * the translation could be performed and FALSE if at least one character
- * cannot be translated.
+/****************************************************************************/
+
+/* Check if a file name is right and proper for AmigaDOS use,
+ * which excludes the use unprintable characters, the path
+ * delimiters ':' and '/', but also the SMB path delimeter
+ * character '\'.
+ *
+ * Returns ERROR_INVALID_COMPONENT_NAME if the name is
+ * unsuitable, 0 otherwise.
  */
-STATIC BOOL
-TranslateCName(TEXT * name,const TEXT * map)
+static int
+validate_amigados_file_name(const TEXT * name,int len)
 {
-	BOOL success = TRUE;
-	TEXT c;
+	int error = ERROR_INVALID_COMPONENT_NAME;
+	int i, c;
 
-	while((c = (*name)) != '\0')
+	if(len <= 0 || len > 255)
+		goto out;
+
+	for(i = 0 ; i < len ; i++)
 	{
-		c = map[c];
+		c = name[i];
 
-		/* The NUL means that the respective mapping cannot
-		 * represent the desired character.
+		/* This should be a printable character and none of
+		 * the characters reserved by the file system which
+		 * should not appear in a file/directory name.
 		 */
-		if(c == '\0')
-		{
-			success = FALSE;
-			break;
-		}
-
-		(*name++) = c;
+		if(c == '/' || c == ':' || c == SMB_PATH_SEPARATOR || (c < ' ' && c != '\t') || (128 <= c && c < 160))
+			goto out;
 	}
 
-	return(success);
+	error = OK;
+
+ out:
+
+	return(error);
 }
 
 /****************************************************************************/
@@ -2425,8 +2420,8 @@ TranslateCName(TEXT * name,const TEXT * map)
 /* Remove a DosList entry using the proper protocols. Note that
  * this function can fail!
  */
-STATIC BOOL
-ReallyRemoveDosEntry(struct DosList * entry)
+static BOOL
+really_remove_dosentry(struct DosList * entry)
 {
 	struct DosPacket * dp;
 	struct Message * mn;
@@ -2490,9 +2485,9 @@ ReallyRemoveDosEntry(struct DosList * entry)
 
 /****************************************************************************/
 
-/* Release all resources allocated by the Setup() routine. */
-STATIC VOID
-Cleanup(VOID)
+/* Release all resources allocated by the setup() routine. */
+static void
+cleanup(void)
 {
 	BOOL send_disk_change = FALSE;
 
@@ -2501,7 +2496,7 @@ Cleanup(VOID)
 	/* If any errors have cropped up, display them now before
 	 * we call it quits.
 	 */
-	DisplayErrorList();
+	display_error_message_list();
 
 	if(NewProgramName != NULL)
 	{
@@ -2533,7 +2528,7 @@ Cleanup(VOID)
 		{
 			SHOWMSG("removing the device node");
 
-			if(ReallyRemoveDosEntry(DeviceNode))
+			if(really_remove_dosentry(DeviceNode))
 			{
 				SHOWMSG("freeing the device node");
 				FreeDosEntry(DeviceNode);
@@ -2557,7 +2552,7 @@ Cleanup(VOID)
 		{
 			SHOWMSG("removing the volume node");
 
-			if(ReallyRemoveDosEntry(VolumeNode))
+			if(really_remove_dosentry(VolumeNode))
 			{
 				SHOWMSG("freeing the volume node");
 				FreeDosEntry(VolumeNode);
@@ -2601,7 +2596,7 @@ Cleanup(VOID)
 	if(WBStartup == NULL && send_disk_change)
 	{
 		SHOWMSG("sending a disk removed event");
-		SendDiskChange(IECLASS_DISKREMOVED);
+		send_disk_change_notification(IECLASS_DISKREMOVED);
 	}
 
 	SHOWMSG("closing libraries and devices...");
@@ -2686,8 +2681,8 @@ Cleanup(VOID)
 }
 
 /* Allocate all the necessary resources to get going. */
-STATIC BOOL
-Setup(
+static BOOL
+setup(
 	const TEXT *	program_name,
 	const TEXT *	service,
 	const TEXT *	workgroup,
@@ -2714,7 +2709,6 @@ Setup(
 	struct DosList * dl;
 	int error = 0;
 	int smb_error_class = 0, smb_error = 0;
-	BOOL volume_name_is_sound;
 	const TEXT * actual_volume_name;
 	int actual_volume_name_len;
 	TEXT name[MAX_FILENAME_LEN+1];
@@ -2729,7 +2723,7 @@ Setup(
 	MemoryPool = CreatePool(MEMF_ANY|MEMF_PUBLIC,4096,4096);
 	if(MemoryPool == NULL)
 	{
-		ReportError("Could not create memory pool.");
+		report_error("Could not create memory pool.");
 		goto out;
 	}
 
@@ -2754,7 +2748,7 @@ Setup(
 
 	if(opt_time_zone_offset != NULL)
 	{
-		TimeZoneOffset			= (*opt_time_zone_offset);
+		TimeZoneOffset			= -(*opt_time_zone_offset);
 		OverrideLocaleTimeZone	= TRUE;
 	}
 
@@ -2765,7 +2759,7 @@ Setup(
 
 	if(OpenDevice(TIMERNAME,UNIT_VBLANK,(struct IORequest *)&TimerRequest,0) != OK)
 	{
-		ReportError("Could not open 'timer.device'.");
+		report_error("Could not open 'timer.device'.");
 		goto out;
 	}
 
@@ -2778,7 +2772,7 @@ Setup(
 			ITimer = (struct TimerIFace *)GetInterface(TimerBase, "main", 1, 0);
 			if(ITimer == NULL)
 			{
-				ReportError("Could not open 'timer.device'.");
+				report_error("Could not open 'timer.device'.");
 				goto out;
 			}
 		}
@@ -2803,7 +2797,7 @@ Setup(
 
 	if(SocketBase == NULL)
 	{
-		ReportError("Could not open 'bsdsocket.library' V3; TCP/IP stack not running?");
+		report_error("Could not open 'bsdsocket.library' V3; TCP/IP stack not running?");
 		goto out;
 	}
 
@@ -2815,7 +2809,7 @@ Setup(
 	TAG_END);
 	if(error != OK)
 	{
-		ReportError("Could not initialize 'bsdsocket.library' (%ld, %s).",error,posix_strerror(error));
+		report_error("Could not initialize 'bsdsocket.library' (%ld, %s).",error,posix_strerror(error));
 		goto out;
 	}
 
@@ -2836,8 +2830,8 @@ Setup(
 		file = Open(translation_file,MODE_OLDFILE);
 		if(file != ZERO)
 		{
-			if(Read(file,A2M,256) != 256 ||
-			   Read(file,M2A,256) != 256)
+			if(Read(file,map_amiga_to_smb_name,256) != 256 ||
+			   Read(file,map_smb_to_amiga_name,256) != 256)
 			{
 				msg = "Could not read translation file";
 				error = IoErr();
@@ -2860,13 +2854,15 @@ Setup(
 			TEXT description[100];
 
 			Fault(error,NULL,description,sizeof(description));
+
+			/* Drop the line feed - we don't need it. */
 			for(i = ((int)strlen(description)) - 1 ; i >= 0 ; i--)
 			{
 				if(description[i] == '\n')
 					description[i] = '\0';
 			}
 
-			ReportError("%s '%s' (%ld, %s).",msg,translation_file,error,description);
+			report_error("%s '%s' (%ld, %s).",msg,translation_file,error,description);
 			goto out;
 		}
 	}
@@ -2897,7 +2893,7 @@ Setup(
 	FileSystemPort = CreateMsgPort();
 	if(FileSystemPort == NULL)
 	{
-		ReportError("Could not create filesystem port.");
+		report_error("Could not create filesystem port.");
 		goto out;
 	}
 
@@ -2906,39 +2902,15 @@ Setup(
 	 */
 	if(device_name != NULL)
 	{
-		BOOL device_name_is_sound;
-
 		len = strlen(device_name);
 
 		/* Lose the trailing ':' character, if any. */
 		if(len > 0 && device_name[len-1] == ':')
 			len--;
 
-		device_name_is_sound = TRUE;
-
-		if(len == 0 || len > 255)
+		if(NOT is_valid_device_name(device_name, len))
 		{
-			device_name_is_sound = FALSE;
-		}
-		else
-		{
-			int c;
-
-			for(i = 0 ; i < len ; i++)
-			{
-				c = device_name[i];
-
-				if(c == '/' || c == ':' || (c < ' ' && c != '\t') || (128 <= c && c < 160))
-				{
-					device_name_is_sound = FALSE;
-					break;
-				}
-			}
-		}
-
-		if(NOT device_name_is_sound)
-		{
-			ReportError("Device name '%s' cannot be used with AmigaDOS.",device_name);
+			report_error("Device name '%s' cannot be used with AmigaDOS.",device_name);
 			goto out;
 		}
 
@@ -2972,7 +2944,7 @@ Setup(
 	{
 		UnLockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
 
-		ReportError("Device name '%s:' is already taken.",device_name);
+		report_error("Device name '%s:' is already taken.",device_name);
 		goto out;
 	}
 
@@ -2982,7 +2954,7 @@ Setup(
 	{
 		UnLockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
 
-		ReportError("Could not create device node.");
+		report_error("Could not create device node.");
 		goto out;
 	}
 
@@ -2996,37 +2968,16 @@ Setup(
 	else
 		actual_volume_name = volume_name;
 
+	/* Ignore a trailing colon character. */
 	actual_volume_name_len = strlen(actual_volume_name);
 	if(actual_volume_name_len > 0 && actual_volume_name[actual_volume_name_len-1] == ':')
 		actual_volume_name_len--;
 
-	volume_name_is_sound = TRUE;
-
-	if(actual_volume_name_len == 0 || actual_volume_name_len > 255)
-	{
-		volume_name_is_sound = FALSE;
-	}
-	else
-	{
-		int c;
-
-		for(i = 0 ; i < actual_volume_name_len ; i++)
-		{
-			c = actual_volume_name[i];
-
-			if(c == '/' || c == ':' || (c < ' ' && c != '\t') || (128 <= c && c < 160))
-			{
-				volume_name_is_sound = FALSE;
-				break;
-			}
-		}
-	}
-
-	if(NOT volume_name_is_sound)
+	if(NOT is_valid_device_name(actual_volume_name,actual_volume_name_len))
 	{
 		UnLockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
 
-		ReportError("Volume name '%s' cannot be used with AmigaDOS.",actual_volume_name);
+		report_error("Volume name '%s' cannot be used with AmigaDOS.",actual_volume_name);
 		goto out;
 	}
 
@@ -3039,7 +2990,7 @@ Setup(
 	{
 		UnLockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
 
-		ReportError("Could not create volume node.");
+		report_error("Could not create volume node.");
 		goto out;
 	}
 
@@ -3076,7 +3027,7 @@ Setup(
 
 	/* Tell Workbench and friends to update their volume lists. */
 	if(VolumeNodeAdded)
-		SendDiskChange(IECLASS_DISKINSERTED);
+		send_disk_change_notification(IECLASS_DISKINSERTED);
 
 	SetProgramName(NewProgramName);
 
@@ -3247,32 +3198,48 @@ escape_name(const TEXT * name)
 /****************************************************************************/
 
 /* Convert a BCPL string into a standard NUL terminated 'C' string. */
-STATIC VOID
-ConvertBString(int max_len,STRPTR cstring,const void * bstring)
+static void
+convert_from_bcpl_to_c_string(STRPTR cstring,int cstring_size,const void * bstring)
 {
 	const TEXT * from = bstring;
-	int len = from[0];
+	int len;
 
-	if(len > max_len-1)
-		len = max_len-1;
+	ASSERT( cstring_size > 0 );
+
+	len = from[0];
+	if(len > cstring_size-1)
+		len = cstring_size-1;
 
 	if(len > 0)
-		memcpy(cstring,from+1,len);
+		memcpy(cstring,&from[1],len);
 
-	cstring[len] = '\0';
+	if(cstring_size > 0)
+	{
+		ASSERT( len >= 0 );
+
+		cstring[len] = '\0';
+	}
 }
 
 /* Convert a NUL terminated 'C' string into a BCPL string. */
-STATIC VOID
-ConvertCString(void * bstring,int max_len,const TEXT * cstring,int len)
+static void
+convert_from_c_to_bcpl_string(void * bstring,int bstring_size,const TEXT * cstring,int len)
 {
 	TEXT * to = bstring;
 
-	if(len > max_len-1)
-		len = max_len-1;
+	ASSERT( bstring_size > 0 );
 
-	(*to++) = len;
-	memcpy(to,cstring,len);
+	if(bstring_size > 0)
+	{
+		if(bstring_size > 256)
+			bstring_size = 256;
+
+		if(len > bstring_size-1)
+			len = bstring_size-1;
+
+		(*to++) = len;
+		memcpy(to,cstring,len);
+	}
 }
 
 /****************************************************************************/
@@ -3457,7 +3424,7 @@ build_full_path_name(
 
 		size = 1 + name_len + 1;
 
-		buffer = AllocateMemory(size);
+		buffer = allocate_memory(size);
 		if(buffer == NULL)
 		{
 			error = ERROR_NO_FREE_STORE;
@@ -3485,7 +3452,7 @@ build_full_path_name(
 	{
 		size = 1 + parent_name_len + 1 + name_len + 1;
 
-		buffer = AllocateMemory(size);
+		buffer = allocate_memory(size);
 		if(buffer == NULL)
 		{
 			error = ERROR_NO_FREE_STORE;
@@ -3559,10 +3526,159 @@ build_full_path_name(
 
  out:
 
-	FreeMemory(buffer);
+	free_memory(buffer);
 
 	RETURN(error);
 	return(error);
+}
+
+/****************************************************************************/
+
+/* Break up an SMB path name into two parts, this being the directory part
+ * and a base part. For example, in "\foo\bar\baz" the directory part would
+ * be "\foo\bar" and the base part would be "baz".
+ *
+ * Because breaking up the path name may require adding a NUL byte to
+ * separate the directory and base parts, buffer memory will be allocated to
+ * hold the path name.
+ *
+ * Pointers to the directory and base parts will be provided by filling in the
+ * dir_part_ptr and base_part_ptr pointers, unless these are NULL. Note that
+ * the strings are read-only.
+ *
+ * This function will return an error if memory allocation failed or if the
+ * path name provided cannot be split.
+ *
+ * Make sure to release the memory allocated which the temp_ptr will point to
+ * when you no longer need it.
+ */
+static int
+split_path_name(
+	const TEXT *	path,
+	int				path_len,
+	STRPTR *		temp_ptr,
+	STRPTR *		dir_part_ptr,
+	STRPTR *		base_part_ptr)
+{
+	STRPTR dir_part = NULL;
+	STRPTR base_part = NULL;
+	int error = OK;
+	STRPTR temp;
+	int i;
+
+	ASSERT( path != NULL && path_len >= 0 && temp_ptr != NULL );
+
+	(*temp_ptr) = NULL;
+
+	if(dir_part_ptr != NULL)
+		(*dir_part_ptr) = NULL;
+
+	if(base_part_ptr != NULL)
+		(*base_part_ptr) = NULL;
+
+	/* Make a copy of the path string. */
+	temp = allocate_memory(path_len+1);
+	if(temp == NULL)
+	{
+		error = ERROR_NO_FREE_STORE;
+		goto out;
+	}
+
+	memcpy(temp,path,path_len);
+	temp[path_len] = '\0';
+
+	/* Find the last '\' character which separates
+	 * the directory part from the base part.
+	 */
+	for(i = path_len-1 ; i >= 0 ; i--)
+	{
+		if(temp[i] == SMB_PATH_SEPARATOR)
+		{
+			/* Is this the root directory? */
+			if(i == 0)
+			{
+				/* We return this constant value as the
+				 * directory part (root directory).
+				 */
+				dir_part = "\\";
+
+				/* If possible, return what follows the root
+				 * directory as the base part.
+				 */
+				if(path_len > 1)
+					base_part = &temp[i+1];
+			}
+			else
+			{
+				/* Chop off the directory part. */
+				dir_part = temp;
+				temp[i] = '\0';
+
+				if(i+1 < path_len)
+					base_part = &temp[i+1];
+			}
+
+			break;
+		}
+	}
+
+	/* We have to have a directory part and a base part. */
+	if(dir_part == NULL || base_part == NULL)
+	{
+		error = ERROR_INVALID_COMPONENT_NAME;
+		goto out;
+	}
+
+	/* Don't forget to free this when it is no longer needed. */
+	(*temp_ptr)	= temp;
+	temp = NULL;
+
+	if(dir_part_ptr != NULL)
+		(*dir_part_ptr) = dir_part;
+
+	if(base_part_ptr != NULL)
+		(*base_part_ptr) = base_part;
+
+ out:
+
+	free_memory(temp);
+
+	return(error);
+}
+
+/****************************************************************************/
+
+/* Return a pointer to the base part of an SMB path name. For example,
+ * in "\foo\bar\baz" the base part would be "baz", and in "foo" the
+ * base part (in the absence of a directory part) would be identical
+ * to the path name "foo".
+ *
+ * Note that this function requires the path name to consist of a
+ * directory and a base part, and the base part must not be empty,
+ * e.g. "foo\" is not supported.
+ */
+static const TEXT *
+get_base_name(const TEXT * path_name,int path_name_len)
+{
+	const TEXT * result = path_name;
+
+	if(path_name_len > 1)
+	{
+		int i;
+
+		for(i = path_name_len-1 ; i >= 0 ; i--)
+		{
+			if(path_name[i] == SMB_PATH_SEPARATOR)
+			{
+				ASSERT( i+1 < path_name_len );
+
+				result = &path_name[i+1];
+				break;
+			}
+		}
+	}
+
+	return(result);
 }
 
 /****************************************************************************/
@@ -3624,7 +3740,7 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 		}
 	}
 
-	parent_name = AllocateMemory(name_len+1);
+	parent_name = allocate_memory(name_len+1);
 	if(parent_name == NULL)
 	{
 		SHOWMSG("not enough memory");
@@ -3645,9 +3761,136 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 
  out:
 
-	FreeMemory(parent_name);
+	free_memory(parent_name);
 
 	RETURN(error);
+	return(error);
+}
+
+/****************************************************************************/
+
+/* Translate an Amiga file name into an encoded form, such as UTF-8 or
+ * through a code page translation table. The file name provided will
+ * be modified in place and may become longer than it already is.
+ */
+static int
+translate_amiga_name_to_smb_name(STRPTR name, int name_len, int name_size)
+{
+	int error = ERROR_INVALID_COMPONENT_NAME;
+
+	ASSERT( name != NULL && name_len < name_size );
+
+	/* Translate the Amiga file name into UTF-8 encoded form? */
+	if (TranslateUTF8)
+	{
+		TEXT encoded_name[MAX_FILENAME_LEN+1];
+		int encoded_name_len;
+
+		/* Figure out how long the UTF-8 version will become. */
+		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
+
+		/* Encoding error occured, or the resulting name is longer than the buffer will hold? */
+		if(encoded_name_len < 0 || encoded_name_len >= name_size)
+			goto out;
+
+		/* Repeat the encoding process, writing the result to the
+		 * replacement name buffer now.
+		 */
+		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
+
+		/* Copy it back to the name buffer (which is not terribly efficient, though). */
+		strlcpy(name,encoded_name,name_size);
+	}
+	/* Translate the Amiga file name using a translation table? */
+	else if (TranslateNames)
+	{
+		const TEXT * map = map_amiga_to_smb_name;
+		TEXT c;
+		int i;
+
+		for(i = 0 ; i < name_len ; i++)
+		{
+			c = map[name[i]];
+
+			/* The NUL means that the respective mapping cannot
+			 * represent the desired character.
+			 */
+			if(c == '\0')
+				goto out;
+
+			name[i] = c;
+		}
+	}
+
+	error = OK;
+
+ out:
+
+	return(error);
+}
+
+/****************************************************************************/
+
+/* Translate an SMB file name in encoded form, such as UTF-8 or
+ * through a code page translation table, into a form suitable
+ * for use with AmigaDOS. The file name provided will be modified
+ * in place and may become longer than it already is.
+ */
+static int
+translate_smb_name_to_amiga_name(STRPTR name, int name_len, int name_size)
+{
+	int error = ERROR_INVALID_COMPONENT_NAME;
+
+	ASSERT( name != NULL && name_len < name_size );
+
+	/* Translate the name of the file/directory from UTF-8
+	 * into AmigaOS ISO 8859-1 (ISO Latin 1) encoding?
+	 */
+	if(TranslateUTF8)
+	{
+		TEXT decoded_name[MAX_FILENAME_LEN+1];
+		int decoded_name_len;
+
+		/* Try to decode the file name, translating it into ISO 8859-1 format. */
+		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
+
+		/* Decoding error occured, or the decoded name would be longer than
+		 * buffer would allow?
+		 */
+		if(decoded_name_len < 0 || decoded_name_len >= name_size)
+			goto out;
+
+		/* Decode the name for real. */
+		decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+
+		/* Copy it back to the name buffer (which is not terribly efficient, though). */
+		strlcpy(name,decoded_name,name_size);
+	}
+	/* Translate the name to Amiga format using a mapping table. */
+	else if (TranslateNames)
+	{
+		const TEXT * map = map_smb_to_amiga_name;
+		TEXT c;
+		int i;
+
+		for(i = 0 ; i < name_len ; i++)
+		{
+			c = map[name[i]];
+
+			/* The NUL means that the respective mapping cannot
+			 * represent the desired character.
+			 */
+			if(c == '\0')
+				goto out;
+
+			name[i] = c;
+		}
+	}
+
+	error = OK;
+
+ out:
+
 	return(error);
 }
 
@@ -3663,8 +3906,8 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
  * same process is currently scanning and issuing deletion
  * commands for.
  */
-STATIC VOID
-RestartDirScanner(const struct MsgPort * user,const TEXT * parent_dir_name)
+static void
+restart_directory_scanning(const struct MsgPort * user,const TEXT * parent_dir_name)
 {
 	struct LockNode * ln;
 
@@ -3682,9 +3925,9 @@ RestartDirScanner(const struct MsgPort * user,const TEXT * parent_dir_name)
 		if(ln->ln_LastUser == user)
 			continue;
 
-		if(CompareNames(parent_dir_name,ln->ln_FullName) == SAME)
+		if(compare_names(parent_dir_name,ln->ln_FullName) == SAME)
 		{
-			D(("restart scanning for '%s'", ln->ln_FullName));
+			D(("restart scanning for '%s'", escape_name(ln->ln_FullName)));
 
 			ln->ln_RestartExamine = TRUE;
 		}
@@ -3695,7 +3938,7 @@ RestartDirScanner(const struct MsgPort * user,const TEXT * parent_dir_name)
 
 /****************************************************************************/
 
-STATIC BPTR
+static BPTR
 Action_Parent(
 	const struct MsgPort *	user,
 	struct FileLock *		parent,
@@ -3703,7 +3946,7 @@ Action_Parent(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	const TEXT * parent_name;
+	struct LockNode * parent_ln;
 	struct LockNode * ln = NULL;
 	int error;
 
@@ -3711,28 +3954,26 @@ Action_Parent(
 
 	SHOWVALUE(parent);
 
-	if(parent != NULL)
+	/* The zero lock's parent is the zero lock. */
+	if(parent == NULL)
 	{
-		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
-
-		if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
-			goto out;
-		}
-
-		parent_name = parent_ln->ln_FullName;
-
-		parent_ln->ln_LastUser = user;
-	}
-	else
-	{
-		parent_name = NULL;
+		error = OK;
+		goto out;
 	}
 
-	error = build_full_path_name(parent_name,"/",&full_name);
+	parent_ln = (struct LockNode *)parent->fl_Key;
+
+	if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("lock doesn't look right");
+
+		error = ERROR_INVALID_LOCK;
+		goto out;
+	}
+
+	parent_ln->ln_LastUser = user;
+
+	error = get_parent_dir_name(parent_ln->ln_FullName,strlen(parent_ln->ln_FullName),&full_name);
 	if(error != OK)
 	{
 		/* Check if we ended up having to return the parent of
@@ -3745,7 +3986,7 @@ Action_Parent(
 		goto out;
 	}
 
-	ln = AllocateMemory(sizeof(*ln));
+	ln = allocate_memory(sizeof(*ln));
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -3766,7 +4007,7 @@ Action_Parent(
 
 	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -3779,8 +4020,8 @@ Action_Parent(
 
  out:
 
-	FreeMemory(full_name);
-	FreeMemory(ln);
+	free_memory(full_name);
+	free_memory(ln);
 
 	(*error_ptr) = error;
 
@@ -3790,7 +4031,7 @@ Action_Parent(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_DeleteObject(
 	const struct MsgPort *	user,
 	struct FileLock *		parent,
@@ -3842,44 +4083,13 @@ Action_DeleteObject(
 	 * BCPL format and needs to be converted into
 	 * 'C' format.
 	 */
-	ConvertBString(sizeof(name),name,bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		/* Translate the Amiga file name into UTF-8 encoded form? */
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			/* Figure out how long the UTF-8 version will become. */
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-
-			/* Encoding error occured, or the resulting name is longer than the buffer will hold? */
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			/* Repeat the encoding process, writing the result to the
-			 * replacement name buffer now.
-			 */
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			/* Copy it back to the conversion buffer (which is not terribly efficient, though). */
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		/* Translate the Amiga file name using a translation table? */
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,&full_name);
@@ -3899,7 +4109,7 @@ Action_DeleteObject(
 	/* Is there a file handle or file lock attached to this
 	 * object? If so, we'll exit right away.
 	 */
-	error = CheckAccessModeCollision(full_name,EXCLUSIVE_LOCK);
+	error = check_access_mode_collision(full_name,EXCLUSIVE_LOCK);
 	if(error != OK)
 	{
 		LOG(("there is still a lock or file attached to %s\n", full_name));
@@ -3918,13 +4128,13 @@ Action_DeleteObject(
 
 	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
 	if(smba_getattr(file,&st,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -3968,7 +4178,7 @@ Action_DeleteObject(
 			{
 				SHOWMSG("could be some other problem");
 				
-				error = MapErrnoToIoErr(error);
+				error = map_errno_to_ioerr(error);
 			}
 
 			goto out;
@@ -3982,7 +4192,7 @@ Action_DeleteObject(
 		{
 			SHOWVALUE(error);
 
-			error = MapErrnoToIoErr(error);
+			error = map_errno_to_ioerr(error);
 			goto out;
 		}
 	}
@@ -3990,7 +4200,7 @@ Action_DeleteObject(
 	/* Restart directory scanning for all locks which share
 	 * the parent directory of the object just deleted.
 	 */
-	RestartDirScanner(user, full_parent_name);
+	restart_directory_scanning(user, full_parent_name);
 
 	SHOWMSG("done.");
 
@@ -4001,8 +4211,8 @@ Action_DeleteObject(
 	if(file != NULL)
 		smba_close(ServerData,file);
 
-	FreeMemory(full_name);
-	FreeMemory(full_parent_name);
+	free_memory(full_name);
+	free_memory(full_parent_name);
 
 	(*error_ptr) = error;
 
@@ -4012,7 +4222,7 @@ Action_DeleteObject(
 
 /****************************************************************************/
 
-STATIC BPTR
+static BPTR
 Action_CreateDir(
 	const struct MsgPort *	user,
 	struct FileLock *		parent,
@@ -4021,15 +4231,12 @@ Action_CreateDir(
 {
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
-	int full_name_len;
 	struct LockNode * ln = NULL;
 	const TEXT * parent_name;
-	STRPTR dir_name = NULL;
 	smba_file_t * dir = NULL;
-	const TEXT * base_name;
 	TEXT name[MAX_FILENAME_LEN+1];
+	STRPTR dir_name,base_name,temp = NULL;
 	int error;
-	int i;
 
 	ENTER();
 
@@ -4062,35 +4269,13 @@ Action_CreateDir(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,&full_name);
@@ -4103,45 +4288,18 @@ Action_CreateDir(
 		goto out;
 	}
 
-	D(("full_name = '%s'",escape_name(full_name)));
-
-	full_name_len = strlen(full_name);
-
-	/* Note: extra character needed for special case '\name'. */ 
-	dir_name = AllocateMemory(full_name_len+2);
-	if(dir_name == NULL)
+	error = split_path_name(full_name,strlen(full_name),&temp,&dir_name,&base_name);
+	if(error != OK)
 	{
-		error = ERROR_NO_FREE_STORE;
+		D(("could not split path '%s'",escape_name(full_name)));
 		goto out;
 	}
 
-	memcpy(dir_name,full_name,full_name_len+1);
+	D(("path name = '%s'",escape_name(full_name)));
+	D(("directory name = '%s'\n", dir_name));
+	D(("base name = '%s'\n", base_name));
 
-	base_name = NULL;
-
-	for(i = full_name_len-1 ; i >= 0 ; i--)
-	{
-		if(dir_name[i] == SMB_PATH_SEPARATOR)
-		{
-			/* Is this a case of '\name'? If so, see to it that
-			 * dir_name becomes '\' and base_name becomes 'foo'.
-			 */
-			if(i == 0)
-			{
-				memmove(&dir_name[1],&dir_name[0],full_name_len+1);
-				i++;
-			}
-
-			dir_name[i] = '\0';
-
-			base_name = &dir_name[i+1];
-			break;
-		}
-	}
-
-	D(("full path name = '%s', directory name = '%s'\n", dir_name, base_name));
-
-	ln = AllocateMemory(sizeof(*ln));
+	ln = allocate_memory(sizeof(*ln));
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -4158,9 +4316,9 @@ Action_CreateDir(
 	ln->ln_FullName				= full_name;
 	ln->ln_LastUser				= user;
 
-	if(smba_open(ServerData,dir_name,open_read_only,open_dont_truncate,&dir,&error) < 0)
+	if(smba_open(ServerData,dir_name,open_writable,open_dont_truncate,&dir,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4168,7 +4326,7 @@ Action_CreateDir(
 
 	if(smba_mkdir(dir,base_name,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4177,9 +4335,9 @@ Action_CreateDir(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4195,9 +4353,9 @@ Action_CreateDir(
 	if(dir != NULL)
 		smba_close(ServerData,dir);
 
-	FreeMemory(dir_name);
-	FreeMemory(full_name);
-	FreeMemory(ln);
+	free_memory(temp);
+	free_memory(full_name);
+	free_memory(ln);
 
 	(*error_ptr) = error;
 
@@ -4207,7 +4365,7 @@ Action_CreateDir(
 
 /****************************************************************************/
 
-STATIC BPTR
+static BPTR
 Action_LocateObject(
 	const struct MsgPort *	user,
 	struct FileLock *		parent,
@@ -4247,35 +4405,13 @@ Action_LocateObject(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	if(is_reserved_name(FilePart(name)))
@@ -4296,7 +4432,7 @@ Action_LocateObject(
 		goto out;
 	}
 
-	ln = AllocateMemory(sizeof(*ln));
+	ln = allocate_memory(sizeof(*ln));
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -4313,7 +4449,7 @@ Action_LocateObject(
 	ln->ln_FullName				= full_name;
 	ln->ln_LastUser				= user;
 
-	error = CheckAccessModeCollision(full_name,ln->ln_FileLock.fl_Access);
+	error = check_access_mode_collision(full_name,ln->ln_FileLock.fl_Access);
 	if(error != OK)
 		goto out;
 
@@ -4321,7 +4457,7 @@ Action_LocateObject(
 
 	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4334,8 +4470,8 @@ Action_LocateObject(
 
  out:
 
-	FreeMemory(full_name);
-	FreeMemory(ln);
+	free_memory(full_name);
+	free_memory(ln);
 
 	(*error_ptr) = error;
 
@@ -4345,7 +4481,7 @@ Action_LocateObject(
 
 /****************************************************************************/
 
-STATIC BPTR
+static BPTR
 Action_CopyDir(
 	const struct MsgPort *	user,
 	struct FileLock *		lock,
@@ -4370,7 +4506,7 @@ Action_CopyDir(
 		goto out;
 	}
 
-	ln = AllocateMemory(sizeof(*ln));
+	ln = allocate_memory(sizeof(*ln));
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -4404,13 +4540,14 @@ Action_CopyDir(
 
 	source_name_len = strlen(source_name);
 
-	full_name = AllocateMemory(source_name_len+1);
+	full_name = allocate_memory(source_name_len+1);
 	if(full_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
+	/* Length includes the terminating NUL byte. */
 	memcpy(full_name,source_name,source_name_len+1);
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
@@ -4425,7 +4562,7 @@ Action_CopyDir(
 
 	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4438,8 +4575,8 @@ Action_CopyDir(
 
  out:
 
-	FreeMemory(full_name);
-	FreeMemory(ln);
+	free_memory(full_name);
+	free_memory(ln);
 
 	(*error_ptr) = error;
 
@@ -4449,7 +4586,7 @@ Action_CopyDir(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_FreeLock(
 	struct FileLock *	lock,
 	LONG *				error_ptr)
@@ -4504,8 +4641,8 @@ Action_FreeLock(
 
 	found->ln_Magic = 0;
 
-	FreeMemory(found->ln_FullName);
-	FreeMemory(found);
+	free_memory(found->ln_FullName);
+	free_memory(found);
 
  out:
 
@@ -4517,7 +4654,7 @@ Action_FreeLock(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_SameLock(
 	const struct MsgPort *	user,
 	struct FileLock *		lock1,
@@ -4592,7 +4729,7 @@ Action_SameLock(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_SetProtect(
 	const struct MsgPort *	user,
 	struct FileLock *		parent,
@@ -4639,35 +4776,13 @@ Action_SetProtect(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,&full_name);
@@ -4686,7 +4801,7 @@ Action_SetProtect(
 
 	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4713,7 +4828,7 @@ Action_SetProtect(
 
 	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4724,7 +4839,7 @@ Action_SetProtect(
 	if(file != NULL)
 		smba_close(ServerData,file);
 
-	FreeMemory(full_name);
+	free_memory(full_name);
 
 	(*error_ptr) = error;
 
@@ -4734,7 +4849,7 @@ Action_SetProtect(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_RenameObject(
 	const struct MsgPort *	user,
 	struct FileLock *		source_lock,
@@ -4785,35 +4900,13 @@ Action_RenameObject(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,source_bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,&full_source_name);
@@ -4847,35 +4940,13 @@ Action_RenameObject(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,destination_bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,&full_destination_name);
@@ -4892,11 +4963,11 @@ Action_RenameObject(
 	 * updating the names in all the file locks and file handles which
 	 * use it.
 	 */
-	error = NameAlreadyInUse(full_source_name);
+	error = name_already_in_use(full_source_name);
 	if(error != OK)
 		goto out;
 
-	error = NameAlreadyInUse(full_destination_name);
+	error = name_already_in_use(full_destination_name);
 	if(error != OK)
 		goto out;
 
@@ -4905,7 +4976,7 @@ Action_RenameObject(
 
 	if(smba_rename(ServerData,full_source_name,full_destination_name,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -4916,18 +4987,18 @@ Action_RenameObject(
 	 * the entry was removed unless entry just changed name, but did
 	 * not move to a different directory.
 	 */
-	if(parent_source_name != NULL && (parent_destination_name == NULL || CompareNames(parent_source_name,parent_destination_name) != SAME))
-		RestartDirScanner(user,parent_source_name);
+	if(parent_source_name != NULL && (parent_destination_name == NULL || compare_names(parent_source_name,parent_destination_name) != SAME))
+		restart_directory_scanning(user,parent_source_name);
 
 	result = DOSTRUE;
 
  out:
 
-	FreeMemory(full_source_name);
-	FreeMemory(full_destination_name);
+	free_memory(full_source_name);
+	free_memory(full_destination_name);
 
-	FreeMemory(parent_source_name);
-	FreeMemory(parent_destination_name);
+	free_memory(parent_source_name);
+	free_memory(parent_destination_name);
 
 	(*error_ptr) = error;
 
@@ -4937,7 +5008,7 @@ Action_RenameObject(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_DiskInfo(
 	struct InfoData *	id,
 	LONG *				error_ptr)
@@ -5000,7 +5071,7 @@ Action_DiskInfo(
 		id->id_BytesPerBlock	= 512;
 		id->id_DiskType			= ID_NO_DISK_PRESENT;
 
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		result = DOSFALSE;
 	}
 
@@ -5017,7 +5088,7 @@ Action_DiskInfo(
 	return(result);
 }
 
-STATIC LONG
+static LONG
 Action_Info(
 	const struct MsgPort *	user,
 	struct FileLock *		lock,
@@ -5067,7 +5138,7 @@ Action_Info(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_ExamineObject(
 	const struct MsgPort *	user,
 	struct FileLock *		lock,
@@ -5082,6 +5153,8 @@ Action_ExamineObject(
 	SHOWVALUE(lock);
 
 	memset(fib,0,sizeof(*fib));
+
+	fib->fib_DiskKey = -1;
 
 	if(lock == NULL)
 	{
@@ -5099,7 +5172,6 @@ Action_ExamineObject(
 		fib->fib_EntryType		= ST_ROOT;
 		fib->fib_NumBlocks		= 1;
 		fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
-		fib->fib_DiskKey		= -1; /* The ZERO lock cannot be used for directory scanning... */
 		fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 								  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 	}
@@ -5123,11 +5195,11 @@ Action_ExamineObject(
 		{
 			SHOWMSG("information not available");
 
-			error = MapErrnoToIoErr(error);
+			error = map_errno_to_ioerr(error);
 			goto out;
 		}
 
-		seconds = st.mtime - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+		seconds = st.mtime - UNIX_TIME_OFFSET - get_time_zone_delta();
 		if(seconds < 0)
 			seconds = 0;
 
@@ -5152,6 +5224,7 @@ Action_ExamineObject(
 			fib->fib_DirEntryType	= ST_ROOT;
 			fib->fib_EntryType		= ST_ROOT;
 			fib->fib_NumBlocks		= 1;
+			fib->fib_DiskKey		= 0;
 			fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 		}
@@ -5159,101 +5232,58 @@ Action_ExamineObject(
 		{
 			QUAD size_quad;
 			QUAD num_blocks_quad;
+			TEXT translated_name[MAX_FILENAME_LEN+1];
 			const TEXT * name;
-			const TEXT * final_name;
-			TEXT c;
 			int name_len;
-			int i;
 
-			name = ln->ln_FullName;
+			name = get_base_name(ln->ln_FullName,strlen(ln->ln_FullName));
 			name_len = strlen(name);
 
-			/* We just want the base name, not the path
-			 * leading up to it.
-			 */
-			for(i = name_len-1 ; i >= 0 ; i--)
+			if(NOT ServerData->server.unicode_enabled)
 			{
-				if(name[i] == SMB_PATH_SEPARATOR)
+				if(name_len >= (int)sizeof(translated_name))
 				{
-					name = &name[i+1];
-					name_len -= i+1;
-					break;
-				}
-			}
+					D(("name is too long (%ld >= %ld)", name_len, sizeof(translated_name)));
 
-			/* Translate the name of the file/directory from UTF-8
-			 * into AmigaOS ISO 8859-1 (ISO Latin 1) encoding?
-			 */
-			if(TranslateUTF8 && NOT ServerData->server.unicode_enabled)
-			{
-				TEXT decoded_name[MAX_FILENAME_LEN+1];
-				int decoded_name_len;
-
-				/* Try to decode the file name, translating it into ISO 8859-1 format. */
-				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-
-				/* Decoding error occured, or the decoded name would be longer than
-				 * buffer would allow?
-				 */
-				if(decoded_name_len < 0 || decoded_name_len >= (int)sizeof(fib->fib_FileName))
-				{
 					error = ERROR_INVALID_COMPONENT_NAME;
 					goto out;
 				}
 
-				/* Decode the name for real. */
-				decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+				/* Length includes the terminating NUL byte. */
+				memcpy(translated_name,name,name_len+1);
 
-				/* Store the decoded name in the form expected
-				 * by dos.library (which will then translate it again).
-				 */
-				fib->fib_FileName[0] = decoded_name_len;
-				memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
-			}
-			else
-			{
-				/* Will the name fit? */
-				if(name_len >= (int)sizeof(fib->fib_FileName))
+				error = translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name));
+				if(error != OK)
 				{
-					error = ERROR_INVALID_COMPONENT_NAME;
+					D(("name is not acceptable"));
 					goto out;
 				}
 
-				/* Store the file/directory name in the form expected
-				 * by dos.library.
-				 */
-				ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
-
-				/* If necessary, translate the name to Amiga format using a mapping table. */
-				if(TranslateNames && NOT ServerData->server.unicode_enabled)
-				{
-					if(!TranslateBName(fib->fib_FileName,M2A))
-					{
-						D(("name contains unacceptable characters"));
-
-						error = ERROR_INVALID_COMPONENT_NAME;
-						goto out;
-					}
-				}
+				name = translated_name;
+				name_len = strlen(name);
 			}
 
 			/* Check if this is a usable Amiga file or directory name. */
-			for(i = 0, final_name = &fib->fib_FileName[1] ; i < name_len ; i++)
+			error = validate_amigados_file_name(name, name_len);
+			if(error != OK)
 			{
-				c = final_name[i];
-
-				/* This should be a printable character and none of
-				 * the characters reserved by the file system which
-				 * should not appear in a file/directory name.
-				 */
-				if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
-				{
-					D(("name contains unacceptable characters"));
-
-					error = ERROR_INVALID_COMPONENT_NAME;
-					goto out;
-				}
+				D(("name contains unacceptable characters"));
+				goto out;
 			}
+
+			/* Will the name fit? */
+			if(name_len >= (int)sizeof(fib->fib_FileName))
+			{
+				D(("name is too long (%ld >= %ld)", name_len, sizeof(fib->fib_FileName)));
+
+				error = ERROR_INVALID_COMPONENT_NAME;
+				goto out;
+			}
+
+			/* Store the file/directory name in the form expected
+			 * by dos.library.
+			 */
+			convert_from_c_to_bcpl_string(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 			/* We pretend that the volume uses 512 bytes per
 			 * block (or in SMB terms: the sector size is
@@ -5286,8 +5316,8 @@ Action_ExamineObject(
 			if(NOT st.is_changed_since_last_archive)
 				fib->fib_Protection |= FIBF_ARCHIVE;
 
-			if(NOT st.is_dir)
-				fib->fib_DiskKey = -1;
+			if(st.is_dir)
+				fib->fib_DiskKey = 0;
 		}
 	}
 
@@ -5312,12 +5342,14 @@ Action_ExamineObject(
 
 /****************************************************************************/
 
-/* Check if the name is acceptable as an Amiga file name. */
-STATIC BOOL
+/* Check if the name is acceptable as an Amiga file name. Note
+ * that we do not check the length.
+ */
+static BOOL
 name_is_acceptable(const TEXT * name)
 {
 	BOOL result = FALSE;
-	TEXT c;
+	int c;
 
 	c = name[0];
 
@@ -5354,14 +5386,12 @@ dir_scan_callback_func_exnext(
 	int						eof,
 	smba_stat_t *			st)
 {
-	TEXT * final_file_name;
 	int result = 0;
 	int name_len;
-	int i;
 	LONG seconds;
-	TEXT c;
 	QUAD size_quad;
 	QUAD num_blocks_quad;
+	TEXT translated_name[MAX_FILENAME_LEN+1];
 
 	ENTER();
 
@@ -5381,7 +5411,7 @@ dir_scan_callback_func_exnext(
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if(!name_is_acceptable(name))
+	if(NOT name_is_acceptable(name))
 	{
 		D(("   name is not acceptable"));
 		goto out;
@@ -5395,69 +5425,45 @@ dir_scan_callback_func_exnext(
 
 	name_len = strlen(name);
 
-	if(TranslateUTF8 && NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
-		TEXT decoded_name[MAX_FILENAME_LEN+1];
-		int decoded_name_len;
-
-		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-
-		/* Skip file names which we could not represent. */
-		if(decoded_name_len < 0)
+		if(name_len >= (int)sizeof(translated_name))
 		{
-			D(("   name cannot be decoded"));
+			D(("   name is too long (%ld >= %ld)", name_len, sizeof(translated_name)));
 			goto out;
 		}
 
-		if(decoded_name_len >= (int)sizeof(fib->fib_FileName))
+		/* Length includes the terminating NUL byte. */
+		memcpy(translated_name,name,name_len+1);
+
+		if(translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name)) != OK)
 		{
-			D(("   decoded name is too long (%ld >= %ld)",decoded_name_len, sizeof(fib->fib_FileName)));
+			D(("   name is not acceptable"));
 			goto out;
 		}
 
-		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
-
-		fib->fib_FileName[0] = decoded_name_len;
-		memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
-
-		name_len = decoded_name_len;
-	}
-	else
-	{
-		/* Skip file names which we could not represent. */
-		if(name_len >= (int)sizeof(fib->fib_FileName))
-		{
-			D(("   name is too long (%ld >= %ld)",name_len, sizeof(fib->fib_FileName)));
-			goto out;
-		}
-
-		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
-
-		if(TranslateNames && NOT ServerData->server.unicode_enabled)
-		{
-			if(!TranslateBName(fib->fib_FileName,M2A))
-			{
-				D(("   name cannot be translated"));
-				goto out;
-			}
-		}
+		name = translated_name;
+		name_len = strlen(name);
 	}
 
 	/* Check if this is a usable Amiga file or directory name. */
-	for(i = 0, final_file_name = &fib->fib_FileName[1] ; i < name_len ; i++)
+	if(validate_amigados_file_name(name, name_len) != OK)
 	{
-		c = final_file_name[i];
-
-		/* This should be a printable character and none of
-		 * the characters reserved by the file system which
-		 * should not appear in a file/directory name.
-		 */
-		if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
-		{
-			D(("   final name contains unacceptable characters"));
-			goto out;
-		}
+		D(("   name contains unacceptable characters"));
+		goto out;
 	}
+
+	/* Will the name fit? */
+	if(name_len >= (int)sizeof(fib->fib_FileName))
+	{
+		D(("   name is too long (%ld >= %ld)", name_len, sizeof(fib->fib_FileName)));
+		goto out;
+	}
+
+	/* Store the file/directory name in the form expected
+	 * by dos.library.
+	 */
+	convert_from_c_to_bcpl_string(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 	D(("   final name = '%b'", MKBADDR(fib->fib_FileName)));
 
@@ -5487,7 +5493,7 @@ dir_scan_callback_func_exnext(
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-	seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+	seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - get_time_zone_delta();
 	if(seconds < 0)
 		seconds = 0;
 
@@ -5505,7 +5511,7 @@ dir_scan_callback_func_exnext(
 	return(result);
 }
 
-STATIC LONG
+static LONG
 Action_ExamineNext(
 	const struct MsgPort *	user,
 	struct FileLock *		lock,
@@ -5532,17 +5538,20 @@ Action_ExamineNext(
 	if(lock == NULL)
 	{
 		SHOWMSG("invalid lock");
+
+		fib->fib_DiskKey = -1;
+
 		error = ERROR_INVALID_LOCK;
 		goto out;
 	}
-
-	offset = fib->fib_DiskKey;
 
 	ln = (struct LockNode *)lock->fl_Key;
 
 	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
 	{
 		SHOWMSG("lock doesn't look right");
+
+		fib->fib_DiskKey = -1;
 
 		error = ERROR_INVALID_LOCK;
 		goto out;
@@ -5559,6 +5568,10 @@ Action_ExamineNext(
 		offset = 0;
 
 		ln->ln_RestartExamine = FALSE;
+	}
+	else
+	{
+		offset = fib->fib_DiskKey;
 	}
 
 	memset(fib,0,sizeof(*fib));
@@ -5584,7 +5597,7 @@ Action_ExamineNext(
 		SHOWVALUE(error);
 		fib->fib_DiskKey = -1;
 
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -5621,7 +5634,7 @@ dir_scan_callback_func_exall(
 	int						eof,
 	smba_stat_t *			st)
 {
-	TEXT decoded_name[MAX_FILENAME_LEN+1];
+	TEXT translated_name[MAX_FILENAME_LEN+1];
 	BOOL ignore_this_entry = FALSE;
 	int name_len = -1;
 	int result = 0;
@@ -5644,7 +5657,7 @@ dir_scan_callback_func_exall(
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if (!name_is_acceptable(name))
+	if (NOT name_is_acceptable(name))
 	{
 		D(("   name is not acceptable"));
 		ignore_this_entry = TRUE;
@@ -5656,100 +5669,51 @@ dir_scan_callback_func_exall(
 	}
 	else if (NOT ServerData->server.unicode_enabled)
 	{
-		/* If necessary, translate the name of the file first, so that we
-		 * can decide early on whether or not it should show up in a
-		 * directory listing. This filters out, for example, files using
-		 * characters which are not usable on the Amiga because they fall
-		 * outside the 8 bit character set used.
-		 */
-		if(TranslateUTF8)
+		name_len = strlen(name);
+
+		if(name_len < (int)sizeof(translated_name))
 		{
-			int decoded_name_len;
+			/* Length includes the terminating NUL byte. */
+			memcpy(translated_name,name,name_len+1);
 
-			name_len = strlen(name);
-
-			decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-
-			/* Skip file names which we could not represent. */
-			if(decoded_name_len < 0)
+			if(translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name)) == OK)
 			{
-				D(("   name cannot be decoded"));
-				ignore_this_entry = TRUE;
-			}
-			else if (decoded_name_len > MAX_FILENAME_LEN)
-			{
-				D(("   decoded name is too long (%ld > %ld)",decoded_name_len, MAX_FILENAME_LEN));
-				ignore_this_entry = TRUE;
+				name = translated_name;
+				name_len = strlen(name);
 			}
 			else
 			{
-				decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
+				D(("   name cannot be translated"));
 
-				/* Use the decoded replacement name. */
-				name = decoded_name;
-				name_len = decoded_name_len;
+				ignore_this_entry = TRUE;
 			}
 		}
-		else if (TranslateNames)
+		else
 		{
-			name_len = strlen(name);
-			if (name_len > MAX_FILENAME_LEN)
-			{
-				D(("   name is too long (%ld > %ld)",name_len, MAX_FILENAME_LEN));
-				ignore_this_entry = TRUE;
-			}
-			else
-			{
-				/* We need to make a copy of the original name, because
-				 * the translation will modify what is passed to it.
-				 */
-				memcpy(decoded_name,name,name_len+1);
+			D(("   name is too long (%ld >= %ld)", name_len, sizeof(translated_name)));
 
-				if(TranslateCName(decoded_name,M2A))
-				{
-					/* Use the translated replacement name. */
-					name = decoded_name;
-				}
-				else
-				{
-					D(("   name cannot be translated"));
-					ignore_this_entry = TRUE;
-				}
-			}
+			ignore_this_entry = TRUE;
 		}
 	}
 
 	/* Check if this is a usable Amiga file or directory name. */
-	if(!ignore_this_entry)
+	if(NOT ignore_this_entry)
 	{
-		TEXT c;
-		int i;
-
 		if(name_len == -1)
 			name_len = strlen(name);
 
-		for(i = 0 ; i < name_len ; i++)
+		if(validate_amigados_file_name(name, name_len) != OK)
 		{
-			c = name[i];
+			D(("   final name contains unacceptable characters"));
 
-			/* This should be a printable character and none of
-			 * the characters reserved by the file system which
-			 * should not appear in a file/directory name.
-			 */
-			if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
-			{
-				D(("   final name contains unacceptable characters"));
-
-				ignore_this_entry = TRUE;
-				break;
-			}
+			ignore_this_entry = TRUE;
 		}
 	}
 
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if(!ignore_this_entry)
+	if(NOT ignore_this_entry)
 	{
 		ULONG type = ec->ec_Type;
 		struct ExAllData * ed;
@@ -5834,7 +5798,7 @@ dir_scan_callback_func_exall(
 			LONG seconds;
 
 			/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-			seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+			seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - get_time_zone_delta();
 			if(seconds < 0)
 				seconds = 0;
 
@@ -5921,7 +5885,7 @@ dir_scan_callback_func_exall(
 	return(result);
 }
 
-STATIC LONG
+static LONG
 Action_ExamineAll(
 	const struct MsgPort *	last_user,
 	struct FileLock *		lock,
@@ -6062,7 +6026,7 @@ Action_ExamineAll(
 		if(smba_getattr(ln->ln_File,&st,&error) < 0)
 		{
 			SHOWMSG("didn't work");
-			error = MapErrnoToIoErr(error);
+			error = map_errno_to_ioerr(error);
 
 			eac->eac_LastKey = (ULONG)-1;
 
@@ -6108,7 +6072,7 @@ Action_ExamineAll(
 
 		eac->eac_LastKey = (ULONG)-1;
 
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -6138,7 +6102,7 @@ Action_ExamineAll(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_Find(
 	const struct MsgPort *	user,
 	LONG					action,
@@ -6154,6 +6118,7 @@ Action_Find(
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	BOOL create_new_file;
+	STRPTR temp = NULL;
 	int error;
 
 	ENTER();
@@ -6199,35 +6164,13 @@ Action_Find(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	if(is_reserved_name(FilePart(name)))
@@ -6246,7 +6189,7 @@ Action_Find(
 		goto out;
 	}
 
-	fn = AllocateMemory(sizeof(*fn));
+	fn = allocate_memory(sizeof(*fn));
 	if(fn == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -6260,7 +6203,7 @@ Action_Find(
 	fn->fn_FullName	= full_name;
 	fn->fn_Mode		= (action == ACTION_FINDOUTPUT) ? EXCLUSIVE_LOCK : SHARED_LOCK;
 
-	error = CheckAccessModeCollision(full_name,fn->fn_Mode);
+	error = check_access_mode_collision(full_name,fn->fn_Mode);
 	if(error != OK)
 		goto out;
 
@@ -6314,10 +6257,8 @@ Action_Find(
 	/* Create a new file? */
 	if(create_new_file)
 	{
+		STRPTR dir_name,base_name;
 		smba_file_t * dir;
-		int full_name_len;
-		STRPTR base_name;
-		int i;
 
 		if(WriteProtected)
 		{
@@ -6325,48 +6266,24 @@ Action_Find(
 			goto out;
 		}
 
-		full_name_len = strlen(full_name);
-
-		/* Note: extra character required for special case below. */
-		parent_path = AllocateMemory(full_name_len+2);
-		if(parent_path == NULL)
+		error = split_path_name(full_name,strlen(full_name),&temp,&dir_name,&base_name);
+		if(error != OK)
 		{
-			error = ERROR_NO_FREE_STORE;
+			D(("could not split path '%s'",escape_name(full_name)));
 			goto out;
 		}
 
-		memcpy(parent_path,full_name,full_name_len+1);
-
-		base_name = NULL;
-
-		for(i = full_name_len-1 ; i >= 0 ; i--)
-		{
-			if(parent_path[i] == SMB_PATH_SEPARATOR)
-			{
-				if(i == 0)
-				{
-					memmove(&parent_path[1],&parent_path[0],full_name_len+1);
-					i++;
-				}
-
-				parent_path[i] = '\0';
-
-				base_name = &parent_path[i+1];
-				break;
-			}
-		}
-
 		SHOWMSG("creating a file; finding parent path first");
-		D(("parent_path = '%s'",escape_name(parent_path)));
+		D(("dir_name = '%s'",escape_name(dir_name)));
 
-		if(smba_open(ServerData,parent_path,open_read_only,open_dont_truncate,&dir,&error) < 0)
+		if(smba_open(ServerData,dir_name,open_writable,open_dont_truncate,&dir,&error) < 0)
 		{
-			error = MapErrnoToIoErr(error);
+			error = map_errno_to_ioerr(error);
 			goto out;
 		}
 
 		SHOWMSG("now trying to create the file");
-		D(("base_name = '%s'",escape_name(base_name)));
+		D(("base name = '%s'",escape_name(base_name)));
 
 		if(smba_create(dir,base_name,&error) < 0)
 		{
@@ -6375,7 +6292,7 @@ Action_Find(
 
 			smba_close(ServerData,dir);
 
-			error = MapErrnoToIoErr(error);
+			error = map_errno_to_ioerr(error);
 
 			SHOWVALUE(error);
 
@@ -6390,7 +6307,7 @@ Action_Find(
 	/* Now for the remainder... */
 	if(smba_open(ServerData,full_name,action != ACTION_FINDINPUT,create_new_file,&fn->fn_File,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -6404,9 +6321,10 @@ Action_Find(
 
  out:
 
-	FreeMemory(full_name);
-	FreeMemory(fn);
-	FreeMemory(parent_path);
+	free_memory(temp);
+	free_memory(full_name);
+	free_memory(fn);
+	free_memory(parent_path);
 
 	(*error_ptr) = error;
 
@@ -6416,7 +6334,7 @@ Action_Find(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_Read(
 	struct FileNode *	fn,
 	APTR				mem,
@@ -6443,7 +6361,7 @@ Action_Read(
 		result = smba_read(fn->fn_File,mem,length,&fn->fn_OffsetQuad,&error);
 		if(result < 0)
 		{
-			error = MapErrnoToIoErr(error);
+			error = map_errno_to_ioerr(error);
 
 			result = -1;
 			goto out;
@@ -6462,7 +6380,7 @@ Action_Read(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_Write(
 	struct FileNode *	fn,
 	APTR				mem,
@@ -6495,7 +6413,7 @@ Action_Write(
 		result = smba_write(fn->fn_File,mem,length,&fn->fn_OffsetQuad,&error);
 		if(result < 0)
 		{
-			error = MapErrnoToIoErr(error);
+			error = map_errno_to_ioerr(error);
 
 			result = -1;
 			goto out;
@@ -6514,7 +6432,7 @@ Action_Write(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_End(
 	struct FileNode *	which_fn,
 	LONG *				error_ptr)
@@ -6559,8 +6477,8 @@ Action_End(
 
 	found->fn_Magic = 0;
 
-	FreeMemory(found->fn_FullName);
-	FreeMemory(found);
+	free_memory(found->fn_FullName);
+	free_memory(found);
 
 	result = DOSTRUE;
 
@@ -6573,7 +6491,7 @@ Action_End(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_Seek(
 	struct FileNode *	fn,
 	LONG				position,
@@ -6618,7 +6536,7 @@ Action_Seek(
 
 			if(smba_getattr(fn->fn_File,&st,&error) < 0)
 			{
-				error = MapErrnoToIoErr(error);
+				error = map_errno_to_ioerr(error);
 				goto out;
 			}
 
@@ -6675,7 +6593,7 @@ Action_Seek(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_SetFileSize(
 	struct FileNode *	fn,
 	LONG				position,
@@ -6720,7 +6638,7 @@ Action_SetFileSize(
 
 			if(smba_getattr(fn->fn_File,&st,&error) < 0)
 			{
-				error = MapErrnoToIoErr(error);
+				error = map_errno_to_ioerr(error);
 				goto out;
 			}
 
@@ -6763,7 +6681,7 @@ Action_SetFileSize(
 
 	if(smba_setattr(fn->fn_File,NULL,&new_position_quad,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -6787,7 +6705,7 @@ Action_SetFileSize(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_SetDate(
 	const struct MsgPort *		user,
 	struct FileLock *			parent,
@@ -6835,35 +6753,13 @@ Action_SetDate(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,&full_name);
@@ -6880,13 +6776,13 @@ Action_SetDate(
 
 	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
 	if(smba_getattr(file,&st,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -6896,11 +6792,11 @@ Action_SetDate(
 
 	st.atime = -1;
 	st.ctime = -1;
-	st.mtime = seconds + UNIX_TIME_OFFSET + GetTimeZoneDelta();
+	st.mtime = seconds + UNIX_TIME_OFFSET + get_time_zone_delta();
 
 	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -6911,7 +6807,7 @@ Action_SetDate(
 	if(file != NULL)
 		smba_close(ServerData,file);
 
-	FreeMemory(full_name);
+	free_memory(full_name);
 
 	(*error_ptr) = error;
 
@@ -6921,7 +6817,7 @@ Action_SetDate(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_ExamineFH(
 	struct FileNode *		fn,
 	struct FileInfoBlock *	fib,
@@ -6930,16 +6826,18 @@ Action_ExamineFH(
 	QUAD size_quad;
 	QUAD num_blocks_quad;
 	LONG result = DOSFALSE;
-	const TEXT * final_name;
-	TEXT c;
 	smba_stat_t st;
 	int error;
 	LONG seconds;
+	TEXT translated_name[MAX_FILENAME_LEN+1];
 	const TEXT * name;
 	int name_len;
-	int i;
 
 	ENTER();
+
+	memset(fib,0,sizeof(*fib));
+
+	fib->fib_DiskKey = -1;
 
 	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
 	{
@@ -6951,86 +6849,58 @@ Action_ExamineFH(
 
 	if(smba_getattr(fn->fn_File,&st,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
-
-	name = fn->fn_FullName;
+	
+	name = get_base_name(fn->fn_FullName,strlen(fn->fn_FullName));
 	name_len = strlen(name);
 
-	for(i = name_len ; i >= 0 ; i--)
+	if(NOT ServerData->server.unicode_enabled)
 	{
-		if(name[i] == SMB_PATH_SEPARATOR)
+		if(name_len >= (int)sizeof(translated_name))
 		{
-			name = &name[i+1];
-			name_len -= i+1;
-			break;
-		}
-	}
-
-	memset(fib,0,sizeof(*fib));
-
-	if(TranslateUTF8 && NOT ServerData->server.unicode_enabled)
-	{
-		TEXT decoded_name[MAX_FILENAME_LEN+1];
-		int decoded_name_len;
-
-		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-		if(decoded_name_len < 0 || decoded_name_len >= (int)sizeof(fib->fib_FileName))
-		{
-			error = ERROR_INVALID_COMPONENT_NAME;
-			goto out;
-		}
-
-		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
-
-		fib->fib_FileName[0] = decoded_name_len;
-		memcpy(&fib->fib_FileName[1],decoded_name,decoded_name_len);
-
-		name_len = decoded_name_len;
-	}
-	else
-	{
-		/* Will the name fit? */
-		if(name_len >= (int)sizeof(fib->fib_FileName))
-		{
-			D(("name contains unacceptable characters"));
+			D(("name is too long (%ld >= %ld)", name_len, sizeof(translated_name)));
 
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
 		}
 
-		ConvertCString(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
+		/* Length includes the terminating NUL byte. */
+		memcpy(translated_name,name,name_len+1);
 
-		if(TranslateNames && NOT ServerData->server.unicode_enabled)
+		error = translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name));
+		if(error != OK)
 		{
-			if(!TranslateBName(fib->fib_FileName,M2A))
-			{
-				D(("name contains unacceptable characters"));
-
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
+			D(("name is not acceptable"));
+			goto out;
 		}
+
+		name = translated_name;
+		name_len = strlen(name);
 	}
 
 	/* Check if this is a usable Amiga file or directory name. */
-	for(i = 0, final_name = &fib->fib_FileName[1] ; i < name_len ; i++)
+	error = validate_amigados_file_name(name, name_len);
+	if(error != OK)
 	{
-		c = final_name[i];
-
-		/* This should be a printable character and none of
-		 * the characters reserved by the file system which
-		 * should not appear in a file/directory name.
-		 */
-		if((c < ' ' && c != '\t') || (128 <= c && c < 160) || c == '/' || c == ':' || c == SMB_PATH_SEPARATOR)
-		{
-			D(("name contains unacceptable characters"));
-
-			error = ERROR_INVALID_COMPONENT_NAME;
-			goto out;
-		}
+		D(("name contains unacceptable characters"));
+		goto out;
 	}
+
+	/* Will the name fit? */
+	if(name_len >= (int)sizeof(fib->fib_FileName))
+	{
+		D(("name is too long (%ld >= %ld)", name_len, sizeof(fib->fib_FileName)));
+
+		error = ERROR_INVALID_COMPONENT_NAME;
+		goto out;
+	}
+
+	/* Store the file/directory name in the form expected
+	 * by dos.library.
+	 */
+	convert_from_c_to_bcpl_string(fib->fib_FileName,sizeof(fib->fib_FileName),name,name_len);
 
 	/* Convert the size of the file into blocks, with 512 bytes per block. */
 	size_quad.Low	= st.size_low;
@@ -7044,7 +6914,6 @@ Action_ExamineFH(
 	fib->fib_EntryType		= ST_FILE;
 	fib->fib_NumBlocks		= num_blocks_quad.Low;
 	fib->fib_Size			= truncate_64_bit_position(&size_quad);
-	fib->fib_DiskKey		= -1;
 
 	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 							  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
@@ -7059,7 +6928,7 @@ Action_ExamineFH(
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-	seconds = (st.mtime == 0 ? st.ctime : st.mtime) - UNIX_TIME_OFFSET - GetTimeZoneDelta();
+	seconds = (st.mtime == 0 ? st.ctime : st.mtime) - UNIX_TIME_OFFSET - get_time_zone_delta();
 	if(seconds < 0)
 		seconds = 0;
 
@@ -7079,7 +6948,7 @@ Action_ExamineFH(
 
 /****************************************************************************/
 
-STATIC BPTR
+static BPTR
 Action_ParentFH(
 	struct FileNode *	fn,
 	LONG *				error_ptr)
@@ -7087,9 +6956,7 @@ Action_ParentFH(
 	BPTR result = ZERO;
 	struct LockNode * ln = NULL;
 	int error;
-	STRPTR full_name = NULL;
-	int full_name_len;
-	int i;
+	STRPTR parent_dir_name = NULL;
 
 	ENTER();
 
@@ -7101,34 +6968,11 @@ Action_ParentFH(
 		goto out;
 	}
 
-	full_name_len = strlen(fn->fn_FullName);
-	if(full_name_len < 2) /* Must be large enough to hold SMB_ROOT_DIR_NAME. */
-		full_name_len = 2;
-
-	full_name = AllocateMemory(full_name_len+1);
-	if(full_name == NULL)
-	{
-		error = ERROR_NO_FREE_STORE;
+	error = get_parent_dir_name(fn->fn_FullName,strlen(fn->fn_FullName),&parent_dir_name);
+	if(error != OK)
 		goto out;
-	}
 
-	memcpy(full_name,fn->fn_FullName,full_name_len+1);
-
-	for(i = full_name_len-1 ; i >= 0 ; i--)
-	{
-		if(i == 0)
-		{
-			strcpy(full_name,SMB_ROOT_DIR_NAME);
-			break;
-		}
-		else if (full_name[i] == SMB_PATH_SEPARATOR)
-		{
-			full_name[i] = '\0';
-			break;
-		}
-	}
-
-	ln = AllocateMemory(sizeof(*ln));
+	ln = allocate_memory(sizeof(*ln));
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -7142,13 +6986,13 @@ Action_ParentFH(
 	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
-	ln->ln_FullName				= full_name;
+	ln->ln_FullName				= parent_dir_name;
 
-	D(("full_name = '%s'",escape_name(full_name)));
+	D(("parent_dir_name = '%s'",escape_name(parent_dir_name)));
 
-	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,parent_dir_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -7156,13 +7000,13 @@ Action_ParentFH(
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
-	full_name = NULL;
+	parent_dir_name = NULL;
 	ln = NULL;
 
  out:
 
-	FreeMemory(ln);
-	FreeMemory(full_name);
+	free_memory(ln);
+	free_memory(parent_dir_name);
 
 	(*error_ptr) = error;
 
@@ -7172,7 +7016,7 @@ Action_ParentFH(
 
 /****************************************************************************/
 
-STATIC BPTR
+static BPTR
 Action_CopyDirFH(
 	const struct MsgPort *	user,
 	struct FileNode *		fn,
@@ -7202,16 +7046,17 @@ Action_CopyDirFH(
 
 	full_name_len = strlen(fn->fn_FullName);
 
-	full_name = AllocateMemory(full_name_len+1);
+	full_name = allocate_memory(full_name_len+1);
 	if(full_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
+	/* Length includes the terminating NUL byte. */
 	memcpy(full_name,fn->fn_FullName,full_name_len+1);
 
-	ln = AllocateMemory(sizeof(*ln));
+	ln = allocate_memory(sizeof(*ln));
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -7232,7 +7077,7 @@ Action_CopyDirFH(
 
 	if (smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -7245,8 +7090,8 @@ Action_CopyDirFH(
 
  out:
 
-	FreeMemory(ln);
-	FreeMemory(full_name);
+	free_memory(ln);
+	free_memory(full_name);
 
 	(*error_ptr) = error;
 
@@ -7256,7 +7101,7 @@ Action_CopyDirFH(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_FHFromLock(
 	struct FileHandle *	fh,
 	struct FileLock *	fl,
@@ -7281,7 +7126,7 @@ Action_FHFromLock(
 		goto out;
 	}
 
-	fn = AllocateMemory(sizeof(*fn));
+	fn = allocate_memory(sizeof(*fn));
 	if(fn == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -7298,7 +7143,7 @@ Action_FHFromLock(
 
 	Remove((struct Node *)ln);
 	ln->ln_Magic = 0;
-	FreeMemory(ln);
+	free_memory(ln);
 
 	fh->fh_Arg1 = (LONG)fn;
 
@@ -7315,7 +7160,7 @@ Action_FHFromLock(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_RenameDisk(
 	const void *	bcpl_name,
 	LONG *			error_ptr)
@@ -7370,7 +7215,7 @@ Action_RenameDisk(
 
 	FreeVec(old_name);
 
-	SendDiskChange(IECLASS_DISKINSERTED);
+	send_disk_change_notification(IECLASS_DISKINSERTED);
 
 	result = DOSTRUE;
 
@@ -7384,7 +7229,7 @@ Action_RenameDisk(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_ChangeMode(
 	const struct MsgPort *	user,
 	LONG					type,
@@ -7478,7 +7323,7 @@ Action_ChangeMode(
 	/* Is there another shared access lock
 	 * which refers to the same object?
 	 */
-	if(FindLockNode(name,ln) != NULL)
+	if(find_lock_node(name,ln) != NULL)
 	{
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -7487,7 +7332,7 @@ Action_ChangeMode(
 	/* Is there another shared access file
 	 * which refers to the same object?
 	 */
-	if(FindFileNode(name,fn) != NULL)
+	if(find_file_node(name,fn) != NULL)
 	{
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -7514,7 +7359,7 @@ Action_ChangeMode(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_WriteProtect(
 	LONG	flag,
 	ULONG	key,
@@ -7539,8 +7384,8 @@ Action_WriteProtect(
 
 			if(VolumeNodeAdded)
 			{
-				SendDiskChange(IECLASS_DISKREMOVED);
-				SendDiskChange(IECLASS_DISKINSERTED);
+				send_disk_change_notification(IECLASS_DISKREMOVED);
+				send_disk_change_notification(IECLASS_DISKINSERTED);
 			}
 		}
 	}
@@ -7553,8 +7398,8 @@ Action_WriteProtect(
 
 			if(VolumeNodeAdded)
 			{
-				SendDiskChange(IECLASS_DISKREMOVED);
-				SendDiskChange(IECLASS_DISKINSERTED);
+				send_disk_change_notification(IECLASS_DISKREMOVED);
+				send_disk_change_notification(IECLASS_DISKINSERTED);
 			}
 		}
 		else
@@ -7576,7 +7421,7 @@ Action_WriteProtect(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_MoreCache(
 	LONG	buffer_delta,
 	LONG *	error_ptr)
@@ -7601,7 +7446,7 @@ Action_MoreCache(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_SetComment(
 	const struct MsgPort *	user,
 	struct FileLock *		parent,
@@ -7648,35 +7493,13 @@ Action_SetComment(
 		parent_name = NULL;
 	}
 
-	ConvertBString(sizeof(name),name,bcpl_name);
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		if (TranslateUTF8)
-		{
-			TEXT encoded_name[MAX_FILENAME_LEN+1];
-			int encoded_name_len;
-			int name_len = strlen(name);
-
-			encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-			if(encoded_name_len < 0 || encoded_name_len >= (int)sizeof(name))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-
-			encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-			strlcpy(name,encoded_name,sizeof(name));
-		}
-		else if (TranslateNames)
-		{
-			if(!TranslateCName(name,A2M))
-			{
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
-		}
+		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		if(error != OK)
+			goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,&full_name);
@@ -7693,11 +7516,11 @@ Action_SetComment(
 
 	if (smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
-	ConvertBString(sizeof(comment),comment,bcpl_comment);
+	convert_from_bcpl_to_c_string(comment,sizeof(comment),bcpl_comment);
 
 	SHOWSTRING(comment);
 
@@ -7715,7 +7538,7 @@ Action_SetComment(
 	if(file != NULL)
 		smba_close(ServerData,file);
 
-	FreeMemory(full_name);
+	free_memory(full_name);
 
 	(*error_ptr) = error;
 
@@ -7725,7 +7548,7 @@ Action_SetComment(
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_LockRecord (
 	struct FileNode *	fn,
 	LONG				offset,
@@ -7780,7 +7603,7 @@ Action_LockRecord (
 
 	if (smba_lockrec (fn->fn_File, offset, length, umode, 0, (long)timeout, &error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -7796,7 +7619,7 @@ Action_LockRecord (
 
 /****************************************************************************/
 
-STATIC LONG
+static LONG
 Action_FreeRecord (
 	struct FileNode *	fn,
 	LONG				offset,
@@ -7825,7 +7648,7 @@ Action_FreeRecord (
 
 	if (smba_lockrec (fn->fn_File, offset, length, 2, -1, 0, &error) < 0)
 	{
-		error = MapErrnoToIoErr(error);
+		error = map_errno_to_ioerr(error);
 		goto out;
 	}
 
@@ -7841,8 +7664,8 @@ Action_FreeRecord (
 
 /****************************************************************************/
 
-STATIC VOID
-HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * service_name)
+static void
+file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT * service_name)
 {
 	struct Process * this_process = (struct Process *)FindTask(NULL);
 	BOOL sign_off = FALSE;
@@ -7854,7 +7677,7 @@ HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * 
 
 	ENTER();
 
-	DisplayErrorList();
+	display_error_message_list();
 
 	if(NOT Quiet && WBStartup == NULL)
 	{
@@ -7888,6 +7711,11 @@ HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * 
 			else
 				strlcpy(name,volume_name,sizeof(name));
 
+			/* If the device or volume name had a trailing
+			 * colon character attached, remove it so that the
+			 * output below will always show one colon
+			 * character following the name, and not two.
+			 */
 			for(i = strlen(name)-1 ; i >= 0 ; i--)
 			{
 				if(name[i] == ':')
@@ -7971,6 +7799,8 @@ HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * 
 						 * of data waiting to be read, keep going.
 						 */
 						num_bytes = recv(server_fd, data, sizeof(data), MSG_PEEK);
+						if(num_bytes < 0)
+							error = errno;
 
 						non_blocking_io = FALSE;
 						IoctlSocket(server_fd, FIONBIO, &non_blocking_io);
@@ -7987,10 +7817,10 @@ HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * 
 					/* If we ran into trouble we might want to shut down
 					 * the server connection...
 					 */
-					if(num_bytes == -1 && errno != EWOULDBLOCK)
+					if(num_bytes < 0 && error != EWOULDBLOCK)
 					{
-						D(("picked up trouble (error=%ld)",errno));
-						smb_check_server_connection(&ServerData->server, errno);
+						D(("picked up trouble (error=%ld)",error));
+						smb_check_server_connection(&ServerData->server, error);
 					}
 
 					SHOWMSG("and were'done here");
@@ -8332,7 +8162,7 @@ HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * 
 				    fn->fn_MinNode.mln_Succ != NULL ;
 				    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
 				{
-					D(("  name='%s'",fn->fn_FullName));
+					D(("  name='%s'",escape_name(fn->fn_FullName)));
 					D(("  mode=%ld, offset=%s",fn->fn_Mode,convert_quad_to_string(&fn->fn_OffsetQuad)));
 					D((""));
 				}
@@ -8343,7 +8173,7 @@ HandleFileSystem(const TEXT * device_name,const TEXT * volume_name,const TEXT * 
 				    ln->ln_MinNode.mln_Succ != NULL ;
 				    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 				{
-					D(("  name='%s'",ln->ln_FullName));
+					D(("  name='%s'",escape_name(ln->ln_FullName)));
 					D(("  mode=%ld",ln->ln_FileLock.fl_Access));
 					D((""));
 				}
