@@ -114,18 +114,18 @@ typedef struct smba_file
 
 /****************************************************************************/
 
-typedef int (*smba_callback_t) (void *d, int fpos, int nextpos, char *name, int eof, smba_stat_t * st);
+typedef int (*smba_callback_t) (void *callback_data, int fpos, int nextpos, char *name, int eof, smba_stat_t * st);
 
 /****************************************************************************/
 
-int smba_open(smba_server_t *s, char *name, int writable, int truncate, smba_file_t **file, int * error_ptr);
+int smba_open(smba_server_t *s, const char *name, int writable, int truncate_file, smba_file_t **file, int * error_ptr);
 void smba_close(smba_server_t * s, smba_file_t *f);
 int smba_read(smba_file_t *f, char *data, long len, const QUAD * const offset, int * error_ptr);
 int smba_write(smba_file_t *f, const char *data, long len, const QUAD * const offset, int * error_ptr);
 int smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, long timeout, int * error_ptr);
 int smba_getattr(smba_file_t *f, smba_stat_t *data, int * error_ptr);
 int smba_setattr(smba_file_t *f, const smba_stat_t *data, const QUAD * const size, int * error_ptr);
-int smba_readdir(smba_file_t *f, long offs, void *d, smba_callback_t callback, int * error_ptr);
+int smba_readdir(smba_file_t *f, int offs, void *d, smba_callback_t callback, int * error_ptr);
 int smba_create(smba_file_t *dir, const char *name, int * error_ptr);
 int smba_mkdir(smba_file_t *dir, const char *name, int * error_ptr);
 int smba_remove(smba_server_t *s, const char *path, int * error_ptr);

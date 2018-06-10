@@ -107,7 +107,11 @@ smba_connect (
 
 	res->server.abstraction = res;
 
-	gethostname (hostname, MAXHOSTNAMELEN);
+	if(gethostname (hostname, MAXHOSTNAMELEN) < 0)
+	{
+		report_error("Could not look up local host name (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
+		goto error_occured;
+	}
 
 	/* Only retain the host name, drop any domain names following it. */
 	if ((s = strchr (hostname, '.')) != NULL)
@@ -226,7 +230,7 @@ smba_disconnect (smba_server_t * server)
 /*****************************************************************************/
 
 static int
-make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * error_ptr)
+make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int * error_ptr)
 {
 	smba_server_t *s;
 	int result;
@@ -258,7 +262,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 					{
 						LOG (("opening file '%s'\n", escape_name(f->dirent.complete_path)));
 
-						result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate, &f->dirent, error_ptr);
+						result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate_file, &f->dirent, error_ptr);
 						if (result < 0)
 							goto out;
 					}
@@ -274,7 +278,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 				{
 					LOG (("opening file '%s'\n", escape_name(f->dirent.complete_path)));
 
-					result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate, &f->dirent, error_ptr);
+					result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate_file, &f->dirent, error_ptr);
 					if (result < 0)
 						goto out;
 				}
@@ -326,7 +330,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate, int * erro
 /*****************************************************************************/
 
 int
-smba_open (smba_server_t * s, char *name, int writable, int truncate, smba_file_t ** file, int * error_ptr)
+smba_open (smba_server_t * s, const char *name, int writable, int truncate_file, smba_file_t ** file, int * error_ptr)
 {
 	smba_file_t *f;
 	int result;
@@ -344,13 +348,13 @@ smba_open (smba_server_t * s, char *name, int writable, int truncate, smba_file_
 
 	memset(f,0,sizeof(*f));
 
-	f->dirent.complete_path = name;
+	f->dirent.complete_path = (char *)name;
 	f->dirent.len = strlen (name);
 	f->server = s;
 
-	LOG(("open '%s' (writable=%s, truncate=%s)\n", escape_name(name), writable ? "yes" : "no", truncate ? "yes" : "no"));
+	LOG(("open '%s' (writable=%s, truncate_file=%s)\n", escape_name(name), writable ? "yes" : "no", truncate_file ? "yes" : "no"));
 
-	result = make_open (f, open_dont_need_fid, writable, truncate, error_ptr);
+	result = make_open (f, open_dont_need_fid, writable, truncate_file, error_ptr);
 	if (result < 0)
 	{
 		LOG(("open failed\n"));
@@ -940,6 +944,7 @@ smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, lo
 int
 smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 {
+	const struct smb_dirent * dirent;
 	int result;
 	ULONG now;
 
@@ -974,18 +979,20 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 		f->attr_time = now;
 	}
 
-	data->is_dir = (f->dirent.attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
-	data->is_read_only = (f->dirent.attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
-	data->is_hidden = (f->dirent.attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
-	data->is_system = (f->dirent.attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
-	data->is_changed_since_last_archive = (f->dirent.attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
+	dirent = &f->dirent;
 
-	data->size_low	= f->dirent.size_low;
-	data->size_high	= f->dirent.size_high;
+	data->is_dir						= (dirent->attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
+	data->is_read_only					= (dirent->attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
+	data->is_hidden						= (dirent->attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
+	data->is_system						= (dirent->attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
+	data->is_changed_since_last_archive	= (dirent->attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
 
-	data->atime = f->dirent.atime;
-	data->ctime = f->dirent.ctime;
-	data->mtime = f->dirent.mtime;
+	data->size_low	= dirent->size_low;
+	data->size_high	= dirent->size_high;
+
+	data->atime = dirent->atime;
+	data->ctime = dirent->ctime;
+	data->mtime = dirent->mtime;
 
  out:
 
@@ -1074,8 +1081,9 @@ smba_setattr (smba_file_t * f, const smba_stat_t * data, const QUAD * const size
 /*****************************************************************************/
 
 int
-smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int * error_ptr)
+smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t callback, int * error_ptr)
 {
+	const struct smb_dirent * dirent;
 	int cache_index, o, eof, count = 0;
 	int num_entries;
 	smba_stat_t data;
@@ -1159,20 +1167,22 @@ smba_readdir (smba_file_t * f, long offs, void *d, smba_callback_t callback, int
 		eof = (o >= (f->dircache->len - 1) && f->dircache->eof);
 		count++;
 
-		LOG (("delivering '%s', cache_index=%ld, eof=%ld\n", escape_name(f->dircache->cache[o].complete_path), cache_index, eof));
+		dirent = &f->dircache->cache[o];
 
-		data.is_dir							= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
-		data.is_read_only					= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
-		data.is_hidden						= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
-		data.is_system						= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
-		data.is_changed_since_last_archive	= (f->dircache->cache[o].attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
-		data.size_low						= f->dircache->cache[o].size_low;
-		data.size_high						= f->dircache->cache[o].size_high;
-		data.atime							= f->dircache->cache[o].atime;
-		data.ctime							= f->dircache->cache[o].ctime;
-		data.mtime							= f->dircache->cache[o].mtime;
+		LOG (("delivering '%s', cache_index=%ld, eof=%ld\n", escape_name(dirent->complete_path), cache_index, eof));
 
-		if ((*callback) (d, cache_index, cache_index + 1, f->dircache->cache[o].complete_path, eof, &data))
+		data.is_dir							= (dirent->attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
+		data.is_read_only					= (dirent->attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
+		data.is_hidden						= (dirent->attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
+		data.is_system						= (dirent->attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
+		data.is_changed_since_last_archive	= (dirent->attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
+		data.size_low						= dirent->size_low;
+		data.size_high						= dirent->size_high;
+		data.atime							= dirent->atime;
+		data.ctime							= dirent->ctime;
+		data.mtime							= dirent->mtime;
+
+		if ((*callback) (callback_data, cache_index, cache_index + 1, dirent->complete_path, eof, &data))
 			break;
 	}
 
@@ -1239,9 +1249,12 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 
 	memcpy (path, dir->dirent.complete_path, dir->dirent.len);
 	path[dir->dirent.len] = DOS_PATHSEP;
-	memcpy(&path[dir->dirent.len+1], name, len+1);
+	memcpy(&path[dir->dirent.len+1], name, len+1); /* Length includes terminating NUL byte. */
 
-	if (dir->server->server.protocol >= PROTOCOL_LANMAN2)
+	/* At least one Samba version crashed when using SMB_COM_NT_CREATE_ANDX
+	 * to create a new file. Let's see if the old way works better.
+	 */
+	if (FALSE && dir->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
 		int ignored_error;
 
@@ -1545,9 +1558,18 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 	strcpy (service_copy, service);
 	complete_service = service_copy;
 
-	if (strlen (complete_service) < 4 || complete_service[0] != '/')
+	if (strlen (complete_service) < 4)
 	{
-		report_error("Invalid service name '%s'.",complete_service);
+		report_error("Service name '%s' is too short.",complete_service);
+
+		(*error_ptr) = EINVAL;
+
+		goto out;
+	}
+
+	if (complete_service[0] != '/')
+	{
+		report_error("Service name '%s' must begin with '/'.",complete_service);
 
 		(*error_ptr) = EINVAL;
 
@@ -1560,7 +1582,7 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 	share_start = strchr (complete_service, '/');
 	if (share_start == NULL)
 	{
-		report_error("Invalid share name '%s'.",complete_service);
+		report_error("Share name '%s' must contain a '/'.",complete_service);
 
 		(*error_ptr) = EINVAL;
 
@@ -1573,9 +1595,18 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 	if (root_start != NULL)
 		(*root_start) = '\0';
 
-	if ((strlen (complete_service) > 63) || (strlen (share_start) > 63))
+	if (strlen (complete_service) > 63)
 	{
-		report_error("Server or share name is too long in '%s' (max %ld characters).",service,63);
+		report_error("Server name is too long in '%s' (max %ld characters).",service,63);
+
+		(*error_ptr) = ENAMETOOLONG;
+
+		goto out;
+	}
+
+	if (strlen (share_start) > 255)
+	{
+		report_error("Share name is too long in '%s' (max %ld characters).",service,255);
 
 		(*error_ptr) = ENAMETOOLONG;
 
@@ -1624,8 +1655,8 @@ smba_start(
 	char server_name[17], client_name[17]; /* Maximum length appears to be 16 characters for NetBIOS */
 	char username[64], password[64];
 	char workgroup[64]; /* Maximum length appears to be 15 characters */
-	char server[64], share[64];
-	in_addr_t ipAddr;
+	char server[64], share[256];
+	in_addr_t server_ip_address;
 	int result = -1;
 
 	ASSERT( error_ptr != NULL );
@@ -1639,62 +1670,90 @@ smba_start(
 	if(extract_service (service, server, sizeof(server), share, sizeof(share), error_ptr) < 0)
 		goto out;
 
-	ipAddr = inet_addr (server);
-	if (ipAddr == INADDR_NONE) /* name was given, not numeric */
+	server_ip_address = inet_addr (server);
+	if (server_ip_address == INADDR_NONE) /* name was given, not numeric */
 	{
 		int lookup_error;
+
+		LOG(("server name is '%s'\n", server));
+
+		h_errno = 0;
 
 		h = gethostbyname (server);
 		lookup_error = h_errno;
 
 		if (h != NULL)
 		{
-			ipAddr = ((struct in_addr *)(h->h_addr))->s_addr;
+			server_ip_address = ((struct in_addr *)(h->h_addr))->s_addr;
 		}
-		else if (strlen(server) >= 16 || BroadcastNameQuery(server,"",(UBYTE *)&ipAddr) != 0)
+		else if (strlen(server) >= 16 || BroadcastNameQuery(server,"",(UBYTE *)&server_ip_address) != 0)
 		{
-			report_error("Unknown host '%s' (%ld, %s).",server,lookup_error,host_strerror(lookup_error));
+			if(lookup_error == 0)
+				report_error("Could not look up network address of '%s' (%ld, %s).",server,errno,posix_strerror(errno));
+			else
+				report_error("Could not look up network address of '%s' (%ld, %s).",server,lookup_error,host_strerror(lookup_error));
 
 			(*error_ptr) = ENOENT;
 			goto out;
 		}
+
+		LOG(("server network address found (%s)\n", Inet_NtoA(server_ip_address)));
 	}
 	else
 	{
-		char hostName[MAXHOSTNAMELEN+1];
+		char host_name[MAXHOSTNAMELEN+1];
 
-		h = gethostbyaddr ((char *) &ipAddr, sizeof (ipAddr), AF_INET);
+		LOG(("server network address is %s\n", server));
+
+		h_errno = 0;
+
+		h = gethostbyaddr ((char *) &server_ip_address, sizeof (server_ip_address), AF_INET);
 		if (h == NULL)
 		{
-			report_error("Unknown host '%s' (%ld, %s).",server,h_errno,host_strerror(errno));
+			if(h_errno == 0)
+			{
+				report_error("Could not look up name of server with network address %s (%ld, %s).",server,errno,posix_strerror(errno));
 
-			(*error_ptr) = ENOENT;
+				if(errno != 0)
+					(*error_ptr) = errno;
+				else
+					(*error_ptr) = ENOENT;
+			}
+			else
+			{
+				report_error("Could not look up name of server with network address %s (%ld, %s).",server,h_errno,host_strerror(h_errno));
+				(*error_ptr) = ENOENT;
+			}
+
 			goto out;
 		}
+
+		LOG(("server host name found (%s)\n",h->h_name));
 
 		/* Brian Willette: Now we will set the server name to the DNS
 		 * hostname, hopefully this will be the same as the NetBIOS name for
 		 * the server.
+		 *
 		 * We do this because the user supplied no hostname, and we
 		 * need one for NetBIOS, this is the best guess choice we have
 		 * NOTE: If the names are different between DNS and NetBIOS on
 		 * the windows side, the user MUST use the -s option.
 		 */
 		for (i = 0; h->h_name[i] != '.' && h->h_name[i] != '\0' && i < 255; i++)
-			hostName[i] = h->h_name[i];
+			host_name[i] = h->h_name[i];
 
-		hostName[i] = '\0';
+		host_name[i] = '\0';
 
 		/* Make sure the hostname is 16 characters or less (for NetBIOS) */
-		if (!opt_raw_smb && strlen (hostName) > 16)
+		if (!opt_raw_smb && strlen (host_name) > 16)
 		{
-			report_error("Server host name '%s' is too long (max %ld characters).", hostName, 16);
+			report_error("Server name '%s' is too long (max %ld characters).", host_name, 16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;
 		}
 
-		strlcpy (server_name, hostName, sizeof(server_name));
+		strlcpy (server_name, host_name, sizeof(server_name));
 	}
 
 	if(opt_password != NULL)
@@ -1720,16 +1779,6 @@ smba_start(
 
 	strlcpy(username,opt_username,sizeof(username));
 	string_toupper(username);
-
-	/*
-	if (strlen(opt_workgroup) > 15)
-	{
-		report_error("Workgroup/domain name '%s' is too long (max %ld characters).", opt_workgroup,15);
-
-		(*error_ptr) = ENAMETOOLONG;
-		goto out;
-	}
-	*/
 
 	strlcpy (workgroup, opt_workgroup, sizeof(workgroup));
 	string_toupper (workgroup);
@@ -1775,7 +1824,7 @@ smba_start(
 
 	if(smba_connect (
 		&par,
-		ipAddr,
+		server_ip_address,
 		use_extended,
 		workgroup,
 		opt_cachesize,
@@ -1798,11 +1847,11 @@ smba_start(
 
 			smb_translate_error_class_and_code((*smb_error_class_ptr),(*smb_error_ptr),&smb_class_name,&smb_code_text);
 
-			report_error("Could not connect to server (%ld/%ld, %s/%s).",(*smb_error_class_ptr),(*smb_error_ptr),smb_class_name,smb_code_text);
+			report_error("Could not connect to server '%s' (%ld/%ld, %s/%s).",server_name,(*smb_error_class_ptr),(*smb_error_ptr),smb_class_name,smb_code_text);
 		}
 		else
 		{
-			report_error("Could not connect to server (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
+			report_error("Could not connect to server '%s' (%ld, %s).",server_name,(*error_ptr),posix_strerror(*error_ptr));
 		}
 
 		goto out;

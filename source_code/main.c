@@ -3250,7 +3250,11 @@ convert_from_c_to_bcpl_string(void * bstring,int bstring_size,const TEXT * cstri
  * layer it sits upon.
  *
  * Hence "foo\bar\\baz" becomes "foo\baz", "foo\\bar", becomes "bar",
- * and "\foo" is not permitted and will result in an error.
+ * "foo\\" becomes "" and "\foo" is not permitted and will result in
+ * an error.
+ *
+ * A trailing path name separator will be removed since it has no
+ * meaning for SMB path names, e.g. "Documents\" will become "Documents".
  */
 static int
 reduce_path_name(TEXT * name,int len,int * new_len_ptr)
@@ -3289,10 +3293,10 @@ reduce_path_name(TEXT * name,int len,int * new_len_ptr)
 			/* Find the position of the path component we
 			 * will have to remove.
 			 */
-			while(position > 0 && name[position] != SMB_PATH_SEPARATOR)
+			while(position >= 0 && name[position] != SMB_PATH_SEPARATOR)
 				position--;
 
-			if(name[position] == SMB_PATH_SEPARATOR)
+			if(position < 0 || name[position] == SMB_PATH_SEPARATOR)
 				position++;
 
 			/* How many characters do we have to remove? */
@@ -3313,6 +3317,12 @@ reduce_path_name(TEXT * name,int len,int * new_len_ptr)
 		D(("leading '%lc' not permitted", SMB_PATH_SEPARATOR));
 		goto out;
 	}
+
+	/* There should never be a trailing path separator (since it would
+	 * not separate anything, and it has no meaning in SMB paths).
+	 */
+	if(len > 0 && name[len-1] == SMB_PATH_SEPARATOR)
+		len--;
 
 	name[len] = '\0';
 
@@ -4079,6 +4089,8 @@ Action_DeleteObject(
 		parent_name = NULL;
 	}
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
 	/* Name string, as given in the DOS packet, is in
 	 * BCPL format and needs to be converted into
 	 * 'C' format.
@@ -4269,6 +4281,8 @@ Action_CreateDir(
 		parent_name = NULL;
 	}
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
@@ -4404,6 +4418,8 @@ Action_LocateObject(
 	{
 		parent_name = NULL;
 	}
+
+	D(("name = '%b'",MKBADDR(bcpl_name)));
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
@@ -4776,6 +4792,8 @@ Action_SetProtect(
 		parent_name = NULL;
 	}
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
@@ -4878,6 +4896,9 @@ Action_RenameObject(
 
 	SHOWVALUE(source_lock);
 	SHOWVALUE(destination_lock);
+
+	D(("source name = '%b'",MKBADDR(source_bcpl_name)));
+	D(("destination name = '%b'",MKBADDR(destination_bcpl_name)));
 
 	if(source_lock != NULL)
 	{
@@ -6753,6 +6774,8 @@ Action_SetDate(
 		parent_name = NULL;
 	}
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if (NOT ServerData->server.unicode_enabled)
@@ -7186,6 +7209,8 @@ Action_RenameDisk(
 		goto out;
 	}
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
 	/* Now for the really interesting part; the new name
 	 * is to be a NUL-terminated BCPL string, and as such
 	 * must be allocated via AllocVec().
@@ -7459,7 +7484,6 @@ Action_SetComment(
 	smba_file_t * file = NULL;
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
-	TEXT comment[80];
 	int error;
 
 	ENTER();
@@ -7469,6 +7493,8 @@ Action_SetComment(
 		error = ERROR_DISK_WRITE_PROTECTED;
 		goto out;
 	}
+
+	D(("name = '%b', comment = '%s'",MKBADDR(bcpl_name),MKBADDR(bcpl_comment)));
 
 	SHOWVALUE(parent);
 
@@ -7520,17 +7546,7 @@ Action_SetComment(
 		goto out;
 	}
 
-	convert_from_bcpl_to_c_string(comment,sizeof(comment),bcpl_comment);
-
-	SHOWSTRING(comment);
-
 	/* All this work and we're only doing something very silly... */
-	if(strlen(comment) > 0)
-	{
-		error = ERROR_COMMENT_TOO_BIG;
-		goto out;
-	}
-
 	result = DOSTRUE;
 
  out:
@@ -7820,6 +7836,7 @@ file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT
 					if(num_bytes < 0 && error != EWOULDBLOCK)
 					{
 						D(("picked up trouble (error=%ld)",error));
+
 						smb_check_server_connection(&ServerData->server, error);
 					}
 

@@ -1931,7 +1931,7 @@ smbfs 1.147 (5.6.2018)
   proper absolute SMB path names required.
 
 
-smbfs 1.148 (7.6.2018)
+smbfs 1.148 (8.6.2018)
 
 - Changed how the TZ/TIMEZONEOFFSET parameter works: for time zones
   east of GMT (such as CET) the number of minutes given now has to be
@@ -1959,3 +1959,40 @@ smbfs 1.148 (7.6.2018)
   which deal with names.
 
 - Cleaned up the naming of functions and data structures a bit.
+
+
+smbfs 1.149 (9.6.2018)
+
+- Reworked the path name conversion code again. It now correctly
+  handles "\foo\\" which becomes "\", and it will always remove
+  a trailing "\" character from a path because unlike in AmigaDOS,
+  the SMB path name only uses "\" characters in the path name as
+  delimiters: at the end of a path a delimiter has no meaning.
+
+- Tried to improve the contents of the error messages which smbfs
+  will print when it cannot use the service and share name information,
+  such as if the syntax has problems or the server name or network
+  address cannot be looked up.
+
+
+smbfs 1.150 (10.6.2018)
+
+- File comments are no longer rejected, they are merely ignored just
+  like any attempt to change the hold, pure, script, execute, read
+  and write protection bits of files and drawers.
+
+- The file creation/modification/access/write time information
+  obtained when opening a file through SMB_COM_NT_CREATE_ANDX was
+  "converted" to UTC, which is not correct. Only the older
+  SMB_COM_OPEN command would provide local time information which
+  had to be converted to UTC first. Same problem for the
+  TRANSACT2_QFILEINFO command. Fixed.
+
+- Just to see if it has a positive impact, SMB_COM_NT_CREATE_ANDX
+  is now replaced by SMB_COM_CREATE for the purpose of creating
+  new files. At least one Samba version crashed with the
+  SMB_COM_NT_CREATE_ANDX command in use.
+
+- If reading the keepalive packets sent by the server turns out to
+  detect a broken server connection, we now shut it down on our
+  side rather than waiting for a retry.

@@ -116,7 +116,7 @@ smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_p
 
 	if (result < NETBIOS_HEADER_SIZE)
 	{
-		LOG (("got less than %ld bytes\n", NETBIOS_HEADER_SIZE));
+		LOG (("expected %ld bytes, got %ld\n", NETBIOS_HEADER_SIZE, result));
 
 		(*error_ptr) = error_end_of_file;
 
@@ -223,7 +223,7 @@ smb_receive_raw (
 
 	if (result < NETBIOS_HEADER_SIZE)
 	{
-		LOG (("got less than %ld bytes\n", NETBIOS_HEADER_SIZE));
+		LOG (("expected %ld bytes, got %ld\n", NETBIOS_HEADER_SIZE, result));
 
 		(*error_ptr) = error_end_of_file;
 
@@ -1058,6 +1058,8 @@ smb_connect (struct smb_server *server, int * error_ptr)
 		result = connect (server->mount_data.fd, (struct sockaddr *)&server->mount_data.addr, sizeof(struct sockaddr_in));
 		if(result < 0)
 		{
+			LOG(("connect() has failed (errno=%ld)\n",errno));
+
 			server->state = CONN_INVALID;
 
 			(*error_ptr) = errno;
@@ -1097,46 +1099,45 @@ smb_connect (struct smb_server *server, int * error_ptr)
 void
 smb_check_server_connection(struct smb_server *server, int error)
 {
-	if(server->state == CONN_VALID)
+	int close_connection;
+
+	switch(error)
 	{
-		int close_connection;
+		case error_end_of_file:
+		case error_invalid_netbios_session:
+		case error_message_exceeds_buffer_size:
+		case error_invalid_buffer_format:
+		case error_data_exceeds_buffer_size:
+		case error_invalid_parameter_size:
+		case error_server_setup_incomplete:
+		case error_server_connection_invalid:
+		case error_smb_message_signature_missing:
+		case error_smb_message_too_short:
+		case error_smb_message_invalid_command:
+		case error_smb_message_invalid_word_count:
+		case error_smb_message_invalid_byte_count:
 
-		switch(error)
-		{
-			case error_end_of_file:
-			case error_invalid_netbios_session:
-			case error_message_exceeds_buffer_size:
-			case error_invalid_buffer_format:
-			case error_data_exceeds_buffer_size:
-			case error_invalid_parameter_size:
-			case error_server_setup_incomplete:
-			case error_server_connection_invalid:
-			case error_smb_message_signature_missing:
-			case error_smb_message_too_short:
-			case error_smb_message_invalid_command:
-			case error_smb_message_invalid_word_count:
-			case error_smb_message_invalid_byte_count:
+			close_connection = TRUE;
+			break;
 
-				close_connection = TRUE;
-				break;
+		default:
 
-			default:
+			close_connection = (error < error_end_of_file);
+			break;
+	}
 
-				close_connection = (error < error_end_of_file);
-				break;
-		}
+	if(close_connection)
+	{
+		/* Stop means stop: EINTR is equivalent to Ctrl+C */
+		if(error == EINTR)
+			server->dont_retry = TRUE;
 
-		if(close_connection)
-		{
-			/* Stop means stop: EINTR is equivalent to Ctrl+C */
-			if(error == EINTR)
-				server->dont_retry = TRUE;
+		smb_invalidate_all_inodes (server);
 
-			smb_invalidate_all_inodes (server);
+		SHOWMSG("closing the server connection.");
+		smb_release(server);
 
-			SHOWMSG("closing the server connection.");
-			smb_release(server);
-		}
+		server->state = CONN_INVALID;
 	}
 }
 

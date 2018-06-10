@@ -536,7 +536,7 @@ smb_name_mangle (byte * p, const byte * name)
  * expressed as seconds past January 1st, 1970, local
  * time zone.
  */
-static INLINE int
+static int
 utc2local (int time_value)
 {
 	int result;
@@ -549,7 +549,7 @@ utc2local (int time_value)
 	return result;
 }
 
-static INLINE int
+static int
 local2utc (int time_value)
 {
 	int result;
@@ -1025,6 +1025,7 @@ smb_retry (struct smb_server *server)
 	if (smb_proc_reconnect (server, &ignored_error) < 0)
 	{
 		LOG (("smb_proc_reconnect failed\n"));
+
 		server->state = CONN_RETRIED;
 		goto out;
 	}
@@ -1310,16 +1311,16 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		params += sizeof(dword); /* CreateDisposition */
 
-		entry->ctime = local2utc (convert_long_date_to_time_t(params));
+		entry->ctime = convert_long_date_to_time_t(params);
 		params += 2 * sizeof(dword); /* CreateTime */
 
-		entry->atime = local2utc (convert_long_date_to_time_t(params));
+		entry->atime = convert_long_date_to_time_t(params);
 		params += 2 * sizeof(dword); /* LastAccessTime */
 
-		entry->wtime = local2utc (convert_long_date_to_time_t(params));
+		entry->wtime = convert_long_date_to_time_t(params);
 		params += 2 * sizeof(dword); /* LastWriteTime */
 
-		entry->mtime = local2utc (convert_long_date_to_time_t(params));
+		entry->mtime = convert_long_date_to_time_t(params);
 		params += 2 * sizeof(dword); /* LastChangeTime */
 
 		params = smb_decode_dword(params, &ext_file_attributes);
@@ -1394,7 +1395,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		entry->attr = WVAL (buf, smb_vwv1);
 
-		/* This is actually the mtime value, but we use it
+		/* This is actually just the mtime value, but we use it
 		 * in all other places as well.
 		 */
 		entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
@@ -1421,7 +1422,7 @@ smb_proc_close (struct smb_server *server, word fileid, dword mtime, int * error
 	int result;
 
 	/* 0 and 0xffffffff mean: do not set mtime */
-	if(mtime != 0 && mtime != 0xffffffff)
+	if(mtime != 0 && mtime != (dword)0xffffffff)
 		mtime = utc2local (mtime);
 
 	smb_setup_header (server, SMBclose, 3, 0);
@@ -1921,10 +1922,10 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, const st
 int
 smb_proc_create (struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr)
 {
+	dword local_time = utc2local (entry->ctime);
 	int result;
 	char *p;
 	char *buf = server->transmit_buffer;
-	int local_time;
 
  retry:
 
@@ -1932,7 +1933,6 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 
 	p = smb_setup_header (server, SMBcreate, 3, len + 2);
 	WSET (buf, smb_vwv0, entry->attr);
-	local_time = utc2local (entry->ctime);
 	DSET (buf, smb_vwv1, local_time);
 	smb_encode_ascii (p, path, len);
 
@@ -2439,7 +2439,8 @@ convert_long_date_to_time_t(const char * p)
 	long_date.High	= DVAL(p,4);
 
 	/* Divide by 10,000,000 to convert the time from 100ns
-	   units into seconds. */
+	 * units into seconds.
+	 */
 	divide_64_by_32(&long_date,10000000,&long_date);
 
 	/* Adjust by 369 years (11,644,473,600 seconds) to convert
@@ -2452,8 +2453,9 @@ convert_long_date_to_time_t(const char * p)
 	underflow = subtract_64_from_64_to_64(&long_date,&adjust,&long_date);
 
 	/* If the result did not produce an underflow or overflow,
-	   return the number of seconds encoded in the least
-	   significant word of the result. */
+	 * return the number of seconds encoded in the least
+	 * significant word of the result.
+	 */
 	if(underflow == 0 && long_date.High == 0)
 		result = long_date.Low;
 	else
@@ -3122,7 +3124,7 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 
 	entry->attr = WVAL (buf, smb_vwv0);
 
-	/* The server only tells us 1 time */
+	/* The server only tells us just the mtime */
 	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv1));
 
 	entry->size_low = DVAL (buf, smb_vwv3);
@@ -3246,11 +3248,15 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 
 	p = resp_data;
 
+	entry->ctime = convert_long_date_to_time_t(p);
 	p += 2 * sizeof(dword); /* CreateTime */
+
+	entry->atime = convert_long_date_to_time_t(p);
 	p += 2 * sizeof(dword); /* LastAccessTime */
+
 	p += 2 * sizeof(dword); /* LastWriteTime */
 
-	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (convert_long_date_to_time_t(p));
+	entry->mtime = convert_long_date_to_time_t(p);
 	p += 2 * sizeof(dword); /* LastChangeTime */
 
 	p = smb_decode_dword(p, &ext_file_attributes);
@@ -3463,10 +3469,10 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 int
 smb_proc_setattr_core (struct smb_server *server, const char *path, int len, const struct smb_dirent *new_finfo, int * error_ptr)
 {
+	dword local_time = utc2local (new_finfo->mtime);
 	char *p;
 	char *buf = server->transmit_buffer;
 	int result;
-	int local_time;
 
 	ASSERT( smb_payload_size(server, 8, 4 + len) >= 0 );
 
@@ -3474,7 +3480,6 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 
 	p = smb_setup_header (server, SMBsetatr, 8, 4 + len);
 	WSET (buf, smb_vwv0, new_finfo->attr);
-	local_time = utc2local (new_finfo->mtime);
 	DSET (buf, smb_vwv1, local_time);
 	p = smb_encode_ascii (p, path, len);
 	(void) smb_encode_ascii (p, "", 0);
@@ -3730,7 +3735,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	result = smb_connect (server, error_ptr);
 	if (result < 0)
 	{
-		LOG (("could not smb_connect\n"));
+		LOG (("could not connect to server\n"));
 		goto out;
 	}
 
