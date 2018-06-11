@@ -1996,3 +1996,47 @@ smbfs 1.150 (10.6.2018)
 - If reading the keepalive packets sent by the server turns out to
   detect a broken server connection, we now shut it down on our
   side rather than waiting for a retry.
+
+
+smbfs 1.151 (11.6.2018)
+
+- The WORKGROUP parameter is no longer mandatory. If you omit it,
+  then the default text "WORKGROUP" will be used.
+
+- The UNICODE parameter now expects ON/OFF as arguments rather than
+  being a simple enable switch. Note that the default is UNICODE=ON
+  now, which means that if both server and client support Unicode,
+  then smbfs will use it and ignore the TRANSLATE, CP437 and CP850
+  parameters.
+
+- Added the PROTOCOL parameter which can be either NT1 or CORE,
+  with NT1 being the default. If you use PROTOCOL=CORE, then none
+  of the new SMB commands (introduced in 1994) added to smbfs
+  will be used, which might make smbfs work more robustly with
+  certain servers.
+
+- smbfs now only asks the SMB server for write access to a file
+  or directory if that file is to be written to, or if the
+  file/directory attributes are to be modified. I double-checked
+  that these constraints are followed consistently.
+
+- Reworked the logic for Open() with MODE_OLDFILE/MODE_NEWFILE
+  and MODE_UPDATE. MODE_OLDFILE will open the file for read
+  access and implies a shared lock. MODE_NEWFILE will open the
+  file for read/write access and truncate it to 0 bytes, creating
+  it if it does not yet exist, and implies an exclusive lock.
+  MODE_UPDATE will open the file for read/write access and
+  implies an exclusive lock.
+
+- When opening a "file" smbfs now checks if the file is really
+  a file and not a directory. The SMB_COM_NT_CREATE_ANDX and
+  SMB_COM_OPEN commands can be told not to open a directory if
+  a file is expected, but the current smbfs implementation makes
+  it a wee bit too difficult to plug this into the API :-/
+  Well, we may see about this later.
+
+
+smbfs 1.152 (11.6.2018)
+
+- Ouch. Forgot that pretty much all the core functions were
+  still not supporting Unicode mode. Fixed.

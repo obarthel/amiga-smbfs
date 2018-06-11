@@ -76,6 +76,9 @@ struct smb_server
 
 	/* olsen (2018-06-01): Enable Unicode support if the server supports it. */
 	int use_unicode;
+
+	/* olsen (2018-06-11): Prefer SMB core protocol commands over NT1 commands. */
+	int prefer_core_protocol;
 };
 
 #endif

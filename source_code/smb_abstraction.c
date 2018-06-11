@@ -49,6 +49,7 @@ smba_connect (
 	int							timeout,
 	int							opt_raw_smb,
 	int							opt_unicode,
+	int							opt_prefer_core_protocol,
 	int							opt_prefer_write_raw,
 	int							opt_write_behind,
 	int							opt_prefer_read_raw,
@@ -87,6 +88,9 @@ smba_connect (
 
 	/* Enable Unicode support if the server supports it, too. */
 	res->server.use_unicode = opt_unicode;
+
+	/* Prefer SMB core protocol commands to NT1 commands, if possible. */
+	res->server.prefer_core_protocol = opt_prefer_core_protocol;
 
 	/* Prefer SMB_COM_WRITE_RAW over SMB_COM_WRITE_ANDX? */
 	res->server.prefer_write_raw = opt_prefer_write_raw;
@@ -243,7 +247,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 
 		if (!f->is_valid || f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 		{
-			if (f->server->server.protocol >= PROTOCOL_LANMAN2)
+			if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 				result = smb_query_path_information (&s->server, f->dirent.complete_path, f->dirent.len, 0, &f->dirent, error_ptr);
 			else
 				result = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
@@ -386,7 +390,7 @@ write_attr (smba_file_t * f, int * error_ptr)
 
 	LOG (("file '%s'\n", escape_name(f->dirent.complete_path)));
 
-	if(f->server->server.protocol >= PROTOCOL_LANMAN2)
+	if(!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
 		result = make_open (f, open_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
@@ -494,7 +498,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 	D(("read %ld bytes from offset %ld",len,offset));
 
 	/* SMB_COM_READ_ANDX supported? */
-	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_read_raw)
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_read_raw && !f->server->server.prefer_core_protocol)
 	{
 		QUAD position_quad = (*offset);
 		int max_readx_size;
@@ -692,7 +696,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 	max_buffer_size = f->server->server.max_buffer_size;
 
 	/* SMB_COM_WRITE_ANDX supported? */
-	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_write_raw)
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_write_raw && !f->server->server.prefer_core_protocol)
 	{
 		QUAD position_quad = (*offset);
 		int max_writex_size;
@@ -958,7 +962,7 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 	{
 		LOG (("file '%s'\n", escape_name(f->dirent.complete_path)));
 
-		if (f->server->server.protocol >= PROTOCOL_LANMAN2)
+		if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 		{
 			if (f->dirent.opened)
 				result = smb_query_path_information (&f->server->server, NULL, 0, f->dirent.fileid, &f->dirent, error_ptr);
@@ -1060,7 +1064,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * data, const QUAD * const size
 		if(result < 0)
 			goto out;
 
-		if(f->server->server.protocol >= PROTOCOL_LANMAN2)
+		if(!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 			result = smb_set_file_information (&f->server->server, &f->dirent, size, error_ptr);
 		else
 			result = smb_proc_trunc (&f->server->server, f->dirent.fileid, size->Low, error_ptr);
@@ -1228,7 +1232,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 	size_t len;
 	int result;
 
-	result = make_open (dir, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
+	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1251,10 +1255,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 	path[dir->dirent.len] = DOS_PATHSEP;
 	memcpy(&path[dir->dirent.len+1], name, len+1); /* Length includes terminating NUL byte. */
 
-	/* At least one Samba version crashed when using SMB_COM_NT_CREATE_ANDX
-	 * to create a new file. Let's see if the old way works better.
-	 */
-	if (FALSE && dir->server->server.protocol >= PROTOCOL_LANMAN2)
+	if (!dir->server->server.prefer_core_protocol && dir->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
 		int ignored_error;
 
@@ -1269,6 +1270,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 	}
 	else
 	{
+		/* Note: smb_proc_create() closes the file just created. */
 		result = smb_proc_create (&dir->server->server, path, strlen (path), &entry, error_ptr);
 		if(result < 0)
 			goto out;
@@ -1292,7 +1294,7 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 	int name_len;
 	int result;
 
-	result = make_open (dir, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
+	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
@@ -1639,6 +1641,7 @@ smba_start(
 	int					opt_timeout,
 	int					opt_raw_smb,
 	int					opt_unicode,
+	int					opt_prefer_core_protocol,
 	int					opt_prefer_write_raw,
 	int					opt_write_behind,
 	int					opt_prefer_read_raw,
@@ -1832,6 +1835,7 @@ smba_start(
 		opt_timeout,
 		opt_raw_smb,
 		opt_unicode,
+		opt_prefer_core_protocol,
 		opt_prefer_write_raw,
 		opt_write_behind,
 		opt_prefer_read_raw,

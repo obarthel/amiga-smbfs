@@ -151,7 +151,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static void VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_write_raw, BOOL opt_write_behind, BOOL opt_prefer_read_raw, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_prefer_write_raw, BOOL opt_write_behind, BOOL opt_prefer_read_raw, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
 static void file_system_handler(const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -556,11 +556,12 @@ main(void)
 		NUMBER	Timeout;
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
+		KEY		Protocol;
 		SWITCH	NetBIOSTransport;
 		SWITCH	PreferWriteRaw;
 		SWITCH	WriteBehind;
 		SWITCH	PreferReadRaw;
-		SWITCH	Unicode;
+		KEY		Unicode;
 		SWITCH	UTF8;
 		SWITCH	CP437;
 		SWITCH	CP850;
@@ -590,11 +591,12 @@ main(void)
 		"TIMEOUT/N/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
+		"PROTOCOL/K,"
 		"NETBIOS/S,"
 		"PREFERWRITERAW/S,"
 		"WRITEBEHIND/S,"
 		"PREFERREADRAW/S,"
-		"UNICODE/S,"
+		"UNICODE/K,"
 		"UTF8/S,"
 		"CP437/S,"
 		"CP850/S,"
@@ -615,6 +617,7 @@ main(void)
 	LONG cache_size = 0;
 	LONG max_transmit = -1;
 	LONG timeout = 0;
+	char env_protocol[8];
 	char env_workgroup_name[17];
 	char env_user_name[64];
 	char env_password[64];
@@ -700,11 +703,6 @@ main(void)
 			   GetVar("smbfs_workgroup",env_workgroup_name,sizeof(env_workgroup_name),0) > 0)
 			{
 				str = env_workgroup_name;
-			}
-			else
-			{
-				report_error("Required 'WORKGROUP' parameter was not provided.");
-				goto out;
 			}
 		}
 
@@ -835,6 +833,15 @@ main(void)
 			args.DSTOffset = &dst_number;
 		}
 
+		str = FindToolType(Icon->do_ToolTypes,"PROTOCOL");
+		if(str == NULL)
+		{
+			if(GetVar("smbfs_protocol",env_protocol,sizeof(env_protocol),0) > 0)
+				str = env_protocol;
+		}
+
+		args.Protocol = str;
+
 		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
 			args.NetBIOSTransport = TRUE;
 
@@ -857,8 +864,9 @@ main(void)
 		}
 		else
 		{
-			if (FindToolType(Icon->do_ToolTypes,"UNICODE") != NULL)
-				args.Unicode = TRUE;
+			str = FindToolType(Icon->do_ToolTypes,"UNICODE");
+			if (str != NULL)
+				args.Unicode = str;
 			else if (FindToolType(Icon->do_ToolTypes,"UTF8") != NULL)
 				args.UTF8 = TRUE;
 			else if (FindToolType(Icon->do_ToolTypes,"CP437") != NULL)
@@ -906,12 +914,6 @@ main(void)
 			timeout = number;
 		}
 
-		if(args.Workgroup == NULL)
-		{
-			report_error("Required 'WORKGROUP' parameter was not provided.");
-			goto out;
-		}
-
 		if(args.Service == NULL)
 		{
 			report_error("'SERVICE' parameter needs an argument.");
@@ -939,11 +941,6 @@ main(void)
 			{
 				args.Workgroup = env_workgroup_name;
 			}
-			else
-			{
-				report_error("Required 'WORKGROUP' parameter was not provided.");
-				goto out;
-			}
 		}
 
 		if(args.UserName == NULL)
@@ -959,6 +956,12 @@ main(void)
 		{
 			if(GetVar("smbfs_password",env_password,sizeof(env_password),0) > 0)
 				args.Password = env_password;
+		}
+
+		if(args.Protocol == NULL)
+		{
+			if(GetVar("smbfs_protocol",env_protocol,sizeof(env_protocol),0) > 0)
+				args.Protocol = env_protocol;
 		}
 
 		if(args.Service != NULL)
@@ -990,6 +993,26 @@ main(void)
 	/* Use the default if no device or volume name is given. */
 	if(args.DeviceName == NULL && args.VolumeName == NULL)
 		args.DeviceName = "SMBFS";
+
+	/* Restrict the command set which smbfs uses? */
+	if(args.Protocol == NULL)
+		args.Protocol = "NT1";
+
+	if(Stricmp(args.Protocol,"NT1") != SAME && Stricmp(args.Protocol,"CORE") != SAME)
+	{
+		report_error("'PROTOCOL' parameter must be either 'NT1' or 'CORE'.");
+		goto out;
+	}
+
+	/* Disable Unicode support for path names, etc.? */
+	if(args.Unicode == NULL)
+		args.Unicode = "ON";
+
+	if(Stricmp(args.Unicode,"OFF") != SAME && Stricmp(args.Unicode,"ON") != SAME)
+	{
+		report_error("'UNICODE' parameter must be either 'ON' or 'OFF'.");
+		goto out;
+	}
 
 	/* Code page based translation using a file disables
 	 * UTF-8 and built-in CP437 and CP850 translation.
@@ -1025,6 +1048,22 @@ main(void)
 	CaseSensitive = (BOOL)args.CaseSensitive;
 	OmitHidden = (BOOL)args.OmitHidden;
 	TranslateUTF8 = (BOOL)args.UTF8;
+
+	/* You don't need to provide a specific workgroup name. smbfs will
+	 * work perfectly find with modern (and somewhat older) SMB implementations
+	 * if the workgroup name does not match the server's workgroup name.
+	 * But a workgroup name is still mandatory because it's required as part
+	 * of the protocol which sets up the connection between client and
+	 * server.
+	 *
+	 * It all boils down to this: if you don't choose a workgroup name,
+	 * smbfs will use a default of "WORKGROUP".
+	 */
+	if(args.Workgroup == NULL)
+	{
+		strlcpy(env_workgroup_name,"WORKGROUP",sizeof(env_workgroup_name));
+		args.Workgroup = env_workgroup_name;
+	}
 
 	#if DEBUG
 	{
@@ -1114,7 +1153,8 @@ main(void)
 		args.TimeZoneOffset,
 		args.DSTOffset,
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
-		args.Unicode,
+		Stricmp(args.Unicode,"OFF") != SAME,
+		Stricmp(args.Protocol,"CORE") == SAME,
 		args.PreferWriteRaw,
 		args.WriteBehind,
 		args.PreferReadRaw,
@@ -1610,6 +1650,8 @@ get_time_zone_delta(void)
 		seconds = 0;
 	}
 
+	D(("time zone offset: %ld + %ld = %ld",seconds,DSTOffset,seconds + DSTOffset));
+
 	return(seconds + DSTOffset);
 }
 
@@ -1626,7 +1668,7 @@ get_current_time(void)
 
 	GetSysTime((APTR)&tv);
 
-	result = UNIX_TIME_OFFSET + get_time_zone_delta() + tv.tv_secs;
+	result = tv.tv_secs + UNIX_TIME_OFFSET + get_time_zone_delta();
 
 	return(result);
 }
@@ -2698,6 +2740,7 @@ setup(
 	LONG *			opt_dst_offset,
 	BOOL			opt_raw_smb,
 	BOOL			opt_unicode,
+	BOOL			opt_prefer_core_protocol,
 	BOOL			opt_prefer_write_raw,
 	BOOL			opt_write_behind,
 	BOOL			opt_prefer_read_raw, 
@@ -2750,10 +2793,21 @@ setup(
 	{
 		TimeZoneOffset			= -(*opt_time_zone_offset);
 		OverrideLocaleTimeZone	= TRUE;
+
+		SHOWVALUE(TimeZoneOffset);
+	}
+	else
+	{
+		if(Locale != NULL)
+			SHOWVALUE(Locale->loc_GMTOffset);
 	}
 
 	if(opt_dst_offset != NULL)
+	{
 		DSTOffset = -60 * (*opt_dst_offset);
+
+		SHOWVALUE(DSTOffset);
+	}
 
 	memset(&TimerRequest,0,sizeof(TimerRequest));
 
@@ -2879,6 +2933,7 @@ setup(
 		opt_timeout,
 		opt_raw_smb,
 		opt_unicode,
+		opt_prefer_core_protocol,
 		opt_prefer_write_raw,
 		opt_write_behind,
 		opt_prefer_read_raw, 
@@ -4138,7 +4193,7 @@ Action_DeleteObject(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&file,&error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -4330,7 +4385,7 @@ Action_CreateDir(
 	ln->ln_FullName				= full_name;
 	ln->ln_LastUser				= user;
 
-	if(smba_open(ServerData,dir_name,open_writable,open_dont_truncate,&dir,&error) < 0)
+	if(smba_open(ServerData,dir_name,open_read_only,open_dont_truncate,&dir,&error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -4349,7 +4404,7 @@ Action_CreateDir(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -5220,7 +5275,9 @@ Action_ExamineObject(
 			goto out;
 		}
 
-		seconds = st.mtime - UNIX_TIME_OFFSET - get_time_zone_delta();
+		seconds = st.mtime;
+
+		seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
 		if(seconds < 0)
 			seconds = 0;
 
@@ -5514,7 +5571,9 @@ dir_scan_callback_func_exnext(
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-	seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - get_time_zone_delta();
+	seconds = (st->mtime == 0 ? st->ctime : st->mtime);
+
+	seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
 	if(seconds < 0)
 		seconds = 0;
 
@@ -5819,7 +5878,9 @@ dir_scan_callback_func_exall(
 			LONG seconds;
 
 			/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-			seconds = (st->mtime == 0 ? st->ctime : st->mtime) - UNIX_TIME_OFFSET - get_time_zone_delta();
+			seconds = (st->mtime == 0 ? st->ctime : st->mtime);
+
+			seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
 			if(seconds < 0)
 				seconds = 0;
 
@@ -6138,8 +6199,8 @@ Action_Find(
 	struct FileNode * fn = NULL;
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
-	BOOL create_new_file;
 	STRPTR temp = NULL;
+	smba_stat_t st;
 	int error;
 
 	ENTER();
@@ -6222,7 +6283,7 @@ Action_Find(
 	fn->fn_Handle	= fh;
 	fn->fn_Magic	= ID_SMB_DISK;
 	fn->fn_FullName	= full_name;
-	fn->fn_Mode		= (action == ACTION_FINDOUTPUT) ? EXCLUSIVE_LOCK : SHARED_LOCK;
+	fn->fn_Mode		= (action == ACTION_FINDINPUT) ? SHARED_LOCK : EXCLUSIVE_LOCK;
 
 	error = check_access_mode_collision(full_name,fn->fn_Mode);
 	if(error != OK)
@@ -6230,53 +6291,8 @@ Action_Find(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
+	/* Create a new file, or truncate an existing file? */
 	if(action == ACTION_FINDOUTPUT)
-	{
-		/* Definitely create a new file. */
-		create_new_file = TRUE;
-	}
-	else if (action == ACTION_FINDINPUT)
-	{
-		/* Open an existing file for reading. */
-		create_new_file = FALSE;
-	}
-	else if (action == ACTION_FINDUPDATE)
-	{
-		smba_file_t * file = NULL;
-		int ignored_error;
-		smba_stat_t st;
-
-		if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&file,&ignored_error) == OK &&
-		   smba_getattr(file,&st,&ignored_error) == OK)
-		{
-			/* File apparently opens OK and information on it
-			 * is available, don't try to replace it.
-			 */
-			create_new_file = FALSE;
-		}
-		else
-		{
-			/* We try to ignore the error here and assume
-			 * that the remainder of the file opening
-			 * procedure will produce a useful error
-			 * report. In the mean time, assume that the
-			 * file needs to be created.
-			 */
-			create_new_file = TRUE;
-		}
-
-		if(file != NULL)
-			smba_close(ServerData,file);
-	}
-	else
-	{
-		/* What's that? */
-		error = ERROR_ACTION_NOT_KNOWN;
-		goto out;
-	}
-
-	/* Create a new file? */
-	if(create_new_file)
 	{
 		STRPTR dir_name,base_name;
 		smba_file_t * dir;
@@ -6297,7 +6313,7 @@ Action_Find(
 		SHOWMSG("creating a file; finding parent path first");
 		D(("dir_name = '%s'",escape_name(dir_name)));
 
-		if(smba_open(ServerData,dir_name,open_writable,open_dont_truncate,&dir,&error) < 0)
+		if(smba_open(ServerData,dir_name,open_read_only,open_dont_truncate,&dir,&error) < 0)
 		{
 			error = map_errno_to_ioerr(error);
 			goto out;
@@ -6325,10 +6341,29 @@ Action_Find(
 		smba_close(ServerData,dir);
 	}
 
-	/* Now for the remainder... */
-	if(smba_open(ServerData,full_name,action != ACTION_FINDINPUT,create_new_file,&fn->fn_File,&error) < 0)
+	/* Open the file for read access if ACTION_FINDINPUT is used,
+	 * and for write access for ACTION_FINDOUTPUT/ACTION_FINDUPDATE.
+	 */
+	if(smba_open(ServerData,full_name,(action != ACTION_FINDINPUT),open_dont_truncate,&fn->fn_File,&error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
+		goto out;
+	}
+
+	/* Make sure that we ended opening a file, and not a directory.
+	 * Embarrassing questions might otherwise be asked later...
+	 */
+	if(smba_getattr(fn->fn_File,&st,&error) < 0)
+	{
+		error = map_errno_to_ioerr(error);
+		goto out;
+	}
+
+	if(st.is_dir)
+	{
+		D(("ouch: '%s' is a directory, not a file",escape_name(full_name)));
+
+		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
 	}
 
@@ -6951,7 +6986,9 @@ Action_ExamineFH(
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-	seconds = (st.mtime == 0 ? st.ctime : st.mtime) - UNIX_TIME_OFFSET - get_time_zone_delta();
+	seconds = (st.mtime == 0 ? st.ctime : st.mtime);
+
+	seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
 	if(seconds < 0)
 		seconds = 0;
 
