@@ -35,6 +35,8 @@
 
 #if defined(__amigaos4__)
 #include <dos/obsolete.h>
+#else
+#define VARARGS68K
 #endif /* __amigaos4__ */
 
 #include <string.h>
@@ -376,21 +378,36 @@ static void putch(UBYTE c __asm("d0"))
 
 #endif /* __SASC */
 
-void
+void VARARGS68K
 _DPRINTF(const char *fmt,...)
 {
 	if(__debug_level >= DEBUGLEVEL_Reports)
 	{
 		va_list args;
 
-		va_start(args,fmt);
+		#if defined(__amigaos4__)
+		{
+			va_startlinear(args,fmt);
 
-		if(debug_file == (BPTR)NULL)
-			RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
-		else
-			VFPrintf(debug_file,fmt,args);
+			if(debug_file == (BPTR)NULL)
+				RawDoFmt((char *)fmt,va_getlinearva(args, APTR),(VOID (*)())putch,NULL);
+			else
+				VFPrintf(debug_file,fmt,va_getlinearva(args, APTR));
 
-		va_end(args);
+			va_end(args);
+		}
+		#else
+		{
+			va_start(args,fmt);
+
+			if(debug_file == (BPTR)NULL)
+				RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
+			else
+				VFPrintf(debug_file,fmt,args);
+
+			va_end(args);
+		}
+		#endif /* __amigaos4__ */
 
 		if(debug_file == (BPTR)NULL)
 		{
@@ -404,26 +421,46 @@ _DPRINTF(const char *fmt,...)
 	}
 }
 
-void
+void VARARGS68K
 _DLOG(const char *fmt,...)
 {
 	if(__debug_level >= DEBUGLEVEL_Reports)
 	{
 		va_list args;
 
-		va_start(args,fmt);
-
-		if(debug_file == (BPTR)NULL)
+		#if defined(__amigaos4__)
 		{
-			RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
-		}
-		else
-		{
-			VFPrintf(debug_file,fmt,args);
-			Flush(debug_file);
-		}
+			va_startlinear(args,fmt);
 
-		va_end(args);
+			if(debug_file == (BPTR)NULL)
+			{
+				RawDoFmt((char *)fmt,va_getlinearva(args, APTR),(VOID (*)())putch,NULL);
+			}
+			else
+			{
+				VFPrintf(debug_file,fmt,va_getlinearva(args, APTR));
+				Flush(debug_file);
+			}
+
+			va_end(args);
+		}
+		#else
+		{
+			va_start(args,fmt);
+
+			if(debug_file == (BPTR)NULL)
+			{
+				RawDoFmt((char *)fmt,args,(VOID (*)())putch,NULL);
+			}
+			else
+			{
+				VFPrintf(debug_file,fmt,args);
+				Flush(debug_file);
+			}
+
+			va_end(args);
+		}
+		#endif /* __amigaos4__ */
 	}
 }
 

@@ -96,6 +96,11 @@
  #undef DEBUG
  #define DEBUG 1
 #elif defined(DEBUG) && defined(__GNUC__)
+ 
+#ifndef __amigaos4__
+#define VARARGS68K
+#endif /* __amigaos4__ */
+ 
  void _ASSERT(int x,const char *xs,const char *file,int line,const char *function);
  void _SHOWVALUE(unsigned long value,int size,const char *name,const char *file,int line);
  void _SHOWPOINTER(void *p,const char *name,const char *file,int line);
@@ -105,8 +110,8 @@
  void _LEAVE(const char *file,int line,const char *function);
  void _RETURN(const char *file,int line,const char *function,unsigned long result);
  void _DPRINTF_HEADER(const char *file,int line);
- void _DPRINTF(const char *format,...);
- void _DLOG(const char *format,...);
+ void VARARGS68K _DPRINTF(const char *format,...);
+ void VARARGS68K _DLOG(const char *format,...);
  void _SETDEBUGFILE(BPTR file);
  int  _SETDEBUGLEVEL(int level);
  void _PUSHDEBUGLEVEL(int level);
@@ -139,6 +144,11 @@
 
  #undef DEBUG
  #define DEBUG 1
+ 
+#ifndef __amigaos4__
+#undef VARARGS68K
+#endif /* __amigaos4__ */
+ 
 #else
  #define ASSERT(x)			((void)0)
  #define ENTER()			((void)0)
