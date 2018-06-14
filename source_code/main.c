@@ -37,7 +37,6 @@
 /****************************************************************************/
 
 #include "smb_abstraction.h"
-#include "utf-8-iso-8859-1-conversion.h"
 #include "cp437.h"
 #include "cp850.h"
 #include "errors.h"
@@ -211,7 +210,6 @@ static BOOL					Quit;
 static BOOL					Quiet;
 static BOOL					CaseSensitive;
 static BOOL					OmitHidden;
-static BOOL					TranslateUTF8;
 
 static LONG					DSTOffset;
 static LONG					TimeZoneOffset;
@@ -562,7 +560,6 @@ main(void)
 		SWITCH	WriteBehind;
 		SWITCH	PreferReadRaw;
 		KEY		Unicode;
-		SWITCH	UTF8;
 		SWITCH	CP437;
 		SWITCH	CP850;
 		KEY		TranslationFile;
@@ -597,7 +594,6 @@ main(void)
 		"WRITEBEHIND/S,"
 		"PREFERREADRAW/S,"
 		"UNICODE/K,"
-		"UTF8/S,"
 		"CP437/S,"
 		"CP850/S,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
@@ -867,8 +863,6 @@ main(void)
 			str = FindToolType(Icon->do_ToolTypes,"UNICODE");
 			if (str != NULL)
 				args.Unicode = str;
-			else if (FindToolType(Icon->do_ToolTypes,"UTF8") != NULL)
-				args.UTF8 = TRUE;
 			else if (FindToolType(Icon->do_ToolTypes,"CP437") != NULL)
 				args.CP437 = TRUE;
 			else if (FindToolType(Icon->do_ToolTypes,"CP850") != NULL)
@@ -1015,19 +1009,12 @@ main(void)
 	}
 
 	/* Code page based translation using a file disables
-	 * UTF-8 and built-in CP437 and CP850 translation.
+	 * the built-in CP437 and CP850 translation.
 	 */
 	if(args.TranslationFile != NULL)
-	{
-		args.UTF8 = args.CP437 = args.CP850 = FALSE;
-	}
-	else
-	{
-		if (args.UTF8)
-			args.CP437 = args.CP850 = FALSE;
-		else if (args.CP437)
-			args.CP850 = FALSE;
-	}
+		args.CP437 = args.CP850 = FALSE;
+	else if (args.CP437)
+		args.CP850 = FALSE;
 
 	/* Use one of the built-in code page translation tables? */
 	if (args.CP437)
@@ -1047,7 +1034,6 @@ main(void)
 
 	CaseSensitive = (BOOL)args.CaseSensitive;
 	OmitHidden = (BOOL)args.OmitHidden;
-	TranslateUTF8 = (BOOL)args.UTF8;
 
 	/* You don't need to provide a specific workgroup name. smbfs will
 	 * work perfectly find with modern (and somewhat older) SMB implementations
@@ -3834,7 +3820,7 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 
 /****************************************************************************/
 
-/* Translate an Amiga file name into an encoded form, such as UTF-8 or
+/* Translate an Amiga file name into an encoded form, such as
  * through a code page translation table. The file name provided will
  * be modified in place and may become longer than it already is.
  */
@@ -3845,29 +3831,8 @@ translate_amiga_name_to_smb_name(STRPTR name, int name_len, int name_size)
 
 	ASSERT( name != NULL && name_len < name_size );
 
-	/* Translate the Amiga file name into UTF-8 encoded form? */
-	if (TranslateUTF8)
-	{
-		TEXT encoded_name[MAX_FILENAME_LEN+1];
-		int encoded_name_len;
-
-		/* Figure out how long the UTF-8 version will become. */
-		encoded_name_len = encode_iso8859_1_as_utf8_string(name,name_len,NULL,0);
-
-		/* Encoding error occured, or the resulting name is longer than the buffer will hold? */
-		if(encoded_name_len < 0 || encoded_name_len >= name_size)
-			goto out;
-
-		/* Repeat the encoding process, writing the result to the
-		 * replacement name buffer now.
-		 */
-		encode_iso8859_1_as_utf8_string(name,name_len,encoded_name,sizeof(encoded_name));
-
-		/* Copy it back to the name buffer (which is not terribly efficient, though). */
-		strlcpy(name,encoded_name,name_size);
-	}
 	/* Translate the Amiga file name using a translation table? */
-	else if (TranslateNames)
+	if (TranslateNames)
 	{
 		const TEXT * map = map_amiga_to_smb_name;
 		TEXT c;
@@ -3896,7 +3861,7 @@ translate_amiga_name_to_smb_name(STRPTR name, int name_len, int name_size)
 
 /****************************************************************************/
 
-/* Translate an SMB file name in encoded form, such as UTF-8 or
+/* Translate an SMB file name in encoded form, such as
  * through a code page translation table, into a form suitable
  * for use with AmigaDOS. The file name provided will be modified
  * in place and may become longer than it already is.
@@ -3908,31 +3873,8 @@ translate_smb_name_to_amiga_name(STRPTR name, int name_len, int name_size)
 
 	ASSERT( name != NULL && name_len < name_size );
 
-	/* Translate the name of the file/directory from UTF-8
-	 * into AmigaOS ISO 8859-1 (ISO Latin 1) encoding?
-	 */
-	if(TranslateUTF8)
-	{
-		TEXT decoded_name[MAX_FILENAME_LEN+1];
-		int decoded_name_len;
-
-		/* Try to decode the file name, translating it into ISO 8859-1 format. */
-		decoded_name_len = decode_utf8_as_iso8859_1_string(name,name_len,NULL,0);
-
-		/* Decoding error occured, or the decoded name would be longer than
-		 * buffer would allow?
-		 */
-		if(decoded_name_len < 0 || decoded_name_len >= name_size)
-			goto out;
-
-		/* Decode the name for real. */
-		decode_utf8_as_iso8859_1_string(name,name_len,decoded_name,sizeof(decoded_name));
-
-		/* Copy it back to the name buffer (which is not terribly efficient, though). */
-		strlcpy(name,decoded_name,name_size);
-	}
 	/* Translate the name to Amiga format using a mapping table. */
-	else if (TranslateNames)
+	if (TranslateNames)
 	{
 		const TEXT * map = map_smb_to_amiga_name;
 		TEXT c;

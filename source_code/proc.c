@@ -1295,7 +1295,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 					}
 				}
 
-				if (smb_retry (server))
+				if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 					continue;
 				else
 					goto out;
@@ -1394,7 +1394,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 					}
 				}
 
-				if (smb_retry (server))
+				if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 					continue;
 				else
 					goto out;
@@ -1472,22 +1472,14 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 	result = smb_request_ok_with_payload (server, SMBread, 5, -1, data, NULL, count, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 		{
-			if(reopen_entry(server,finfo,NULL) < 0)
-			{
-				LOG(("that didn't work.\n"));
-				goto out;
-			}
-			else
-			{
+			if(reopen_entry(server,finfo,NULL) == 0)
 				goto retry;
-			}
 		}
-		else
-		{
-			goto out;
-		}
+
+		LOG(("that didn't work.\n"));
+		goto out;
 	}
 
 	/* The buffer format must be 1; smb_request_ok_with_payload() already checked this. */
@@ -1505,8 +1497,9 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
 }
 
 /* count must be <= 65535. No error number is returned. A result of 0
-   indicates an error, which has to be investigated by a normal read
-   call. */
+ * indicates an error, which has to be investigated by a normal read
+ * call.
+ */
 int
 smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, char *data, int * error_ptr)
 {
@@ -1530,8 +1523,13 @@ smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, const QU
 	result = smb_request_read_raw (server, data, count, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
-			goto retry;
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+		{
+			if(reopen_entry(server,finfo,NULL) == 0)
+				goto retry;
+		}
+
+		LOG(("that didn't work.\n"));
 	}
 
 	return result;
@@ -1560,13 +1558,13 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 	result = smb_request_ok_with_payload (server, SMBwrite, 1, 0, NULL, data, count, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 		{
-			if(reopen_entry(server,finfo,NULL) < 0)
-				LOG(("that didn't work.\n"));
-			else
+			if(reopen_entry(server,finfo,NULL) == 0)
 				goto retry;
 		}
+
+		LOG(("that didn't work.\n"));
 	}
 	else
 	{
@@ -1671,10 +1669,14 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const Q
 	result = smb_request_ok_with_payload (server, SMBwritebraw, 1, 0, NULL, data, len, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
-			goto retry;
-		else
-			goto out;
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+		{
+			if(reopen_entry(server,finfo,NULL) == 0)
+				goto retry;
+		}
+
+		LOG(("that didn't work.\n"));
+		goto out;
 	}
 
 	num_bytes_written += len;
@@ -1699,10 +1701,14 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const Q
 			data -= len;
 			count += len;
 
-			if (smb_retry (server))
-				goto retry;
-			else
-				goto out;
+			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+			{
+				if(reopen_entry(server,finfo,NULL) == 0)
+					goto retry;
+			}
+
+			LOG(("that didn't work.\n"));
+			goto out;
 		}
 
 		if(server->write_behind)
@@ -1795,13 +1801,13 @@ smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, const QUAD
 	result = smb_request_ok_with_payload (server, SMBwriteX, 6, 0, NULL, data, count, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 		{
-			if(reopen_entry(server,finfo,NULL) < 0)
-				LOG(("that didn't work.\n"));
-			else
+			if(reopen_entry(server,finfo,NULL) == 0)
 				goto retry;
 		}
+
+		LOG(("that didn't work.\n"));
 	}
 	else
 	{
@@ -1854,13 +1860,13 @@ smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, const QUAD 
 	result = smb_request_ok_with_payload (server, SMBreadX, 7, 0, data, NULL, count, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 		{
-			if(reopen_entry(server,finfo,NULL) < 0)
-				LOG(("that didn't work.\n"));
-			else
+			if(reopen_entry(server,finfo,NULL) == 0)
 				goto retry;
 		}
+
+		LOG(("that didn't work.\n"));
 	}
 	else
 	{
@@ -1919,13 +1925,13 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, const st
 	result = smb_request_ok (server, SMBlockingX, 0, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 		{
-			if(reopen_entry(server,finfo,NULL) < 0)
-				LOG(("that didn't work.\n"));
-			else
+			if(reopen_entry(server,finfo,NULL) == 0)
 				goto retry;
 		}
+
+		LOG(("that didn't work.\n"));
 	}
 
 	return result;
@@ -1967,7 +1973,7 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 	result = smb_request_ok (server, SMBcreate, 1, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 		else
 			goto out;
@@ -1977,7 +1983,7 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 	entry->fileid = WVAL (buf, smb_vwv0);
 
 	/* Don't change the modification time. */
-	smb_proc_close (server, entry->fileid, 0, error_ptr);
+	smb_proc_close (server, entry->fileid, -1, error_ptr);
 
  out:
 
@@ -2022,7 +2028,7 @@ smb_proc_mv (struct smb_server *server, const char *old_path, const int old_path
 	result = smb_request_ok (server, SMBmv, 0, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 	}
 
@@ -2098,13 +2104,10 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 		result = smb_trans2_request (server, SMBtrans2, NULL, NULL, NULL, NULL, error_ptr);
 		if (result < 0)
 		{
-			if((*error_ptr) != error_check_smb_error)
-			{
-				if (smb_retry (server))
-					goto retry;
-			}
-
-			goto out;
+			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+				goto retry;
+			else
+				goto out;
 		}
 
 		if(server->rcls != 0)
@@ -2134,7 +2137,7 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 		result = smb_request_ok (server, SMBmkdir, 0, 0, error_ptr);
 		if (result < 0)
 		{
-			if (smb_retry (server))
+			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 				goto retry;
 		}
 	}
@@ -2175,7 +2178,7 @@ smb_proc_rmdir (struct smb_server *server, const char *path, const int len, int 
 	result = smb_request_ok (server, SMBrmdir, 0, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 	}
 
@@ -2219,7 +2222,7 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 	result = smb_request_ok (server, SMBunlink, 0, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 	}
 
@@ -2248,7 +2251,7 @@ smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_p
 	result = smb_request_ok (server, SMBwrite, 1, 0, error_ptr);
 	if(result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 	}
 	else
@@ -2404,7 +2407,7 @@ smb_proc_readdir_short (struct smb_server *server, const char *path, int fpos, i
 			}
 			else
 			{
-				if (smb_retry (server))
+				if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 					goto retry;
 
 				result = -1;
@@ -2951,7 +2954,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 		LOG (("smb_trans2_request returns %ld\n", result));
 
 		/* If an error was flagged, check is_first if it's a protocol
-		 * error which could handle below. Otherwise, try again.
+		 * error which we could handle below. Otherwise, try again.
 		 */
 		if (result < 0 && (*error_ptr) != error_check_smb_error)
 		{
@@ -3196,7 +3199,7 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	result = smb_request_ok (server, SMBgetatr, 10, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 		else
 			goto out;
@@ -3231,6 +3234,8 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	dword ext_file_attributes;
 	dword end_of_file_low;
 	dword end_of_file_high;
+	int is_directory;
+	dword file_name_length;
 	int parameter_count;
 	char * p;
 	int result;
@@ -3307,11 +3312,8 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	result = smb_trans2_request (server, SMBtrans2, &resp_data_len, NULL, &resp_data, NULL, error_ptr);
 	if (result < 0)
 	{
-		if((*error_ptr) != error_check_smb_error)
-		{
-			if (smb_retry (server))
-				goto retry;
-		}
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+			goto retry;
 
 		goto out;
 	}
@@ -3347,10 +3349,25 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	p += 2 * sizeof(dword); /* AllocationSize */
 
 	p = smb_decode_dword(p, &end_of_file_low);
-	(void) smb_decode_dword(p, &end_of_file_high);
+	p = smb_decode_dword(p, &end_of_file_high);
 
 	entry->size_low = end_of_file_low;
 	entry->size_high = end_of_file_high;
+
+	p += sizeof(dword); /* Number of links */
+
+	p += 1; /* Delete pending */
+
+	is_directory = (*p);
+	p += 1; /* Directory */
+
+	p += sizeof(word); /* Reserved */
+
+	p += sizeof(dword); /* Extended attribute size */
+
+	p = smb_decode_dword(p, &file_name_length);
+
+	/* File name follows here. */
 
 	#if DEBUG
 	{
@@ -3362,7 +3379,7 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 
 		seconds_to_tm(entry->mtime,&tm);
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
-		LOG(("size = %s (0x%08lx:0x%08lx)\n",convert_quad_to_string(&entry_size_quad),entry->size_high,entry->size_low));
+		LOG(("size = %s (0x%08lx%08lx)\n",convert_quad_to_string(&entry_size_quad),entry->size_high,entry->size_low));
 		LOG(("attr = 0x%08lx\n",entry->attr));
 	}
 	#endif /* DEBUG */
@@ -3390,7 +3407,7 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry, int * er
 	result = smb_request_ok (server, SMBgetattrE, 11, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 		else
 			goto out;
@@ -3512,22 +3529,13 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 	result = smb_trans2_request (server, SMBtrans2, NULL, NULL, NULL, NULL, error_ptr);
 	if (result < 0)
 	{
-		if((*error_ptr) != error_check_smb_error)
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 		{
-			if (smb_retry (server))
-			{
-				if(reopen_entry(server,entry,NULL) < 0)
-				{
-					LOG(("that didn't work.\n"));
-					goto out;
-				}
-				else
-				{
-					goto retry;
-				}
-			}
+			if(reopen_entry(server,entry,NULL) == 0)
+				goto retry;
 		}
 
+		LOG(("that didn't work.\n"));
 		goto out;
 	}
 
@@ -3583,7 +3591,7 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 	result = smb_request_ok (server, SMBsetatr, 0, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 			goto retry;
 	}
 
@@ -3621,13 +3629,13 @@ smb_proc_setattrE (struct smb_server *server, word fid, struct smb_dirent *new_e
 	result = smb_request_ok (server, SMBsetattrE, 0, 0, error_ptr);
 	if (result < 0)
 	{
-		if (smb_retry (server))
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 		{
-			if(reopen_entry(server,new_entry,NULL) < 0)
-				LOG(("that didn't work.\n"));
-			else
+			if(reopen_entry(server,new_entry,NULL) == 0)
 				goto retry;
 		}
+
+		LOG(("that didn't work.\n"));
 	}
 
 	return result;
@@ -3647,8 +3655,8 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 	if (!server->prefer_core_protocol && server->protocol >= PROTOCOL_NT1)
 	{
 		unsigned char *outbuf = server->transmit_buffer;
-		dword total_allocation_units_low;
-		dword total_free_allocation_units_low;
+		dword total_allocation_units;
+		dword total_free_allocation_units;
 		dword sectors_per_allocation_unit;
 		dword bytes_per_sector;
 
@@ -3683,11 +3691,8 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 		result = smb_trans2_request (server, SMBtrans2, &resp_data_len, NULL, &resp_data, NULL, error_ptr);
 		if (result < 0)
 		{
-			if((*error_ptr) != error_check_smb_error)
-			{
-				if (smb_retry (server))
-					goto retry;
-			}
+			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+				goto retry;
 
 			goto out;
 		}
@@ -3704,15 +3709,15 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 
 		p = resp_data;
 
-		p = smb_decode_dword (p, &total_allocation_units_low);
+		p = smb_decode_dword (p, &total_allocation_units);
 		p += sizeof(dword);
 
-		SHOWVALUE(total_allocation_units_low);
+		SHOWVALUE(total_allocation_units);
 
-		p = smb_decode_dword (p, &total_free_allocation_units_low);
+		p = smb_decode_dword (p, &total_free_allocation_units);
 		p += sizeof(dword);
 
-		SHOWVALUE(total_free_allocation_units_low);
+		SHOWVALUE(total_free_allocation_units);
 
 		p = smb_decode_dword (p, &sectors_per_allocation_unit);
 		(void) smb_decode_dword (p, &bytes_per_sector);
@@ -3720,8 +3725,8 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 		SHOWVALUE(bytes_per_sector);
 		SHOWVALUE(sectors_per_allocation_unit);
 
-		attr->total = total_allocation_units_low;
-		attr->free = total_free_allocation_units_low;
+		attr->total = total_allocation_units;
+		attr->free = total_free_allocation_units;
 
 		attr->blocksize = bytes_per_sector;
 		attr->allocblocks = sectors_per_allocation_unit;
@@ -3740,7 +3745,7 @@ smb_proc_dskattr (struct smb_server *server, struct smb_dskattr *attr, int * err
 		result = smb_request_ok (server, SMBdskattr, 5, 0, error_ptr);
 		if (result < 0)
 		{
-			if (smb_retry (server))
+			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
 				goto retry;
 
 			goto out;

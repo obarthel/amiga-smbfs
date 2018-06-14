@@ -48,7 +48,7 @@ LFLAGS = -nostartfiles -nostdlib -L.
 
 OBJS = \
 	main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o \
-	utf-8-iso-8859-1-conversion.o cp437.o cp850.o
+	cp437.o cp850.o
 
 ###############################################################################
 
@@ -70,12 +70,11 @@ cp437.o : cp437.c
 cp850.o : cp850.c
 crypt.o : crypt.c system_headers.h assert.h quad_math.h smbfs.h
 dump_smb.o : dump_smb.c system_headers.h assert.h quad_math.h smbfs.h dump_smb.h
-main.o : main.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h utf-8-iso-8859-1-conversion.h cp437.h cp850.h errors.h dump_smb.h smbfs_rev.h
+main.o : main.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h cp437.h cp850.h errors.h dump_smb.h smbfs_rev.h
 proc.o : proc.c system_headers.h assert.h quad_math.h smbfs.h errors.h smbfs_rev.h
 quad_math.o : quad_math.c quad_math.h
 smb_abstraction.o : smb_abstraction.c system_headers.h assert.h quad_math.h smbfs.h errors.h smb_abstraction.h
 sock.o : sock.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h dump_smb.h errors.h
-utf-8-iso-8859-1-conversion.o : utf-8-iso-8859-1-conversion.c utf-8-iso-8859-1-conversion.h
 
 ###############################################################################
 

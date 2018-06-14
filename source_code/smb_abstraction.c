@@ -457,10 +457,8 @@ smba_close (smba_server_t * s, smba_file_t * f)
 		{
 			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(found->dirent.complete_path), found->dirent.fileid));
 
-			/* Don't change the modification time unless the contents
-			 * of the file were changed.
-			 */
-			smb_proc_close (&found->server->server, found->dirent.fileid, found->modified ? found->dirent.mtime : 0, &ignored_error);
+			/* Don't change the modification time. */
+			smb_proc_close (&found->server->server, found->dirent.fileid, -1, &ignored_error);
 		}
 
 		if (found->dircache != NULL)
@@ -888,7 +886,6 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 
 		/* This file was modified. */
 		f->dirent.mtime = get_current_time();
-		f->modified = TRUE;
 
 		size_quad.Low	= f->dirent.size_low;
 		size_quad.High	= f->dirent.size_high;
@@ -1072,7 +1069,6 @@ smba_setattr (smba_file_t * f, const smba_stat_t * data, const QUAD * const size
 		if(result < 0)
 			goto out;
 
-		f->modified			= TRUE;
 		f->dirent.size_low	= size->Low;
 		f->dirent.size_high	= size->High;
 	}
@@ -1266,7 +1262,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 		/* Close the file again, we don't really need it right now.
 		 * Don't change the modification time.
 		 */
-		smb_proc_close(&dir->server->server,entry.fileid,0,&ignored_error);
+		smb_proc_close(&dir->server->server,entry.fileid,-1,&ignored_error);
 	}
 	else
 	{
@@ -1343,8 +1339,8 @@ close_path (smba_server_t * s, const char *path, int * error_ptr)
 		{
 			if (p->dirent.opened)
 			{
-				/* Don't change the modification time unless the file was modified. */
-				result = smb_proc_close (&s->server, p->dirent.fileid, p->modified ? p->dirent.mtime : 0, error_ptr);
+				/* Don't change the modification time. */
+				result = smb_proc_close (&s->server, p->dirent.fileid, -1, error_ptr);
 				if(result < 0)
 				{
 					LOG(("closing '%s' with file id %ld failed\n", escape_name(path), p->dirent.fileid));

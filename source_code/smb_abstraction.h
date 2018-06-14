@@ -109,7 +109,6 @@ typedef struct smba_file
 	dircache_t *			dircache;		/* content cache for directories */
 	unsigned				is_valid:1;		/* server was down, entry removed, ... */
 	unsigned				attr_dirty:1;	/* attribute cache is dirty */
-	unsigned				modified:1;		/* file was modified */
 } smba_file_t;
 
 /****************************************************************************/

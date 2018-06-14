@@ -2040,3 +2040,28 @@ smbfs 1.152 (11.6.2018)
 
 - Ouch. Forgot that pretty much all the core functions were
   still not supporting Unicode mode. Fixed.
+
+
+smbfs 1.153 (14.6.2018)
+
+- The modification time of files which were written to no longer
+  get updated when those files are closed again. We now trust
+  the server's file system to do its job.
+
+- The SMB_COM_READ_RAW and SMB_COM_WRITE_RAW commands did not
+  reopen the files they were handling after succeeding in
+  reestablishing a connection to the server (following a
+  timeout and whatnot). Fixed.
+
+- If a command fails because of an error, we now only try to
+  reestablish a server connection and repeat the command if
+  the error reported is not an SMB protocol error. The protocol
+  error may persist even when trying to repeat the command,
+  but a network error may be resolved by closing the connection
+  to the server and then reopening it.
+
+- Removed the UTF-8 translation option, since it is not needed.
+  The SMB protocol as implemented by smbfs only uses UTF-16
+  (Unicode) or code page based path name encoding. UTF-8 support
+  was added due to my mistaken assumption that what I now know is
+  corrupted data sent by the server may have been UTF-8-encoded.
