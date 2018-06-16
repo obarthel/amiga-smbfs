@@ -26,7 +26,7 @@
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
- * Fritz!Box: smbfs debuglevel=2 debugfile=ram:fritz.nas.log unicode user=nas password=nas volume=fritz.nas //fritzbox-3272/fritz.nas
+ * Fritz!Box: smbfs debuglevel=2 debugfile=ram:fritz.nas.log user=nas password=nas volume=fritz.nas //fritzbox-3272/fritz.nas
  * Samba 4.6.7: smbfs debuglevel=2 debugfile=ram:ubuntu-17.log volume=ubuntu-test //ubuntu-17-olaf/test
  * Samba 4.7.6: smbfs debuglevel=2 debugfile=ram:ubuntu-18.log volume=ubuntu-test //ubuntu-18-olaf/test
  * Samba 3.0.25: smbfs debuglevel=2 debugfile=ram:samba-3.0.25.log user=olsen password=... volume=olsen //192.168.1.118/olsen
@@ -151,7 +151,7 @@ static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static void VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
 static void cleanup(void);
 static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_prefer_write_raw, BOOL opt_write_behind, BOOL opt_prefer_read_raw, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
-static void file_system_handler(const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
+static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
 
@@ -545,6 +545,7 @@ main(void)
 		SWITCH	CaseSensitive;
 		SWITCH	OmitHidden;
 		SWITCH	Quiet;
+		SWITCH	RaisePriority;
 		KEY		ClientName;
 		KEY		ServerName;
 		KEY		DeviceName;
@@ -579,6 +580,7 @@ main(void)
 		"CASE=CASESENSITIVE/S,"
 		"OMITHIDDEN/S,"
 		"QUIET/S,"
+		"RAISEPRIORITY/S,"
 		"CLIENT=CLIENTNAME/K,"
 		"SERVER=SERVERNAME/K,"
 		"DEVICE=DEVICENAME/K,"
@@ -736,6 +738,9 @@ main(void)
 
 		if(FindToolType(Icon->do_ToolTypes,"QUIET") != NULL)
 			args.Quiet = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"RAISEPRIORITY") != NULL)
+			args.RaisePriority = TRUE;
 
 		if(FindToolType(Icon->do_ToolTypes,"CASE") != NULL ||
 		   FindToolType(Icon->do_ToolTypes,"CASESENSITIVE") != NULL)
@@ -1015,10 +1020,14 @@ main(void)
 		args.CP437 = args.CP850 = FALSE;
 	else if (args.CP437)
 		args.CP850 = FALSE;
+	else if (args.CP850)
+		args.CP437 = FALSE;
 
 	/* Use one of the built-in code page translation tables? */
 	if (args.CP437)
 	{
+		SHOWMSG("using code page 437 translation");
+
 		memmove(map_amiga_to_smb_name,unicode_to_cp437,sizeof(unicode_to_cp437));
 		memmove(map_smb_to_amiga_name,cp437_to_unicode,sizeof(cp437_to_unicode));
 
@@ -1026,6 +1035,8 @@ main(void)
 	}
 	else if (args.CP850)
 	{
+		SHOWMSG("using code page 850 translation");
+
 		memmove(map_amiga_to_smb_name,unicode_to_cp850,sizeof(unicode_to_cp850));
 		memmove(map_smb_to_amiga_name,cp850_to_unicode,sizeof(cp850_to_unicode));
 
@@ -1153,7 +1164,7 @@ main(void)
 		if(Locale != NULL)
 			SHOWVALUE(Locale->loc_GMTOffset);
 
-		file_system_handler(args.DeviceName,args.VolumeName,args.Service);
+		file_system_handler(args.RaisePriority,args.DeviceName,args.VolumeName,args.Service);
 
 		result = RETURN_WARN;
 	}
@@ -2867,6 +2878,8 @@ setup(
 
 		error = OK;
 
+		D(("using translation file '%s'",translation_file));
+
 		file = Open(translation_file,MODE_OLDFILE);
 		if(file != ZERO)
 		{
@@ -2892,15 +2905,14 @@ setup(
 		else
 		{
 			TEXT description[100];
+			STRPTR s;
 
 			Fault(error,NULL,description,sizeof(description));
 
 			/* Drop the line feed - we don't need it. */
-			for(i = ((int)strlen(description)) - 1 ; i >= 0 ; i--)
-			{
-				if(description[i] == '\n')
-					description[i] = '\0';
-			}
+			s = strchr(description,'\n');
+			if(s != NULL)
+				(*s) = '\0';
 
 			report_error("%s '%s' (%ld, %s).",msg,translation_file,error,description);
 			goto out;
@@ -7660,11 +7672,11 @@ Action_FreeRecord (
 /****************************************************************************/
 
 static void
-file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT * service_name)
+file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * volume_name,const TEXT * service_name)
 {
 	struct Process * this_process = (struct Process *)FindTask(NULL);
 	BOOL sign_off = FALSE;
-	BYTE old_priority;
+	int old_priority = 0;
 	fd_set read_fds;
 	int server_fd;
 	ULONG signals;
@@ -7737,16 +7749,19 @@ file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT
 
 	done = FALSE;
 
-	/* Raise the Task priority of the file system to 10
-	 * unless it already is running at priority 10 or higher.
-	 */
-	Forbid();
+	if(raise_priority)
+	{
+		/* Raise the Task priority of the file system to 10
+		 * unless it already is running at priority 10 or higher.
+		 */
+		Forbid();
 
-	old_priority = this_process->pr_Task.tc_Node.ln_Pri;
-	if(old_priority < 10)
-		SetTaskPri((struct Task *)this_process, 10);
+		old_priority = this_process->pr_Task.tc_Node.ln_Pri;
+		if(old_priority < 10)
+			SetTaskPri((struct Task *)this_process, 10);
 
-	Permit();
+		Permit();
+	}
 
 	FD_ZERO(&read_fds);
 
@@ -7841,6 +7856,12 @@ file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT
 		else
 		{
 			signals = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit));
+		}
+
+		if(signals & SIGBREAKF_CTRL_C)
+		{
+			SHOWMSG("stop signal received; trying to quit...");
+			Quit = TRUE;
 		}
 
 		if(signals & (1UL << FileSystemPort->mp_SigBit))
@@ -8143,6 +8164,15 @@ file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT
 
 				D(("\n"));
 			}
+
+			/* Let's get paranoid: check if we should quit. */
+			if(SetSignal(0,0) & SIGBREAKF_CTRL_C)
+			{
+				SHOWMSG("stop signal received; trying to quit...");
+				Quit = TRUE;
+
+				break;
+			}
 		}
 
 		#if DEBUG
@@ -8177,9 +8207,6 @@ file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT
 		}
 		#endif /* DEBUG */
 
-		if(signals & SIGBREAKF_CTRL_C)
-			Quit = TRUE;
-
 		if(Quit)
 		{
 			if(IsListEmpty((struct List *)&FileList) && IsListEmpty((struct List *)&LockList))
@@ -8195,15 +8222,18 @@ file_system_handler(const TEXT * device_name,const TEXT * volume_name,const TEXT
 	}
 	while(NOT done);
 
-	/* Restore the priority of the file system, unless the priority
-	 * has already been changed.
-	 */
-	Forbid();
+	if(raise_priority)
+	{
+		/* Restore the priority of the file system, unless the priority
+		 * has already been changed.
+		 */
+		Forbid();
 
-	if(old_priority < 10 && this_process->pr_Task.tc_Node.ln_Pri == 10)
-		SetTaskPri((struct Task *)this_process, old_priority);
+		if(old_priority < 10 && this_process->pr_Task.tc_Node.ln_Pri == 10)
+			SetTaskPri((struct Task *)this_process, old_priority);
 
-	Permit();
+		Permit();
+	}
 
 	if(sign_off)
 		LocalFPrintf(ZERO, "stopped.\n");

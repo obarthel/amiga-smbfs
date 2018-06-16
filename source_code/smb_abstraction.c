@@ -83,23 +83,39 @@ smba_connect (
 	if(opt_raw_smb)
 		res->server.raw_smb = TRUE;
 
+	D(("use raw SMB = %s",opt_raw_smb ? "yes" : "no"));
+
 	/* Timeout for send/receive operations in seconds. */
 	res->server.timeout = timeout;
+
+	D(("send/receive/connect timeout = %ld seconds%s",timeout,timeout > 0 ? "" : " (= default timeout)"));
 
 	/* Enable Unicode support if the server supports it, too. */
 	res->server.use_unicode = opt_unicode;
 
+	D(("use Unicode = %s",opt_unicode ? "yes" : "no"));
+
 	/* Prefer SMB core protocol commands to NT1 commands, if possible. */
 	res->server.prefer_core_protocol = opt_prefer_core_protocol;
+
+	D(("prefer core protocol = %s",opt_prefer_core_protocol ? "yes" : "no"));
 
 	/* Prefer SMB_COM_WRITE_RAW over SMB_COM_WRITE_ANDX? */
 	res->server.prefer_write_raw = opt_prefer_write_raw;
 
+	D(("prefer SMB_COM_WRITE_RAW over SMB_COM_WRITE_ANDX = %s",opt_prefer_write_raw ? "yes" : "no"));
+
 	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
 	res->server.write_behind = opt_write_behind;
 
+	D(("use asynchronous SMB_COM_WRITE_RAW operations = %s",opt_write_behind ? "yes" : "no"));
+
 	/* Prefer SMB_COM_READ_RAW over SMB_COM_READ_ANDX? */
 	res->server.prefer_read_raw = opt_prefer_read_raw;
+
+	D(("prefer SMB_COM_READ_RAW over SMB_COM_READ_ANDX = %s",opt_prefer_read_raw ? "yes" : "no"));
+
+	D(("cache size = %ld entries", cache_size));
 
 	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
 	{
@@ -108,6 +124,8 @@ smba_connect (
 	}
 
 	strlcpy(data.workgroup_name,workgroup_name,sizeof(data.workgroup_name));
+
+	D(("workgroup name = '%s'",workgroup_name));
 
 	res->server.abstraction = res;
 
@@ -120,6 +138,10 @@ smba_connect (
 	/* Only retain the host name, drop any domain names following it. */
 	if ((s = strchr (hostname, '.')) != NULL)
 		(*s) = '\0';
+
+	D(("local host name = '%s'",hostname));
+
+	D(("server ip address = %s",Inet_NtoA(ip_addr)));
 
 	data.addr.sin_family		= AF_INET;
 	data.addr.sin_addr.s_addr	= ip_addr;
@@ -151,14 +173,25 @@ smba_connect (
 	}
 
 	strlcpy (data.service, p->service, sizeof(data.service));
+
+	D(("service = '%s'",data.service));
+
 	string_toupper (data.service);
+
 	strlcpy (data.username, p->username, sizeof(data.username));
 	strlcpy (data.password, p->password, sizeof(data.password));
 
+	D(("user name = '%s'",data.username));
+
 	data.given_max_xmit = max_transmit;
+
+	D(("max transmit = %ld bytes",max_transmit));
 
 	strlcpy (data.server_name, p->server_name, sizeof(data.server_name));
 	strlcpy (data.client_name, p->client_name, sizeof(data.client_name));
+
+	D(("server name = '%s'",data.server_name));
+	D(("client name = '%s'",data.client_name));
 
 	if (data.server_name[0] == '\0')
 	{
@@ -368,7 +401,7 @@ smba_open (smba_server_t * s, const char *name, int writable, int truncate_file,
 	AddTail ((struct List *)&s->open_files, (struct Node *)f);
 	s->num_open_files++;
 
-	LOG(("file is ready (but hasn't actually been opened yet), number of open files = %ld\n",s->num_open_files));
+	LOG(("file has been 'opened', number of open files = %ld\n",s->num_open_files));
 
 	(*file) = f;
 	f = NULL;
@@ -773,15 +806,14 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		 * The parameters of a SMB_COM_WRITE_RAW command account for
 		 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
 		 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+
-		 * 2(dataoffset) = 25 bytes
+		 * 2(dataoffset)+4(offset high) = 29 bytes
 		 *
 		 * The data part of a SMB_COM_WRITE_RAW command accounts for
 		 * 2(bytecount) = 2 bytes
 		 *
-		 * This leaves 'max_buffer_size' - 59 for the payload.
+		 * This leaves 'max_buffer_size' - 63 for the payload.
 		 */
-		/*max_size_smb_com_write_raw = 2 * f->server->server.max_buffer_size - (SMB_HEADER_LEN + 12 * sizeof (word) + 4) - 8;*/
-		max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 59;
+		max_size_smb_com_write_raw = max(max_buffer_size, max_raw_size) - 63;
 
 		/* SMB_COM_WRITE_RAW cannot transmit more than 65535 bytes. */
 		if(max_size_smb_com_write_raw > 65535)
@@ -1224,6 +1256,7 @@ int
 smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 {
 	struct smb_dirent entry;
+	int ignored_error;
 	char *path = NULL;
 	size_t len;
 	int result;
@@ -1253,24 +1286,21 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 
 	if (!dir->server->server.prefer_core_protocol && dir->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
-		int ignored_error;
-
 		result = smb_proc_open (&dir->server->server, path, strlen(path), open_writable, open_truncate, &entry, error_ptr);
 		if(result < 0)
 			goto out;
-
-		/* Close the file again, we don't really need it right now.
-		 * Don't change the modification time.
-		 */
-		smb_proc_close(&dir->server->server,entry.fileid,-1,&ignored_error);
 	}
 	else
 	{
-		/* Note: smb_proc_create() closes the file just created. */
 		result = smb_proc_create (&dir->server->server, path, strlen (path), &entry, error_ptr);
 		if(result < 0)
 			goto out;
 	}
+
+	/* Close the file again, we don't really need it right now.
+	 * Don't change the modification time.
+	 */
+	smb_proc_close(&dir->server->server,entry.fileid,-1,&ignored_error);
 
  out:
 

@@ -2065,3 +2065,47 @@ smbfs 1.153 (14.6.2018)
   (Unicode) or code page based path name encoding. UTF-8 support
   was added due to my mistaken assumption that what I now know is
   corrupted data sent by the server may have been UTF-8-encoded.
+
+
+smbfs 1.154 (16.6.2018)
+
+- The conversion of UTF-16 text to ISO Latin 1 and vice versa
+  now stops as soon as the limits of the destination buffer
+  have been reached. Previously, the code would still keep
+  looking at what's in the source buffer.
+
+- The log output now also includes information on how long the
+  configured read/write/connect timeout is.
+
+- The QUERY_PATH_INFO command now decodes the path name, if
+  possible. This information is logged but not used for
+  anything else yet.
+
+- smb_proc_create() no longer closes the file just created.
+  The function calling smb_proc_create() now takes care
+  of that (which would be the smba_create() function).
+
+- Added more debug output, covering the program options, directory
+  entry decoding and other particularly exciting minutiea :-/
+
+- The SMB_COM_WRITE_RAW did not properly fill in the 64 bit
+  integer write offset, of which only half of the most significant
+  32 bits were stored in the command buffer. On top of that, the
+  maximum size calculated as being available for the payload to
+  be sent to the server was too small by four bytes. Ouch :-(
+
+- The test to verify that reopening the server connection has
+  succeeded should have tested for a return value >= 0, instead
+  of == 0. The problem is really with the API design of
+  smb_request() and smb_request_ok() which either return the number
+  of bytes received (for success) or -1 (for failure). So, the
+  solution is to make both smb_request() and smb_request_ok()
+  return 0 for success and -1 for failure.
+
+- Added the RAISEPRIORITY option. Instead of always raising the task
+  priority of the smbfs program to 10 while it is running, this is
+  configurable feature now.
+
+- You can now stop smbfs even while it's currently polling and
+  processing incoming DOS packets. Between each call to GetMsg()
+  it checks the break signal and will stop as soon as it can.

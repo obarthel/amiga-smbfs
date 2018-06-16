@@ -269,12 +269,16 @@ static void convert_time_t_to_long_date(time_t t, QUAD * long_date);
 
 /* Copy a string in ISO-Latin-1 form (8 bits per character) into a
  * buffer, converting it into a little-endian 16 bit Unicode version
- * of the string. This works because the ISO-Latin-1 sits within
- * the ASCII/BMP Latin-1 Unicode range.
+ * of the string. This works because the ISO-Latin-1 character sits
+ * within the ASCII/BMP Latin-1 Unicode range.
  *
  * This function creates a null-terminated UTF16-LE Unicode string and
  * returns how many bytes were written to the buffer, including the
  * null-termination.
+ *
+ * To be on the safe side (the path name length can be a 32 bit
+ * integer), the whole copying operation stops as soon as the
+ * output buffer is filled.
  */
 static int
 copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
@@ -282,23 +286,28 @@ copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
 	int num_bytes_written = 0;
 	int i;
 
+	/* We have to have enough room to NUL-terminate the
+	 * resulting converted string.
+	 */
 	if(to_size >= 2)
 	{
+		/* That takes care of the NUL. */
 		to_size -= 2;
 
 		for(i = 0 ; i < len ; i++)
 		{
-			if(num_bytes_written + 2 <= to_size)
-			{
-				(*to++) = (*from++);
-				(*to++) = '\0';
+			if(num_bytes_written + 2 > to_size)
+				break;
 
-				num_bytes_written += 2;
-			}
+			(*to++) = (*from++);
+			(*to++) = '\0';
+
+			num_bytes_written += 2;
 		}
 
-		(*to++) = '\0';
-		(*to) = '\0';
+		/* And we terminate that string... */
+		(*to++)	= '\0';
+		(*to)	= '\0';
 
 		num_bytes_written += 2;
 	}
@@ -310,8 +319,8 @@ copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
 
 /* Copy a string in little-endian 16 bit Unicode into a buffer, converting
  * it into a ISO-Latin-1 (8 bits per character) version of the string, if
- * possible. Code points beyond the ASCII/BMP Latin-1 are replaced by the
- * control character 0x80.
+ * possible. Code points beyond the ASCII/BMP Latin-1 character set are
+ * replaced by the control character 0x80.
  *
  * Note that the length is given as the number of 16 bit Unicode
  * characters, not the number of bytes required to store the string.
@@ -319,6 +328,10 @@ copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
  * This function creates a null-terminated ISO-Latin-1 string and
  * returns how many bytes were written to the buffer, including the
  * null-termination.
+ *
+ * To be on the safe side (the path name length can be a 32 bit
+ * integer), the whole copying operation stops as soon as the
+ * output buffer is filled.
  */
 static int
 copy_utf16le_to_latin1(byte * to,int to_size,const byte * from,int len)
@@ -327,24 +340,37 @@ copy_utf16le_to_latin1(byte * to,int to_size,const byte * from,int len)
 	word c;
 	int i;
 
+	/* We have to have enough room to NUL-terminate the
+	 * resulting converted string.
+	 */
 	if(to_size >= 1)
 	{
+		/* That takes care of the NUL. */
 		to_size -= 1;
 
 		for(i = 0 ; i < len ; i++, from += 2)
 		{
-			c = ((word)from[1] << 8) | from[0];
+			if(num_bytes_written + 1 > to_size)
+				break;
 
+			/* Pick up the next UTF-16 code point,
+			 * and just hopefully it will map to
+			 * exactly one ASCII/BMP Latin-1
+			 * character. If not, we substitute it
+			 * with an "unusable" character which
+			 * will be detected later, resulting in
+			 * the file/directory name to be
+			 * dropped.
+			 */
+			c = ((word)from[1] << 8) | from[0];
 			if(c >= 256)
 				c = 0x80;
 
-			if(num_bytes_written + 1 <= to_size)
-			{
-				(*to++) = c;
-				num_bytes_written++;
-			}
+			(*to++) = c;
+			num_bytes_written++;
 		}
 
+		/* And we terminate that string... */
 		(*to) = '\0';
 
 		num_bytes_written++;
@@ -571,12 +597,12 @@ date_dos2unix (unsigned short time_value, unsigned short date)
 
 	memset(&tm,0,sizeof(tm));
 
-	tm.tm_sec = 2 * (time_value & 0x1F);
-	tm.tm_min = (time_value >> 5) & 0x3F;
-	tm.tm_hour = (time_value >> 11) & 0x1F;
-	tm.tm_mday = date & 0x1F;
-	tm.tm_mon = ((date >> 5) & 0xF) - 1;
-	tm.tm_year = ((date >> 9) & 0x7F) + 80;
+	tm.tm_sec	= 2 * (time_value & 0x1F);
+	tm.tm_min	= (time_value >> 5) & 0x3F;
+	tm.tm_hour	= (time_value >> 11) & 0x1F;
+	tm.tm_mday	= date & 0x1F;
+	tm.tm_mon	= ((date >> 5) & 0xF) - 1;
+	tm.tm_year	= ((date >> 9) & 0x7F) + 80;
 
 	seconds = tm_to_seconds(&tm);
 
@@ -903,10 +929,9 @@ smb_dump_packet (const byte * packet)
 
 #endif /* DEBUG */
 
-/* smb_request_ok: We expect the server to be locked. Then we do the
-   request and check the answer completely. When smb_request_ok
-   returns 0, you can be quite sure that everything went well. When
-   the answer is <=0, the returned number is a valid unix errno. */
+/* smb_request_ok: We do the request and check the answer
+ * completely. Returns 0 for success and -1 for failure.
+ */
 static int
 smb_request_ok_with_payload (
 	struct smb_server *	server,
@@ -958,6 +983,15 @@ smb_request_ok_with_payload (
 
 		(*error_ptr) = error;
 		result = -1;
+	}
+	else
+	{
+		D(("smb_request() returned %ld bytes\n", result));
+
+		/* Return 0 for success, rather than the number of
+		 * bytes received.
+		 */
+		result = 0;
 	}
 
 	if(result < 0)
@@ -1262,7 +1296,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			{
 				(*data++) = 0;
 
-				copy_latin1_to_utf16le(data, pathname_size, pathname, len);
+				(void) copy_latin1_to_utf16le(data, pathname_size, pathname, len);
 			}
 			else
 			{
@@ -1333,9 +1367,6 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		entry->size_low = end_of_file_low;
 		entry->size_high = end_of_file_high;
-
-		entry->opened = TRUE;
-		entry->writable = writable;
 	}
 	else
 	{
@@ -1388,10 +1419,8 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 						continue;
 					}
-					else
-					{
-						goto out;
-					}
+
+					goto out;
 				}
 
 				if ((*error_ptr) != error_check_smb_error && smb_retry (server))
@@ -1415,10 +1444,10 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		entry->size_low = DVAL (buf, smb_vwv4);
 		entry->size_high = 0;
-
-		entry->opened = TRUE;
-		entry->writable = writable;
 	}
+
+	entry->opened = TRUE;
+	entry->writable = writable;
 
  out:
 
@@ -1427,7 +1456,8 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 }
 
 /* smb_proc_close: in finfo->mtime we can send a modification time to
-   the server */
+ * the server
+ */
 int
 smb_proc_close (struct smb_server *server, word fileid, dword mtime, int * error_ptr)
 {
@@ -1447,9 +1477,9 @@ smb_proc_close (struct smb_server *server, word fileid, dword mtime, int * error
 	return result;
 }
 
-/* In smb_proc_read and smb_proc_write we do not retry, because the
-   file-id would not be valid after a reconnection. */
-
+/* In smb_proc_read and smb_proc_write we retry, but we update
+ * the file-id to be valid again after a reconnection.
+ */
 int
 smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr)
 {
@@ -1653,16 +1683,9 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const Q
 
 	DSET (buf, smb_vwv8, 0); /* reserved */
 
-	if (server->protocol > PROTOCOL_COREPLUS)
-	{
-		WSET (buf, smb_vwv10, len);
-		WSET (buf, smb_vwv11, p - smb_base(buf));
-		WSET (buf, smb_vwv12, offset_quad->High);
-	}
-	else
-	{
-		WSET (buf, smb_vwv10, 0);
-	}
+	WSET (buf, smb_vwv10, len);
+	WSET (buf, smb_vwv11, p - smb_base(buf));
+	DSET (buf, smb_vwv12, offset_quad->High);
 
 	LOG(("requesting SMBwritebraw\n"));
 
@@ -1716,7 +1739,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const Q
 			/* We just assume success; the next file operation to follow
 			 * will set an error status if something went wrong.
 			 */
-			result = num_bytes_written + count;
+			num_bytes_written += count;
 		}
 		else
 		{
@@ -1744,11 +1767,13 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const Q
 				goto out;
 			}
 
-			result = num_bytes_written + count;
+			num_bytes_written += count;
 		}
 
-		LOG (("bytes sent so far = %ld\n", result));
+		LOG (("bytes sent so far = %ld\n", num_bytes_written));
 	}
+
+	result = num_bytes_written;
 
  out:
 
@@ -1794,7 +1819,6 @@ smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, const QUAD
 
 	WSET (p, 0, 1+count); p += 2; /* Byte count (1 pad byte + data bytes)  */
 	(*p) = 0; /* Padding byte that must be ignored */
-
 
 	LOG(("requesting SMBwriteX: offset=%s, count=%ld\n", convert_quad_to_string(offset_quad), count));
 
@@ -1981,9 +2005,6 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 
 	entry->opened = TRUE;
 	entry->fileid = WVAL (buf, smb_vwv0);
-
-	/* Don't change the modification time. */
-	smb_proc_close (server, entry->fileid, -1, error_ptr);
 
  out:
 
@@ -2229,6 +2250,9 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 	return result;
 }
 
+/* This does not really truncate the file, making it shorter. It just
+ * writes "enough" data to the file.
+ */
 int
 smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_ptr)
 {
@@ -2283,7 +2307,7 @@ smb_decode_dirent (const char *p, struct smb_dirent *entry)
 
 	entry->complete_path[name_size] = '\0';
 
-	LOG (("path = '%s'\n", escape_name(entry->complete_path)));
+	LOG (("name = '%s'\n", escape_name(entry->complete_path)));
 
 	#if DEBUG
 	{
@@ -2663,7 +2687,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 
 				finfo->len = name_len;
 
-				D(("name = '%s', length=%ld",escape_name(finfo->complete_path),name_len));
+				D(("name = '%s', length=%ld, size=%ld",escape_name(finfo->complete_path),name_len,name_size));
 			}
 
 			break;
@@ -2774,7 +2798,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 
 				finfo->len = name_len;
 
-				D(("name = '%s', length=%ld",escape_name(finfo->complete_path),name_len));
+				D(("name = '%s', length=%ld, size=%ld",escape_name(finfo->complete_path),name_len,name_size));
 			}
 
 			break;
@@ -2921,6 +2945,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 		if (is_first)
 		{
 			LOG (("first match\n"));
+
 			WSET (p, 0, attribute); /* attribute */
 			WSET (p, 2, max_matches); /* max count */
 			WSET (p, 4, SMB_FIND_CLOSE_AT_EOS|SMB_FIND_RETURN_RESUME_KEYS|SMB_FIND_CONTINUE_FROM_LAST);
@@ -2930,6 +2955,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 		else
 		{
 			LOG (("next match; ff_dir_handle=0x%lx ff_resume_key=%ld mask='%s'\n", ff_dir_handle, ff_resume_key, escape_name(mask)));
+
 			WSET (p, 0, ff_dir_handle);
 			WSET (p, 2, max_matches); /* max count */
 			WSET (p, 4, info_level);
@@ -3075,7 +3101,10 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 			{
 				smb_decode_long_dirent (server, p, NULL, info_level, &entry_length);
 				if(entry_length == 0)
+				{
+					LOG (("no more entries available; stopping.\n"));
 					break;
+				}
 
 				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
 			}
@@ -3083,7 +3112,10 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 			{
 				smb_decode_long_dirent (server, p, NULL, info_level, &entry_length);
 				if(entry_length == 0)
+				{
+					LOG (("no more entries available; stopping.\n"));
 					break;
+				}
 
 				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
 
@@ -3097,7 +3129,10 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 				if(!smb_decode_long_dirent (server, p, current_entry, info_level, &entry_length))
 				{
 					if(entry_length == 0)
+					{
+						LOG (("no more entries available; stopping.\n"));
 						break;
+					}
 
 					LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
 
@@ -3237,6 +3272,7 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	int is_directory;
 	dword file_name_length;
 	int parameter_count;
+	const char * file_name;
 	char * p;
 	int result;
 	char *resp_data = NULL;
@@ -3365,22 +3401,31 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 
 	p += sizeof(dword); /* Extended attribute size */
 
-	p = smb_decode_dword(p, &file_name_length);
-
-	/* File name follows here. */
+	/* File name follows the length field. */
+	file_name = smb_decode_dword(p, &file_name_length);
 
 	#if DEBUG
 	{
+		TEXT name[SMB_MAXNAMELEN+1];
 		struct tm tm;
 		QUAD entry_size_quad;
+
+		/* Let's show what the name of the object in
+		 * question is supposed to look like. The
+		 * text is provided as 16 bit characters,
+		 * even if Unicode mode is not enabled.
+		 */
+		copy_utf16le_to_latin1(name, sizeof(name), file_name, file_name_length / sizeof(word));
 
 		entry_size_quad.Low		= entry->size_low;
 		entry_size_quad.High	= entry->size_high;
 
 		seconds_to_tm(entry->mtime,&tm);
+
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 		LOG(("size = %s (0x%08lx%08lx)\n",convert_quad_to_string(&entry_size_quad),entry->size_high,entry->size_low));
 		LOG(("attr = 0x%08lx\n",entry->attr));
+		LOG(("name = '%s' (length in bytes = %ld)\n",escape_name(name),file_name_length));
 	}
 	#endif /* DEBUG */
 

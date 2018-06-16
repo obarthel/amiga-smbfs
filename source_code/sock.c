@@ -938,6 +938,8 @@ smb_connect (struct smb_server *server, int * error_ptr)
 
 	if(server->mount_data.fd < 0)
 	{
+		LOG(("network socket needs to be opened\n"));
+
 		result = socket (AF_INET, SOCK_STREAM, 0);
 		if (result < 0)
 		{
@@ -951,7 +953,7 @@ smb_connect (struct smb_server *server, int * error_ptr)
 		server->mount_data.fd = result;
 	}
 
-	LOG(("connecting to server %s\n", Inet_NtoA(server->mount_data.addr.sin_addr.s_addr)));
+	LOG(("connecting to server %s with socket %ld\n", Inet_NtoA(server->mount_data.addr.sin_addr.s_addr), server->mount_data.fd));
 
 	/* Wait a certain time period for the connection attempt to succeed? */
 	if(server->timeout > 0)
@@ -1015,6 +1017,8 @@ smb_connect (struct smb_server *server, int * error_ptr)
 				/* Connection could not be made. */
 				else
 				{
+					LOG(("connection could not be established (error=%ld)\n",errno));
+
 					(*error_ptr) = errno;
 
 					result = -1;
@@ -1023,6 +1027,8 @@ smb_connect (struct smb_server *server, int * error_ptr)
 			/* Well, that could happen, too. */
 			else
 			{
+				LOG(("connection could not be established (error=%ld)\n",errno));
+
 				(*error_ptr) = errno;
 				result = -1;
 			}
@@ -1030,12 +1036,16 @@ smb_connect (struct smb_server *server, int * error_ptr)
 		/* Connection attempt timed out? */
 		else if (result == 0)
 		{
+			LOG(("connection could not be established (timeout)\n"));
+
 			(*error_ptr) = EWOULDBLOCK;
 			result = -1;
 		}
 		/* Well, that could happen, too. */
 		else /* if (result < 0) */
 		{
+			LOG(("connection could not be established (error=%ld)\n",errno));
+
 			(*error_ptr) = errno;
 		}
 
@@ -1047,6 +1057,7 @@ smb_connect (struct smb_server *server, int * error_ptr)
 		{
 			server->state = CONN_INVALID;
 
+			LOG(("connection is invalid.\n"));
 			goto out;
 		}
 	}
@@ -1080,8 +1091,14 @@ smb_connect (struct smb_server *server, int * error_ptr)
 
 		tv.tv_secs = server->timeout;
 
+		LOG(("server timeout = %ld seconds\n", server->timeout));
+
 		setsockopt(server->mount_data.fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
 		setsockopt(server->mount_data.fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+	}
+	else
+	{
+		LOG(("no server read/write/connect timeout was set\n"));
 	}
 
  out:
