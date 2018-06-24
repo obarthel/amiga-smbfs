@@ -113,7 +113,7 @@ typedef struct smba_file
 
 /****************************************************************************/
 
-typedef int (*smba_callback_t) (void *callback_data, int fpos, int nextpos, char *name, int eof, smba_stat_t * st);
+typedef int (*smba_callback_t) (void *callback_data, int fpos, int nextpos, const char *name, int eof, const smba_stat_t * st);
 
 /****************************************************************************/
 

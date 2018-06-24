@@ -54,7 +54,7 @@
 #if defined(DEBUG) && defined(__SASC)
  void _ASSERT(int x,const char *xs,const char *file,int line,const char *function);
  void _SHOWVALUE(unsigned long value,int size,const char *name,const char *file,int line);
- void _SHOWPOINTER(void *p,const char *name,const char *file,int line);
+ void _SHOWPOINTER(const void *p,const char *name,const char *file,int line);
  void _SHOWSTRING(const char *string,const char *name,const char *file,int line);
  void _SHOWMSG(const char *msg,const char *file,int line);
  void _ENTER(const char *file,int line,const char *function);
@@ -103,7 +103,7 @@
  
  void _ASSERT(int x,const char *xs,const char *file,int line,const char *function);
  void _SHOWVALUE(unsigned long value,int size,const char *name,const char *file,int line);
- void _SHOWPOINTER(void *p,const char *name,const char *file,int line);
+ void _SHOWPOINTER(const void *p,const char *name,const char *file,int line);
  void _SHOWSTRING(const char *string,const char *name,const char *file,int line);
  void _SHOWMSG(const char *msg,const char *file,int line);
  void _ENTER(const char *file,int line,const char *function);

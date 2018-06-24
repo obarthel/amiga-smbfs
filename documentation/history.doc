@@ -2109,3 +2109,18 @@ smbfs 1.154 (16.6.2018)
 - You can now stop smbfs even while it's currently polling and
   processing incoming DOS packets. Between each call to GetMsg()
   it checks the break signal and will stop as soon as it can.
+
+
+smbfs 1.155 (24.6.2018)
+
+- Added a bit more debug output for the time/date conversion which
+  is performed on directory entries.
+
+- Directory scanning using the SMB_COM_SEARCH command did not
+  remove padding characters from directory entry names. Fixed.
+
+- The MS-DOS date/time conversion for directory entries returned
+  by core protocol commands failed to account for local/utc
+  conversion. Fixed. Now I'm curious if this actually manages to
+  make things worse because the SMB server may have reported
+  its "local time" as UTC :-/

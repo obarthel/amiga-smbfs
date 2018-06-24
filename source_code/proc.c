@@ -593,6 +593,7 @@ static int
 date_dos2unix (unsigned short time_value, unsigned short date)
 {
 	time_t seconds;
+	time_t utc_seconds;
 	struct tm tm;
 
 	memset(&tm,0,sizeof(tm));
@@ -606,16 +607,75 @@ date_dos2unix (unsigned short time_value, unsigned short date)
 
 	seconds = tm_to_seconds(&tm);
 
-	return(seconds);
+	utc_seconds = local2utc(seconds);
+
+	#if DEBUG
+	{
+		struct tm tm_utc;
+		struct tm tm_local;
+
+		seconds_to_tm(utc_seconds,&tm_utc);
+
+		LOG(("time = %ld-%02ld-%02ld %02ld:%02ld:%02ld (UTC)\n",
+			tm_utc.tm_year + 1900,
+			tm_utc.tm_mon+1,
+			tm_utc.tm_mday,
+			tm_utc.tm_hour,
+			tm_utc.tm_min,
+			tm_utc.tm_sec));
+
+		seconds_to_tm(seconds,&tm_local);
+
+		LOG(("       %ld-%02ld-%02ld %02ld:%02ld:%02ld (local)\n",
+			tm_local.tm_year + 1900,
+			tm_local.tm_mon+1,
+			tm_local.tm_mday,
+			tm_local.tm_hour,
+			tm_local.tm_min,
+			tm_local.tm_sec));
+	}
+	#endif /* DEBUG */
+
+	return(utc_seconds);
 }
 
 /* Convert linear UNIX date to a MS-DOS time/date pair. */
 static void
-date_unix2dos (int unix_date, unsigned short *time_value, unsigned short *date)
+date_unix2dos (int utc_seconds, unsigned short *time_value, unsigned short *date)
 {
+	time_t seconds;
 	struct tm tm;
 
-	seconds_to_tm(unix_date,&tm);
+	seconds = utc2local(utc_seconds);
+
+	seconds_to_tm(seconds,&tm);
+
+	#if DEBUG
+	{
+		struct tm tm_utc;
+		struct tm tm_local;
+
+		seconds_to_tm(utc_seconds,&tm_utc);
+
+		LOG(("time = %ld-%02ld-%02ld %02ld:%02ld:%02ld (UTC)\n",
+			tm_utc.tm_year + 1900,
+			tm_utc.tm_mon+1,
+			tm_utc.tm_mday,
+			tm_utc.tm_hour,
+			tm_utc.tm_min,
+			tm_utc.tm_sec));
+
+		seconds_to_tm(seconds,&tm_local);
+
+		LOG(("       %ld-%02ld-%02ld %02ld:%02ld:%02ld (local)\n",
+			tm_local.tm_year + 1900,
+			tm_local.tm_mon+1,
+			tm_local.tm_mday,
+			tm_local.tm_hour,
+			tm_local.tm_min,
+			tm_local.tm_sec));
+	}
+	#endif /* DEBUG */
 
 	(*time_value) = (tm.tm_hour << 11) | (tm.tm_min << 5) | (tm.tm_sec / 2);
 	(*date) = ((tm.tm_year - 80) << 9) | ((tm.tm_mon + 1) << 5) | tm.tm_mday;
@@ -1442,6 +1502,33 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 		 */
 		entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
 
+		#if DEBUG
+		{
+			struct tm tm_utc;
+			struct tm tm_local;
+
+			seconds_to_tm(entry->mtime,&tm_utc);
+
+			LOG(("modification time = %ld-%02ld-%02ld %02ld:%02ld:%02ld (UTC)\n",
+				tm_utc.tm_year + 1900,
+				tm_utc.tm_mon+1,
+				tm_utc.tm_mday,
+				tm_utc.tm_hour,
+				tm_utc.tm_min,
+				tm_utc.tm_sec));
+
+			seconds_to_tm(DVAL (buf, smb_vwv2),&tm_local);
+
+			LOG(("                    %ld-%02ld-%02ld %02ld:%02ld:%02ld (local)\n",
+				tm_local.tm_year + 1900,
+				tm_local.tm_mon+1,
+				tm_local.tm_mday,
+				tm_local.tm_hour,
+				tm_local.tm_min,
+				tm_local.tm_sec));
+		}
+		#endif /* DEBUG */
+
 		entry->size_low = DVAL (buf, smb_vwv4);
 		entry->size_high = 0;
 	}
@@ -1971,6 +2058,33 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 	char *buf = server->transmit_buffer;
 	int path_size;
 
+	#if DEBUG
+	{
+		struct tm tm_utc;
+		struct tm tm_local;
+
+		seconds_to_tm(entry->ctime,&tm_utc);
+
+		LOG(("creation time = %ld-%02ld-%02ld %02ld:%02ld:%02ld (UTC)\n",
+			tm_utc.tm_year + 1900,
+			tm_utc.tm_mon+1,
+			tm_utc.tm_mday,
+			tm_utc.tm_hour,
+			tm_utc.tm_min,
+			tm_utc.tm_sec));
+
+		seconds_to_tm(local_time,&tm_local);
+
+		LOG(("                %ld-%02ld-%02ld %02ld:%02ld:%02ld (local)\n",
+			tm_local.tm_year + 1900,
+			tm_local.tm_mon+1,
+			tm_local.tm_mday,
+			tm_local.tm_hour,
+			tm_local.tm_min,
+			tm_local.tm_sec));
+	}
+	#endif /* DEBUG */
+
 	if(server->unicode_enabled)
 		path_size = 1 + 2 * (len + 1);
 	else
@@ -2289,7 +2403,8 @@ smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_p
 static int
 smb_decode_dirent (const char *p, struct smb_dirent *entry)
 {
-	size_t name_size;
+	int name_len;
+	int i;
 
 	p += SMB_STATUS_SIZE; /* reserved (search_status) */
 
@@ -2298,14 +2413,37 @@ smb_decode_dirent (const char *p, struct smb_dirent *entry)
 	entry->size_low = DVAL (p, 5);
 	entry->size_high = 0;
 
-	name_size = 13;
+	/* The name is given in 8.3 MS-DOS style format,
+	 * including the "." delimiter. This is a NUL-
+	 * terminated OEM string, with one byte per
+	 * character. If the name is shorter than 12
+	 * characters, it is padded with " " (space)
+	 * characters.
+	 */
+	name_len = 12;
 
-	if(name_size > entry->complete_path_size-1)
+	p += 9;
+
+	/* How long is the NUL-terminated string really? */
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(p[i] == '\0')
+		{
+			name_len = i;
+			break;
+		}
+	}
+
+	/* Remove padding characters from the name. */
+	while(name_len > 0 && p[name_len-1] == ' ')
+		name_len--;
+
+	if(name_len >= entry->complete_path_size)
 		return(-1);
 
-	memcpy (entry->complete_path, p + 9, name_size);
+	memcpy (entry->complete_path, p, name_len);
 
-	entry->complete_path[name_size] = '\0';
+	entry->complete_path[name_len] = '\0';
 
 	LOG (("name = '%s'\n", escape_name(entry->complete_path)));
 
@@ -3245,17 +3383,35 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	/* The server only tells us just the mtime */
 	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv1));
 
-	entry->size_low = DVAL (buf, smb_vwv3);
-	entry->size_high = 0;
-
 	#if DEBUG
 	{
-		struct tm tm;
+		struct tm tm_utc;
+		struct tm tm_local;
 
-		seconds_to_tm(entry->mtime,&tm);
-		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+		seconds_to_tm(entry->mtime,&tm_utc);
+
+		LOG(("modification time = %ld-%02ld-%02ld %02ld:%02ld:%02ld (UTC)\n",
+			tm_utc.tm_year + 1900,
+			tm_utc.tm_mon+1,
+			tm_utc.tm_mday,
+			tm_utc.tm_hour,
+			tm_utc.tm_min,
+			tm_utc.tm_sec));
+
+		seconds_to_tm(DVAL (buf, smb_vwv1),&tm_local);
+
+		LOG(("                    %ld-%02ld-%02ld %02ld:%02ld:%02ld (local)\n",
+			tm_local.tm_year + 1900,
+			tm_local.tm_mon+1,
+			tm_local.tm_mday,
+			tm_local.tm_hour,
+			tm_local.tm_min,
+			tm_local.tm_sec));
 	}
 	#endif /* DEBUG */
+
+	entry->size_low = DVAL (buf, smb_vwv3);
+	entry->size_high = 0;
 
  out:
 
@@ -3607,6 +3763,33 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 	char *buf = server->transmit_buffer;
 	int result;
 	int path_size;
+
+	#if DEBUG
+	{
+		struct tm tm_utc;
+		struct tm tm_local;
+
+		seconds_to_tm(new_finfo->mtime,&tm_utc);
+
+		LOG(("modification time = %ld-%02ld-%02ld %02ld:%02ld:%02ld (UTC)\n",
+			tm_utc.tm_year + 1900,
+			tm_utc.tm_mon+1,
+			tm_utc.tm_mday,
+			tm_utc.tm_hour,
+			tm_utc.tm_min,
+			tm_utc.tm_sec));
+
+		seconds_to_tm(local_time,&tm_local);
+
+		LOG(("                    %ld-%02ld-%02ld %02ld:%02ld:%02ld (local)\n",
+			tm_local.tm_year + 1900,
+			tm_local.tm_mon+1,
+			tm_local.tm_mday,
+			tm_local.tm_hour,
+			tm_local.tm_min,
+			tm_local.tm_sec));
+	}
+	#endif /* DEBUG */
 
 	if(server->unicode_enabled)
 		path_size = 1 + 2 * (len + 1 + 1);

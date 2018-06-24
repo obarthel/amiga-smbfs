@@ -3026,6 +3026,8 @@ setup(
 	if(actual_volume_name_len > 0 && actual_volume_name[actual_volume_name_len-1] == ':')
 		actual_volume_name_len--;
 
+	D(("actual volume name = '%s', length = %ld",actual_volume_name,actual_volume_name_len));
+
 	if(NOT is_valid_device_name(actual_volume_name,actual_volume_name_len))
 	{
 		UnLockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
@@ -5188,10 +5190,18 @@ Action_ExamineObject(
 
 	if(lock == NULL)
 	{
-		const TEXT * volume_name = BADDR(VolumeNode->dol_Name);
-		int len = volume_name[0];
+		const TEXT * volume_name;
+		int len;
 
 		SHOWMSG("ZERO root lock");
+
+		ASSERT( VolumeNode != NULL );
+
+		volume_name = BADDR(VolumeNode->dol_Name);
+		len = volume_name[0];
+
+		SHOWPOINTER(volume_name);
+		SHOWVALUE(len);
 
 		ASSERT( len < (int)sizeof(fib->fib_FileName) );
 
@@ -5243,10 +5253,18 @@ Action_ExamineObject(
 
 		if(strcmp(ln->ln_FullName,SMB_ROOT_DIR_NAME) == SAME)
 		{
-			const TEXT * volume_name = BADDR(VolumeNode->dol_Name);
-			int len = volume_name[0];
+			const TEXT * volume_name;
+			int len;
 
 			SHOWMSG("root lock");
+
+			ASSERT( VolumeNode != NULL );
+
+			volume_name = BADDR(VolumeNode->dol_Name);
+			len = volume_name[0];
+
+			SHOWPOINTER(volume_name);
+			SHOWVALUE(len);
 
 			ASSERT( len < (int)sizeof(fib->fib_FileName) );
 
@@ -5257,6 +5275,7 @@ Action_ExamineObject(
 			fib->fib_EntryType		= ST_ROOT;
 			fib->fib_NumBlocks		= 1;
 			fib->fib_DiskKey		= 0;
+			fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
 			fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
 									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 		}
@@ -5416,7 +5435,7 @@ dir_scan_callback_func_exnext(
 	int						nextpos,
 	const TEXT *			name,
 	int						eof,
-	smba_stat_t *			st)
+	const smba_stat_t *		st)
 {
 	int result = 0;
 	int name_len;
@@ -5666,7 +5685,7 @@ dir_scan_callback_func_exall(
 	int						nextpos,
 	const TEXT *			name,
 	int						eof,
-	smba_stat_t *			st)
+	const smba_stat_t *		st)
 {
 	TEXT translated_name[MAX_FILENAME_LEN+1];
 	BOOL ignore_this_entry = FALSE;
@@ -7231,7 +7250,8 @@ Action_RenameDisk(
 
 	FreeVec(old_name);
 
-	send_disk_change_notification(IECLASS_DISKINSERTED);
+	if(VolumeNodeAdded)
+		send_disk_change_notification(IECLASS_DISKINSERTED);
 
 	result = DOSTRUE;
 
