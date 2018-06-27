@@ -423,35 +423,83 @@ write_attr (smba_file_t * f, int * error_ptr)
 
 	LOG (("file '%s'\n", escape_name(f->dirent.complete_path)));
 
+	LOG(("mtime = %lu\n",f->dirent.mtime));
+
 	if(!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
+		/* Copy these, because make_open() may overwrite them. */
+		time_t mtime = f->dirent.mtime;
+		dword attr = f->dirent.attr;
+
+		LOG(("mtime = %lu\n",f->dirent.mtime));
+
 		result = make_open (f, open_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
 			goto out;
 
+		LOG(("mtime = %lu\n",f->dirent.mtime));
+
+		f->dirent.mtime = mtime;
+		f->dirent.attr = attr;
+
 		result = smb_set_file_information (&f->server->server, &f->dirent, NULL, error_ptr);
+		if (result < 0)
+			goto out;
+
+		f->attr_dirty = FALSE;
 	}
 	else
 	{
+		/* Copy these, because make_open() may overwrite them. */
+		time_t mtime = f->dirent.mtime;
+		dword attr = f->dirent.attr;
+
+		LOG(("mtime = %lu\n",f->dirent.mtime));
+
 		result = make_open (f, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
 			goto out;
 
-		if (f->dirent.opened && f->server->supports_E)
-			result = smb_proc_setattrE (&f->server->server, f->dirent.fileid, &f->dirent, error_ptr);
-		else
+		LOG(("mtime = %lu\n",f->dirent.mtime));
+
+		f->dirent.mtime = mtime;
+		f->dirent.attr = attr;
+
+		/* If the attributes need to be updated, we cannot used smb_proc_setattrE(),
+		 * because that only updates the "time of last write access", but not the
+		 * attributes.
+		 */
+		if(f->attr_dirty)
+		{
+			/* Update the attributes and the "time of last write access". */
 			result = smb_proc_setattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
-	}
+			if(result < 0)
+				goto out;
 
-	if (result < 0)
-	{
-		f->attr_time = 0;
-		goto out;
-	}
+			/* Now deal with the creation/access/modification times. */
+			if (f->dirent.opened && f->server->supports_E)
+			{
+				result = smb_proc_setattrE (&f->server->server, f->dirent.fileid, &f->dirent, error_ptr);
+				if(result < 0)
+					goto out;
+			}
 
-	f->attr_dirty = FALSE;
+			f->attr_dirty = FALSE;
+		}
+		/* Update the times. */
+		else
+		{
+			if (f->dirent.opened && f->server->supports_E)
+				result = smb_proc_setattrE (&f->server->server, f->dirent.fileid, &f->dirent, error_ptr);
+			else
+				result = smb_proc_setattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+		}
+	}
 
  out:
+
+	if (result < 0)
+		f->attr_time = 0;
 
 	return result;
 }
@@ -993,6 +1041,8 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 
 		if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 		{
+			LOG(("using smb_query_path_information\n"));
+
 			if (f->dirent.opened)
 				result = smb_query_path_information (&f->server->server, NULL, 0, f->dirent.fileid, &f->dirent, error_ptr);
 			else
@@ -1001,9 +1051,17 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 		else
 		{
 			if (f->dirent.opened && f->server->supports_E)
+			{
+				LOG(("using smb_proc_getattrE\n"));
+
 				result = smb_proc_getattrE (&f->server->server, &f->dirent, error_ptr);
+			}
 			else
+			{
+				LOG(("using smb_proc_getattr_core\n"));
+
 				result = smb_proc_getattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
+			}
 		}
 
 		if (result < 0)
@@ -1035,40 +1093,46 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 /*****************************************************************************/
 
 int
-smba_setattr (smba_file_t * f, const smba_stat_t * data, const QUAD * const size, int * error_ptr)
+smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, int * error_ptr)
 {
 	BOOL times_changed = FALSE;
 	int result = 0;
 	dword attrs;
 
-	if (data != NULL)
+	if (st != NULL)
 	{
-		if (data->atime != (time_t)-1 && f->dirent.atime != data->atime)
+		if (st->atime != 0 && st->atime != (time_t)-1 && f->dirent.atime != st->atime)
 		{
-			f->dirent.atime = data->atime;
+			LOG(("atime changed to %lu\n",st->atime));
+
+			f->dirent.atime = st->atime;
 			times_changed = TRUE;
 		}
 
-		if (data->ctime != (time_t)-1 && f->dirent.ctime != data->ctime)
+		if (st->ctime != 0 && st->ctime != (time_t)-1 && f->dirent.ctime != st->ctime)
 		{
-			f->dirent.ctime = data->ctime;
+			LOG(("ctime changed to %lu\n",st->ctime));
+
+			f->dirent.ctime = st->ctime;
 			times_changed = TRUE;
 		}
 
-		if (data->mtime != (time_t)-1 && f->dirent.mtime != data->mtime)
+		if (st->mtime != 0 && st->mtime != (time_t)-1 && f->dirent.mtime != st->mtime)
 		{
-			f->dirent.mtime = data->mtime;
+			LOG(("mtime changed to %lu\n",st->mtime));
+
+			f->dirent.mtime = st->mtime;
 			times_changed = TRUE;
 		}
 
 		attrs = f->dirent.attr;
 
-		if (data->is_read_only)
+		if (st->is_read_only)
 			attrs |= SMB_FILE_ATTRIBUTE_READONLY;
 		else
 			attrs &= ~SMB_FILE_ATTRIBUTE_READONLY;
 
-		if (data->is_changed_since_last_archive)
+		if (st->is_changed_since_last_archive)
 			attrs |= SMB_FILE_ATTRIBUTE_ARCHIVE;
 		else
 			attrs &= ~SMB_FILE_ATTRIBUTE_ARCHIVE;
@@ -1096,7 +1160,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * data, const QUAD * const size
 		if(!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 			result = smb_set_file_information (&f->server->server, &f->dirent, size, error_ptr);
 		else
-			result = smb_proc_trunc (&f->server->server, f->dirent.fileid, size->Low, error_ptr);
+			result = smb_proc_trunc (&f->server->server, &f->dirent, size->Low, error_ptr);
 
 		if(result < 0)
 			goto out;

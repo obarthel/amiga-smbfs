@@ -4836,10 +4836,6 @@ Action_SetProtect(
 
 	memset(&st,0,sizeof(st));
 
-	st.atime = -1;
-	st.ctime = -1;
-	st.mtime = -1;
-
 	if((mask & FIBF_DELETE) != 0)
 	{
 		SHOWMSG("write/delete protection enabled");
@@ -5378,10 +5374,33 @@ Action_ExamineObject(
 	SHOWVALUE(fib->fib_DirEntryType);
 	SHOWVALUE(fib->fib_NumBlocks);
 	SHOWVALUE(fib->fib_Size);
-	SHOWVALUE(fib->fib_Date.ds_Days);
-	SHOWVALUE(fib->fib_Date.ds_Minute);
-	SHOWVALUE(fib->fib_Date.ds_Tick);
 	SHOWVALUE(fib->fib_DiskKey);
+
+	#if DEBUG
+	{
+		struct DateTime dat;
+		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+
+		memset(&dat,0,sizeof(dat));
+
+		memset(date,0,sizeof(date));
+		memset(time,0,sizeof(time));
+
+		dat.dat_Stamp	= fib->fib_Date;
+		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_StrDate	= date;
+		dat.dat_StrTime	= time;
+
+		if(DateToStr(&dat))
+		{
+			D(("days=%ld/minutes=%ld/ticks=%ld: %s %s", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick, date, time));
+		}
+		else
+		{
+			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
+		}
+	}
+	#endif /* DEBUG */
 
  out:
 
@@ -5553,6 +5572,32 @@ dir_scan_callback_func_exnext(
 	fib->fib_Date.ds_Days	= (seconds / (24 * 60 * 60));
 	fib->fib_Date.ds_Minute	= (seconds % (24 * 60 * 60)) / 60;
 	fib->fib_Date.ds_Tick	= (seconds % 60) * TICKS_PER_SECOND;
+
+	#if DEBUG
+	{
+		struct DateTime dat;
+		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+
+		memset(&dat,0,sizeof(dat));
+
+		memset(date,0,sizeof(date));
+		memset(time,0,sizeof(time));
+
+		dat.dat_Stamp	= fib->fib_Date;
+		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_StrDate	= date;
+		dat.dat_StrTime	= time;
+
+		if(DateToStr(&dat))
+		{
+			D(("   days=%ld/minutes=%ld/ticks=%ld: %s %s", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick, date, time));
+		}
+		else
+		{
+			D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
+		}
+	}
+	#endif /* DEBUG */
 
 	result = 1;
 
@@ -5781,9 +5826,16 @@ dir_scan_callback_func_exall(
 		 */
 		ed_size = ec->ec_MinSize + name_len+1;
 
-		if(ec->ec_Next == NULL || ed_size > ec->ec_BytesLeft)
+		/* All entries need to begin on a word-aligned address,
+		 * which means that we need to pad the entry size to
+		 * a multiple of 2.
+		 */
+		if((ed_size % 2) > 0)
+			ed_size++;
+
+		if(ec->ec_Next == NULL || ec->ec_BytesLeft < ed_size)
 		{
-			D(("Not enough room to return this entry: size %ld > ec->ec_BytesLeft %ld",ed_size,ec->ec_BytesLeft));
+			D(("Not enough room to return this entry: ec->ec_BytesLeft %ld < size %ld",ec->ec_BytesLeft,ed_size));
 
 			/* If this is the first directory entry,
 			 * stop the entire process before it has
@@ -5814,7 +5866,7 @@ dir_scan_callback_func_exall(
 		ed->ed_Next = NULL;
 
 		/* Copy the name, including the terminating NUL byte. */
-		ed->ed_Name = (STRPTR)(((ULONG)ed) + ec->ec_MinSize);
+		ed->ed_Name = (STRPTR)(&((BYTE *)ed)[ec->ec_MinSize]);
 		memcpy(ed->ed_Name,name,name_len+1);
 
 		/* Fill in as many records as were requested. */
@@ -5908,19 +5960,9 @@ dir_scan_callback_func_exall(
 			if(ec->ec_Last != NULL)
 				ec->ec_Last->ed_Next = ed;
 
-			/* All entries need to begin on a word-aligned address,
-			 * which means that we need to pad the entry size to
-			 * a multiple of 2.
-			 */
-			if((ed_size % 2) > 0)
-				ed_size++;
-
-			/* Note: due to the padding byte the number of bytes
-			 *       left may become negative.
-			 */
 			ec->ec_BytesLeft -= ed_size;
 
-			ec->ec_Next = ec->ec_BytesLeft > 0 ? (struct ExAllData *)(((ULONG)ed) + ed_size) : NULL;
+			ec->ec_Next = ec->ec_BytesLeft > 0 ? (struct ExAllData *)(&((BYTE *)ed)[ed_size]) : NULL;
 			ec->ec_Last = ed;
 
 			ec->ec_Control->eac_Entries++;
@@ -6138,14 +6180,23 @@ Action_ExamineAll(
 
 	#if DEBUG
 	{
+		int num_entries_found = 0;
+		
 		SHOWVALUE(eac->eac_Entries);
 
-		while(ed != NULL)
+		if(eac->eac_Entries > 0)
 		{
-			SHOWSTRING(ed->ed_Name);
+			do
+			{
+				SHOWSTRING(ed->ed_Name);
+				num_entries_found++;
 
-			ed = ed->ed_Next;
+				ed = ed->ed_Next;
+			}
+			while(ed != NULL);
 		}
+		
+		ASSERT( eac->eac_Entries == num_entries_found );
 	}
 	#endif /* DEBUG */
 
@@ -6817,13 +6868,39 @@ Action_SetDate(
 		goto out;
 	}
 
+	#if DEBUG
+	{
+		struct DateTime dat;
+		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+
+		memset(&dat,0,sizeof(dat));
+
+		memset(date,0,sizeof(date));
+		memset(time,0,sizeof(time));
+
+		dat.dat_Stamp	= (*ds);
+		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_StrDate	= date;
+		dat.dat_StrTime	= time;
+
+		if(DateToStr(&dat))
+		{
+			D(("days=%ld/minutes=%ld/ticks=%ld: %s %s", ds->ds_Days, ds->ds_Minute, ds->ds_Tick, date, time));
+		}
+		else
+		{
+			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", ds->ds_Days, ds->ds_Minute, ds->ds_Tick));
+		}
+	}
+	#endif /* DEBUG */
+
 	seconds = (ds->ds_Days * 24 * 60 + ds->ds_Minute) * 60 + (ds->ds_Tick / TICKS_PER_SECOND);
 
-	memset(&st,0,sizeof(st));
-
-	st.atime = -1;
-	st.ctime = -1;
+	st.ctime = 0;
+	st.atime = 0;
 	st.mtime = seconds + UNIX_TIME_OFFSET + get_time_zone_delta();
+
+	D(("mtime = %lu",st.mtime));
 
 	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{

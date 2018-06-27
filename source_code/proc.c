@@ -391,7 +391,7 @@ static size_t strnlen(const char * s,size_t max_size)
 
 	if(max_size > 0)
 	{
-		while((*s) != '\0' && --max_size > 0)
+		while((*s) != '\0' && max_size-- > 0)
 			s++;
 	}
 
@@ -1368,10 +1368,16 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			result = smb_request_ok(server, SMBntcreateX, 34, 0, error_ptr);
 			if (result < 0)
 			{
+				int access_error;
+				
 				SHOWMSG("that didn't work; retrying");
 
 				/* Try again in read-only mode? */
-				if ((*error_ptr) == EACCES || ((*error_ptr) == error_check_smb_error && smb_errno(server->rcls,server->err) == EACCES))
+				access_error = (*error_ptr);
+				if(access_error == error_check_smb_error)
+					access_error = smb_errno(server->rcls,server->err);
+
+				if (access_error == EACCES || access_error == EPERM)
 				{
 					if(retry_read_only)
 					{
@@ -1466,8 +1472,16 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			result = smb_request_ok (server, SMBopen, 7, 0, error_ptr);
 			if (result < 0)
 			{
+				int access_error;
+
+				SHOWMSG("that didn't work; retrying");
+
 				/* Try again in read-only mode? */
-				if ((*error_ptr) == EACCES || ((*error_ptr) == error_check_smb_error && smb_errno(server->rcls,server->err) == EACCES))
+				access_error = (*error_ptr);
+				if(access_error == error_check_smb_error)
+					access_error = smb_errno(server->rcls,server->err);
+
+				if (access_error == EACCES || access_error == EPERM)
 				{
 					if(retry_read_only)
 					{
@@ -1497,10 +1511,10 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 		entry->attr = WVAL (buf, smb_vwv1);
 
-		/* This is actually just the mtime value, but we use it
+		/* This is actually just the wtime value, but we use it
 		 * in all other places as well.
 		 */
-		entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv2));
+		entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc(DVAL (buf, smb_vwv2)); /* Note: this is UTIME, and should be the server's local time. */
 
 		#if DEBUG
 		{
@@ -1546,18 +1560,18 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
  * the server
  */
 int
-smb_proc_close (struct smb_server *server, word fileid, dword mtime, int * error_ptr)
+smb_proc_close (struct smb_server *server, word fileid, dword wtime, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
 
-	/* 0 and 0xffffffff mean: do not set mtime */
-	if(mtime != 0 && mtime != (dword)0xffffffff)
-		mtime = utc2local (mtime);
+	/* Note: wtime is UTIME, and should be the server's local time. */
+	if(wtime != 0 && wtime != (dword)-1)
+		wtime = utc2local(wtime);
 
 	smb_setup_header (server, SMBclose, 3, 0);
 	WSET (buf, smb_vwv0, fileid);
-	DSET (buf, smb_vwv1, mtime);
+	DSET (buf, smb_vwv1, wtime);
 
 	result = smb_request_ok (server, SMBclose, 0, 0, error_ptr);
 
@@ -2052,16 +2066,18 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, const st
 int
 smb_proc_create (struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr)
 {
-	dword local_time = utc2local (entry->ctime);
+	dword local_time;
 	int result;
 	char *p;
 	char *buf = server->transmit_buffer;
 	int path_size;
 
+	local_time = utc2local(entry->ctime); /* Note: this is UTIME, and should be the server's local time. */
+
 	#if DEBUG
 	{
-		struct tm tm_utc;
 		struct tm tm_local;
+		struct tm tm_utc;
 
 		seconds_to_tm(entry->ctime,&tm_utc);
 
@@ -2368,7 +2384,7 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
  * writes "enough" data to the file.
  */
 int
-smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_ptr)
+smb_proc_trunc (struct smb_server *server, struct smb_dirent *entry, dword length, int * error_ptr)
 {
 	char *p;
 	char *buf = server->transmit_buffer;
@@ -2379,7 +2395,7 @@ smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_p
  retry:
 
 	p = smb_setup_header (server, SMBwrite, 5, 3);
-	WSET (buf, smb_vwv0, fid);
+	WSET (buf, smb_vwv0, entry->fileid);
 	WSET (buf, smb_vwv1, 0);
 	DSET (buf, smb_vwv2, length);
 	WSET (buf, smb_vwv4, 0);
@@ -2390,7 +2406,10 @@ smb_proc_trunc (struct smb_server *server, word fid, dword length, int * error_p
 	if(result < 0)
 	{
 		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
-			goto retry;
+		{
+			if(reopen_entry(server,entry,NULL) == 0)
+				goto retry;
+		}
 	}
 	else
 	{
@@ -2826,6 +2845,21 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 				finfo->len = name_len;
 
 				D(("name = '%s', length=%ld, size=%ld",escape_name(finfo->complete_path),name_len,name_size));
+
+				#if DEBUG
+				{
+					struct tm tm;
+
+					seconds_to_tm(finfo->mtime,&tm);
+					LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+					seconds_to_tm(finfo->ctime,&tm);
+					LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+					seconds_to_tm(finfo->atime,&tm);
+					LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+					seconds_to_tm(finfo->wtime,&tm);
+					LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+				}
+				#endif /* DEBUG */
 			}
 
 			break;
@@ -2937,6 +2971,21 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 				finfo->len = name_len;
 
 				D(("name = '%s', length=%ld, size=%ld",escape_name(finfo->complete_path),name_len,name_size));
+
+				#if DEBUG
+				{
+					struct tm tm;
+
+					seconds_to_tm(finfo->mtime,&tm);
+					LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+					seconds_to_tm(finfo->ctime,&tm);
+					LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+					seconds_to_tm(finfo->atime,&tm);
+					LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+					seconds_to_tm(finfo->wtime,&tm);
+					LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+				}
+				#endif /* DEBUG */
 			}
 
 			break;
@@ -3380,8 +3429,8 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 
 	entry->attr = WVAL (buf, smb_vwv0);
 
-	/* The server only tells us just the mtime */
-	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc (DVAL (buf, smb_vwv1));
+	/* The server only tells us just the wtime */
+	entry->ctime = entry->atime = entry->mtime = entry->wtime = local2utc(DVAL (buf, smb_vwv1)); /* Note: this is UTIME, and should be the server's local time. */
 
 	#if DEBUG
 	{
@@ -3505,7 +3554,19 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	if (result < 0)
 	{
 		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
-			goto retry;
+		{
+			/* We don't need the file id? */
+			if (len > 0)
+			{
+				goto retry;
+			}
+			/* We do need the file id. */
+			else if (reopen_entry(server,entry,NULL) == 0)
+			{
+				fid = entry->fileid;
+				goto retry;
+			}
+		}
 
 		goto out;
 	}
@@ -3528,6 +3589,7 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 	entry->atime = convert_long_date_to_time_t(p);
 	p += 2 * sizeof(dword); /* LastAccessTime */
 
+	entry->wtime = convert_long_date_to_time_t(p);
 	p += 2 * sizeof(dword); /* LastWriteTime */
 
 	entry->mtime = convert_long_date_to_time_t(p);
@@ -3577,8 +3639,13 @@ smb_query_path_information(struct smb_server *server, const char *path, int len,
 		entry_size_quad.High	= entry->size_high;
 
 		seconds_to_tm(entry->mtime,&tm);
-
 		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+		seconds_to_tm(entry->ctime,&tm);
+		LOG(("ctime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+		seconds_to_tm(entry->atime,&tm);
+		LOG(("atime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+		seconds_to_tm(entry->wtime,&tm);
+		LOG(("wtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
 		LOG(("size = %s (0x%08lx%08lx)\n",convert_quad_to_string(&entry_size_quad),entry->size_high,entry->size_low));
 		LOG(("attr = 0x%08lx\n",entry->attr));
 		LOG(("name = '%s' (length in bytes = %ld)\n",escape_name(name),file_name_length));
@@ -3704,6 +3771,16 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 		DSET(p, 8, 0);
 		DSET(p, 12, 0);
 
+		/* Note that we update both mtime and wtime of the
+		 * directory and not just mtime because some Samba
+		 * versions will end up setting the mtime of the
+		 * directory entry to the time given as the wtime
+		 * value and ignore the mtime value. This happens
+		 * even if the wtime value is given as zero and the
+		 * mtime value is non-zero.
+		 */
+		LOG(("entry->mtime = %lu\n",entry->mtime));
+
 		convert_time_t_to_long_date(entry->mtime,&change_time_quad);
 
 		/* Last write time */
@@ -3758,16 +3835,36 @@ smb_set_file_information(struct smb_server *server, struct smb_dirent *entry, co
 int
 smb_proc_setattr_core (struct smb_server *server, const char *path, int len, const struct smb_dirent *new_finfo, int * error_ptr)
 {
-	dword local_time = utc2local (new_finfo->mtime);
+	dword local_time;
 	char *p;
 	char *buf = server->transmit_buffer;
 	int result;
 	int path_size;
+	dword attr;
+
+	/* Don't do anything if mtime is unset. */
+	if(new_finfo->mtime == 0 || new_finfo->mtime == (time_t)-1)
+		return(0);
+
+	if(server->unicode_enabled)
+		path_size = 1 + 2 * (len + 1 + 1);
+	else
+		path_size = 1 + len + 1 + 1;
+
+	ASSERT( smb_payload_size(server, 8, path_size) >= 0 );
+
+	/* We cache these because if the connection needs to be
+	 * reestablished, the direntry values will all get
+	 * overwritten.
+	 */
+	attr = new_finfo->attr;
+
+	local_time = utc2local(new_finfo->mtime); /* Note: this is UTIME, and should be the server's local time. */
 
 	#if DEBUG
 	{
-		struct tm tm_utc;
 		struct tm tm_local;
+		struct tm tm_utc;
 
 		seconds_to_tm(new_finfo->mtime,&tm_utc);
 
@@ -3791,17 +3888,10 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 	}
 	#endif /* DEBUG */
 
-	if(server->unicode_enabled)
-		path_size = 1 + 2 * (len + 1 + 1);
-	else
-		path_size = 1 + len + 1 + 1;
-
-	ASSERT( smb_payload_size(server, 8, path_size) >= 0 );
-
  retry:
 
 	p = smb_setup_header (server, SMBsetatr, 8, path_size);
-	WSET (buf, smb_vwv0, new_finfo->attr);
+	WSET (buf, smb_vwv0, attr);
 	DSET (buf, smb_vwv1, local_time);
 
 	if(server->unicode_enabled)
@@ -3826,15 +3916,22 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 	return result;
 }
 
-/* smb_proc_setattrE: we do not retry here, because we rely on fid,
- * which would not be valid after a retry.
- */
 int
 smb_proc_setattrE (struct smb_server *server, word fid, struct smb_dirent *new_entry, int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	word date, time_value;
+	time_t ctime, atime, mtime;
+	int num_changes;
 	int result;
+
+	/* We cache these because if the connection needs to be
+	 * reestablished, the direntry values will all get
+	 * overwritten.
+	 */
+	ctime = new_entry->ctime;
+	atime = new_entry->atime;
+	mtime = new_entry->mtime;
 
  retry:
 
@@ -3842,28 +3939,68 @@ smb_proc_setattrE (struct smb_server *server, word fid, struct smb_dirent *new_e
 
 	WSET (buf, smb_vwv0, fid);
 
-	date_unix2dos (new_entry->ctime, &time_value, &date);
+	num_changes = 0;
+
+	if(ctime != 0 && ctime != (time_t)-1)
+	{
+		date_unix2dos (ctime, &time_value, &date);
+		num_changes++;
+	}
+	else
+	{
+		date = time_value = 0;
+	}
+
 	WSET (buf, smb_vwv1, date);
 	WSET (buf, smb_vwv2, time_value);
 
-	date_unix2dos (new_entry->atime, &time_value, &date);
+	if(atime != 0 && atime != (time_t)-1)
+	{
+		date_unix2dos (atime, &time_value, &date);
+		num_changes++;
+	}
+	else
+	{
+		date = time_value = 0;
+	}
+
 	WSET (buf, smb_vwv3, date);
 	WSET (buf, smb_vwv4, time_value);
 
-	date_unix2dos (new_entry->mtime, &time_value, &date);
+	if(mtime != 0 && mtime != (time_t)-1)
+	{
+		date_unix2dos (mtime, &time_value, &date);
+		num_changes++;
+	}
+	else
+	{
+		date = time_value = 0;
+	}
+
 	WSET (buf, smb_vwv5, date);
 	WSET (buf, smb_vwv6, time_value);
 
-	result = smb_request_ok (server, SMBsetattrE, 0, 0, error_ptr);
-	if (result < 0)
+	/* Do we actually have to change anything at all? */
+	if(num_changes > 0)
 	{
-		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+		result = smb_request_ok (server, SMBsetattrE, 0, 0, error_ptr);
+		if (result < 0)
 		{
-			if(reopen_entry(server,new_entry,NULL) == 0)
-				goto retry;
-		}
+			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+			{
+				if(reopen_entry(server,new_entry,NULL) == 0)
+				{
+					fid = new_entry->fileid;
+					goto retry;
+				}
+			}
 
-		LOG(("that didn't work.\n"));
+			LOG(("that didn't work.\n"));
+		}
+	}
+	else
+	{
+		result = 0;
 	}
 
 	return result;

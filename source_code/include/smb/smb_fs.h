@@ -69,7 +69,7 @@ int smb_proc_mv(struct smb_server *server, const char *opath, const int olen, co
 int smb_proc_mkdir(struct smb_server *server, const char *path, const int len, int * error_ptr);
 int smb_proc_rmdir(struct smb_server *server, const char *path, const int len, int * error_ptr);
 int smb_proc_unlink(struct smb_server *server, const char *path, const int len, int * error_ptr);
-int smb_proc_trunc(struct smb_server *server, word fid, dword length, int * error_ptr);
+int smb_proc_trunc(struct smb_server *server, struct smb_dirent *entry, dword length, int * error_ptr);
 int smb_proc_readdir(struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr);
 int smb_proc_getattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr);
 int smb_proc_getattrE(struct smb_server *server, struct smb_dirent *entry, int * error_ptr);

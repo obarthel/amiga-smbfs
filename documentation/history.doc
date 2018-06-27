@@ -2124,3 +2124,54 @@ smbfs 1.155 (24.6.2018)
   conversion. Fixed. Now I'm curious if this actually manages to
   make things worse because the SMB server may have reported
   its "local time" as UTC :-/
+
+
+smbfs 1.156 (24.6.2018)
+
+- When processing the entries returned by directory scanning
+  the names of entries would not be processed correctly if
+  these were neither NUL-terminated nor NUL-padded. Thanks go
+  to Tony Wyatt for reporting the problem.
+
+- When preparing for reading from a file which was not yet
+  ready to be accessed, accessing it could return an error
+  code indicating that the access mode was not correct.
+  Instead of retrying to access the file in read-only mode,
+  the relevant function aborted the access attempt. This has
+  been replaced by asking for read-only access and retrying.
+  Thanks go to Tony Wyatt for reporting the problem.
+
+- Slightly more robust handling of ExAll() due to the correct
+  size of the the entry being known more early on.
+  
+- Printing the list of ExAll() entries to be returned crashed
+  "reliably" if the number of entries was zero. Thanks go to
+  Hubert Maier for reporting the problem.
+
+
+smbfs 1.157 (26.6.2018)
+
+- The ACTION_SETDATE implementation now shows the date/time
+  to be used before it is handed over to the respective SMB
+  commands which change it for a file/directory. Because the
+  different SMB commands (three of them) cannot but change
+  three times (creation, modification, access) we now make
+  sure that all three are initialized by reusing the current
+  state of affairs.
+
+
+smbfs 1.158 (27.6.2018)
+
+- Changing the attributes of a file/directory, as in "archived"
+  or "deletable" did not work at all in protocol=core because
+  the original code which handled this used the command
+  SMB_COM_SET_INFORMATION2 in place of SMB_COM_SET_INFORMATION.
+  The command SMB_COM_SET_INFORMATION2 can only change time
+  information but not the attributes. I changed this to use
+  SMB_COM_SET_INFORMATION when necessary.
+
+- Changing the attributes and/or times of files/directories
+  would have no effect if the server dropped out, the connection
+  had to be reestablished and the file/directory in question had
+  to be reopened because all the attribute and file information
+  was overwritten. Fixed.
