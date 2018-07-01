@@ -23,6 +23,7 @@
 /*
  * cpr smbfs.debug domain=workgroup user=olsen password=... volume=olsen //felix/olsen
  * cpr smbfs.debug dumpsmb user=guest volume=amiga //windows7-amiga/Users/Public
+ * smbfs debuglevel=2 debugfile=ram:windows7.log user=guest volume=amiga //windows7-amiga/Users/Public
  * copy "amiga:Public/Documents/Amiga Files/Shared/dir/Windows-Export/LP2NRFP.h" ram:
  * smbfs.debug user=guest volume=sicherung //192.168.1.76/sicherung-smb
  * smbfs maxtransmit=16600 debuglevel=2 dumpsmb dumpsmblevel=2 domain=workgroup user=olsen password=... volume=olsen //felix/olsen
@@ -995,7 +996,7 @@ main(void)
 
 	/* Restrict the command set which smbfs uses? */
 	if(args.Protocol == NULL)
-		args.Protocol = "NT1";
+		args.Protocol = "CORE";
 
 	if(Stricmp(args.Protocol,"NT1") != SAME && Stricmp(args.Protocol,"CORE") != SAME)
 	{
@@ -4065,9 +4066,13 @@ Action_DeleteObject(
 	const TEXT * parent_name;
 	STRPTR full_parent_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
+	int name_len;
 	struct LockNode * ln;
 	smba_stat_t st;
+	TEXT * last_name;
+	int last_name_len;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -4108,9 +4113,43 @@ Action_DeleteObject(
 	 */
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
+	/* The SMB_COM_DELETE command supports renaming through
+	 * wildcards. Only the last part of the path (the name
+	 * of the file or directory) may contain the wildcard.
+	 */
+	last_name = FilePart(name);
+	last_name_len = strlen(last_name);
+
+	for(i = 0 ; i < last_name_len ; i++)
+	{
+		if(strchr("*?",last_name[i]) != NULL)
+		{
+			D(("found a wildcard in '%s'",name));
+
+			error = ERROR_OBJECT_NOT_FOUND;
+			goto out;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -4258,8 +4297,12 @@ Action_CreateDir(
 	const TEXT * parent_name;
 	smba_file_t * dir = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
+	int name_len;
 	STRPTR dir_name,base_name,temp = NULL;
+	TEXT * last_name;
+	int last_name_len;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -4296,9 +4339,39 @@ Action_CreateDir(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
+	last_name = FilePart(name);
+	last_name_len = strlen(last_name);
+
+	for(i = 0 ; i < last_name_len ; i++)
+	{
+		if(strchr("*?",last_name[i]) != NULL)
+		{
+			D(("found a wildcard in '%s'",name));
+
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -4403,7 +4476,9 @@ Action_LocateObject(
 	struct LockNode * ln = NULL;
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
+	int name_len;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -4434,9 +4509,25 @@ Action_LocateObject(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -4770,7 +4861,9 @@ Action_SetProtect(
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
+	int name_len;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -4807,9 +4900,25 @@ Action_SetProtect(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -4833,6 +4942,43 @@ Action_SetProtect(
 		error = map_errno_to_ioerr(error);
 		goto out;
 	}
+
+	#if DEBUG
+	{
+		TEXT user_other_bits[11];
+		TEXT owner_bits[9];
+		int i;
+
+		strlcpy(user_other_bits, "rwed rwed", sizeof(user_other_bits));
+
+		for(i = 8 ; i < 16 ; i++)
+		{
+			if((mask & (1 << i)) == 0)
+			{
+				int offset;
+
+				if(i < 12)
+					offset = 12 - i;
+				else
+					offset = 21 - i;
+
+				ASSERT( 0 <= offset && offset < (int)sizeof(user_other_bits) );
+
+				user_other_bits[offset - 1] = '-';
+			}
+		}
+
+		strlcpy(owner_bits, "hsparwed", sizeof(owner_bits));
+
+		for(i = 0 ; i < 8 ; i++)
+		{
+			if((mask & (1 << (7 - i))) != 0)
+				owner_bits[i] = '-';
+		}
+
+		D(("protection bit mask = 0x%08lx (%s %s)",mask,user_other_bits,owner_bits));
+	}
+	#endif /* DEBUG */
 
 	memset(&st,0,sizeof(st));
 
@@ -4890,8 +5036,12 @@ Action_RenameObject(
 	STRPTR parent_source_name = NULL;
 	STRPTR parent_destination_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
+	int name_len;
 	const TEXT * parent_name;
+	TEXT * last_name;
+	int last_name_len;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -4930,9 +5080,43 @@ Action_RenameObject(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
+	/* The SMB_COM_RENAME command supports renaming through
+	 * wildcards. Only the last part of the path (the name
+	 * of the file or directory) may contain the wildcard.
+	 */
+	last_name = FilePart(name);
+	last_name_len = strlen(last_name);
+
+	for(i = 0 ; i < last_name_len ; i++)
+	{
+		if(strchr("*?",last_name[i]) != NULL)
+		{
+			D(("found a wildcard in the source path '%s'",name));
+
+			error = ERROR_OBJECT_NOT_FOUND;
+			goto out;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -4970,9 +5154,39 @@ Action_RenameObject(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
+	last_name = FilePart(name);
+	last_name_len = strlen(last_name);
+
+	for(i = 0 ; i < last_name_len ; i++)
+	{
+		if(strchr("*?",last_name[i]) != NULL)
+		{
+			D(("found a wildcard in the destination path '%s'",name));
+
+			error = ERROR_OBJECT_NOT_FOUND;
+			goto out;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -5012,7 +5226,7 @@ Action_RenameObject(
 	get_parent_dir_name(full_destination_name,strlen(full_destination_name),&parent_destination_name);
 
 	/* Restart directory scanning in the source directory from which
-	 * the entry was removed unless entry just changed name, but did
+	 * the entry was removed unless the entry just changed name, but did
 	 * not move to a different directory.
 	 */
 	if(parent_source_name != NULL && (parent_destination_name == NULL || compare_names(parent_source_name,parent_destination_name) != SAME))
@@ -5208,13 +5422,10 @@ Action_ExamineObject(
 		fib->fib_EntryType		= ST_ROOT;
 		fib->fib_NumBlocks		= 1;
 		fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
-		fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
-								  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 	}
 	else
 	{
 		struct LockNode * ln = (struct LockNode *)lock->fl_Key;
-		LONG seconds;
 		smba_stat_t st;
 
 		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
@@ -5234,16 +5445,6 @@ Action_ExamineObject(
 			error = map_errno_to_ioerr(error);
 			goto out;
 		}
-
-		seconds = st.mtime;
-
-		seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
-		if(seconds < 0)
-			seconds = 0;
-
-		fib->fib_Date.ds_Days	= (seconds / (24 * 60 * 60));
-		fib->fib_Date.ds_Minute	= (seconds % (24 * 60 * 60)) / 60;
-		fib->fib_Date.ds_Tick	= (seconds % 60) * TICKS_PER_SECOND;
 
 		D(("ln->ln_FullName = '%s'",escape_name(ln->ln_FullName)));
 
@@ -5272,8 +5473,6 @@ Action_ExamineObject(
 			fib->fib_NumBlocks		= 1;
 			fib->fib_DiskKey		= 0;
 			fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
-			fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
-									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 		}
 		else
 		{
@@ -5282,6 +5481,7 @@ Action_ExamineObject(
 			TEXT translated_name[MAX_FILENAME_LEN+1];
 			const TEXT * name;
 			int name_len;
+			LONG seconds;
 
 			name = get_base_name(ln->ln_FullName,strlen(ln->ln_FullName));
 			name_len = strlen(name);
@@ -5344,24 +5544,35 @@ Action_ExamineObject(
 			add_64_plus_32_to_64(&size_quad,511,&num_blocks_quad);
 			divide_64_by_32(&num_blocks_quad,512,&num_blocks_quad);
 
+			seconds = (st.mtime == 0) ? st.ctime : st.mtime;
+
+			seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
+			if(seconds < 0)
+				seconds = 0;
+
+			fib->fib_Date.ds_Days	= (seconds / (24 * 60 * 60));
+			fib->fib_Date.ds_Minute	= (seconds % (24 * 60 * 60)) / 60;
+			fib->fib_Date.ds_Tick	= (seconds % 60) * TICKS_PER_SECOND;
+
 			fib->fib_DirEntryType	= st.is_dir ? ST_USERDIR : ST_FILE;
 			fib->fib_EntryType		= fib->fib_DirEntryType;
 			fib->fib_NumBlocks		= num_blocks_quad.Low;
 			fib->fib_Size			= truncate_64_bit_position(&size_quad);
-			fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
-									  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
+
+			D(("is read only = %s",st.is_read_only ? "yes" : "no"));
 
 			if(st.is_read_only)
-			{
-				fib->fib_Protection &= ~(FIBF_OTR_DELETE|FIBF_GRP_DELETE);
 				fib->fib_Protection |= FIBF_DELETE;
-			}
 
 			/* Careful: the 'archive' attribute has exactly the opposite
 			 *          meaning in the Amiga and the SMB worlds.
 			 */
+			D(("is changed since last_archive = %s",st.is_changed_since_last_archive ? "yes" : "no"));
+
 			if(NOT st.is_changed_since_last_archive)
 				fib->fib_Protection |= FIBF_ARCHIVE;
+
+			D(("is directory = %s",st.is_dir ? "yes" : "no"));
 
 			if(st.is_dir)
 				fib->fib_DiskKey = 0;
@@ -5473,7 +5684,7 @@ dir_scan_callback_func_exnext(
 		st_size_quad.High	= st->size_high;
 
 		D((" '%s'",escape_name(name)));
-		D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%s", st->is_dir,st->is_read_only,st->is_hidden,convert_quad_to_string(&st_size_quad)));
+		D(("   is directory=%s, is read-only=%s, is hidden=%s, size=%s", st->is_dir ? "yes" : "no",st->is_read_only ? "yes" : "no",st->is_hidden ? "yes" : "no",convert_quad_to_string(&st_size_quad)));
 		D(("   nextpos=%ld eof=%ld",nextpos,eof));
 	}
 	#endif /* DEBUG */
@@ -5549,11 +5760,9 @@ dir_scan_callback_func_exnext(
 	fib->fib_EntryType		= fib->fib_DirEntryType;
 	fib->fib_NumBlocks		= num_blocks_quad.Low;
 	fib->fib_Size			= truncate_64_bit_position(&size_quad);
-	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
-							  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
 
 	if(st->is_read_only)
-		fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
+		fib->fib_Protection |= FIBF_DELETE;
 
 	/* Careful: the 'archive' attribute has exactly the opposite
 	 *          meaning in the Amiga (= was archived) and the SMB
@@ -5563,7 +5772,7 @@ dir_scan_callback_func_exnext(
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-	seconds = (st->mtime == 0 ? st->ctime : st->mtime);
+	seconds = (st->mtime == 0) ? st->ctime : st->mtime;
 
 	seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
 	if(seconds < 0)
@@ -5747,7 +5956,7 @@ dir_scan_callback_func_exall(
 		st_size_quad.High	= st->size_high;
 
 		D((" '%s'",escape_name(name)));
-		D(("   is_dir=%ld is_read_only=%ld is_hidden=%ld size=%s", st->is_dir,st->is_read_only,st->is_hidden,convert_quad_to_string(&st_size_quad)));
+		D(("   is directory=%s, is read-only=%ls, is hidden=%s, size=%s", st->is_dir ? "yes" : "no",st->is_read_only ? "yes" : "no",st->is_hidden ? "yes" : "no",convert_quad_to_string(&st_size_quad)));
 		D(("   nextpos=%ld eof=%ld",nextpos,eof));
 	}
 	#endif /* DEBUG */
@@ -5835,7 +6044,7 @@ dir_scan_callback_func_exall(
 
 		if(ec->ec_Next == NULL || ec->ec_BytesLeft < ed_size)
 		{
-			D(("Not enough room to return this entry: ec->ec_BytesLeft %ld < size %ld",ec->ec_BytesLeft,ed_size));
+			D(("   Not enough room to return this entry: ec->ec_BytesLeft %ld < size %ld",ec->ec_BytesLeft,ed_size));
 
 			/* If this is the first directory entry,
 			 * stop the entire process before it has
@@ -5843,13 +6052,13 @@ dir_scan_callback_func_exall(
 			 */
 			if(ec->ec_FirstAttempt)
 			{
-				SHOWMSG("this was the first read attempt -- aborting");
+				SHOWMSG("   this was the first read attempt -- aborting");
 				ec->ec_Control->eac_Entries = 0;
 				ec->ec_Error = ERROR_NO_FREE_STORE;
 			}
 			else
 			{
-				SHOWMSG("the caller should try again");
+				SHOWMSG("   the caller should try again");
 				ec->ec_Error = 0;
 			}
 
@@ -5885,15 +6094,18 @@ dir_scan_callback_func_exall(
 
 		if(type >= ED_PROTECTION)
 		{
-			ed->ed_Prot = FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
-			              FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
+			ed->ed_Prot = 0;
+
+			D(("   is read only = %s",st->is_read_only ? "yes" : "no"));
 
 			if(st->is_read_only)
-				ed->ed_Prot ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
+				ed->ed_Prot |= FIBF_DELETE;
 
 			/* Careful: the 'archive' attribute has exactly the opposite
 			 *          meaning in the Amiga and the SMB worlds.
 			 */
+			D(("   is changed since last_archive = %s",st->is_changed_since_last_archive ? "yes" : "no"));
+
 			if(NOT st->is_changed_since_last_archive)
 				ed->ed_Prot |= FIBF_ARCHIVE;
 		}
@@ -5903,7 +6115,7 @@ dir_scan_callback_func_exall(
 			LONG seconds;
 
 			/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-			seconds = (st->mtime == 0 ? st->ctime : st->mtime);
+			seconds = (st->mtime == 0) ? st->ctime : st->mtime;
 
 			seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
 			if(seconds < 0)
@@ -5912,6 +6124,34 @@ dir_scan_callback_func_exall(
 			ed->ed_Days		= (seconds / (24 * 60 * 60));
 			ed->ed_Mins		= (seconds % (24 * 60 * 60)) / 60;
 			ed->ed_Ticks	= (seconds % 60) * TICKS_PER_SECOND;
+
+			#if DEBUG
+			{
+				struct DateTime dat;
+				TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+
+				memset(&dat,0,sizeof(dat));
+
+				memset(date,0,sizeof(date));
+				memset(time,0,sizeof(time));
+
+				dat.dat_Stamp.ds_Days	= ed->ed_Days;
+				dat.dat_Stamp.ds_Minute	= ed->ed_Mins;
+				dat.dat_Stamp.ds_Tick	= ed->ed_Ticks;
+				dat.dat_Format			= FORMAT_DEF;
+				dat.dat_StrDate			= date;
+				dat.dat_StrTime			= time;
+
+				if(DateToStr(&dat))
+				{
+					D(("   days=%ld/minutes=%ld/ticks=%ld: %s %s", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks, date, time));
+				}
+				else
+				{
+					D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks));
+				}
+			}
+			#endif /* DEBUG */
 		}
 
 		if(type >= ED_COMMENT)
@@ -5922,18 +6162,18 @@ dir_scan_callback_func_exall(
 
 		if(ec->ec_Control->eac_MatchString != NULL)
 		{
-			D(("checking name against match string '%s'", ec->ec_Control->eac_MatchString));
+			D(("   checking name against match string '%s'", ec->ec_Control->eac_MatchString));
 
 			if(NOT MatchPatternNoCase(ec->ec_Control->eac_MatchString,ed->ed_Name))
 			{
-				SHOWMSG("name does not match");
+				SHOWMSG("   name does not match");
 				ignore_this_entry = TRUE;
 			}
 		}
 
 		if(!ignore_this_entry && ec->ec_Control->eac_MatchFunc != NULL)
 		{
-			SHOWMSG("checking if match function accepts the entry");
+			SHOWMSG("   checking if match function accepts the entry");
 
 			/* NOTE: the order of the parameters passed to the match hook
 			 *       function can be somewhat confusing. For standard
@@ -5946,7 +6186,7 @@ dir_scan_callback_func_exall(
 			 */
 			if(NOT CallHookPkt(ec->ec_Control->eac_MatchFunc,&type,ed))
 			{
-				SHOWMSG("match function rejected the entry");
+				SHOWMSG("   match function rejected the entry");
 
 				ignore_this_entry = TRUE;
 			}
@@ -5954,7 +6194,7 @@ dir_scan_callback_func_exall(
 
 		if(!ignore_this_entry)
 		{
-			SHOWMSG("registering new entry");
+			SHOWMSG("   registering new entry");
 
 			/* Link the previous entry to the current one. */
 			if(ec->ec_Last != NULL)
@@ -5967,8 +6207,7 @@ dir_scan_callback_func_exall(
 
 			ec->ec_Control->eac_Entries++;
 
-			SHOWVALUE(ec->ec_Last->ed_Next);
-			D(("ed->ed_Name = '%s'", ed->ed_Name));
+			D(("   ed->ed_Name = '%s'", ed->ed_Name));
 		}
 	}
 
@@ -6223,9 +6462,11 @@ Action_Find(
 	struct FileNode * fn = NULL;
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
+	int name_len;
 	STRPTR temp = NULL;
 	smba_stat_t st;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -6272,9 +6513,45 @@ Action_Find(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
+	if(action == ACTION_FINDOUTPUT)
+	{
+		TEXT * last_name;
+		int last_name_len;
+
+		last_name = FilePart(name);
+		last_name_len = strlen(last_name);
+
+		for(i = 0 ; i < last_name_len ; i++)
+		{
+			if(strchr("*?",last_name[i]) != NULL)
+			{
+				D(("found a wildcard in '%s'",name));
+
+				error = ERROR_INVALID_COMPONENT_NAME;
+				goto out;
+			}
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -6800,7 +7077,9 @@ Action_SetDate(
 	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
 	LONG seconds;
+	int name_len;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -6837,9 +7116,25 @@ Action_SetDate(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
@@ -7023,15 +7318,16 @@ Action_ExamineFH(
 	fib->fib_NumBlocks		= num_blocks_quad.Low;
 	fib->fib_Size			= truncate_64_bit_position(&size_quad);
 
-	fib->fib_Protection		= FIBF_OTR_READ|FIBF_OTR_EXECUTE|FIBF_OTR_WRITE|FIBF_OTR_DELETE|
-							  FIBF_GRP_READ|FIBF_GRP_EXECUTE|FIBF_GRP_WRITE|FIBF_GRP_DELETE;
+	D(("is read only = %s",st.is_read_only ? "yes" : "no"));
 
 	if(st.is_read_only)
-		fib->fib_Protection ^= (FIBF_OTR_DELETE|FIBF_GRP_DELETE|FIBF_DELETE);
+		fib->fib_Protection |= FIBF_DELETE;
 
 	/* Careful: the 'archive' attribute has exactly the opposite
 	 *          meaning in the Amiga and the SMB worlds.
 	 */
+	D(("is changed since last_archive = %s",st.is_changed_since_last_archive ? "yes" : "no"));
+
 	if(NOT st.is_changed_since_last_archive)
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
@@ -7045,6 +7341,32 @@ Action_ExamineFH(
 	fib->fib_Date.ds_Days	= (seconds / (24 * 60 * 60));
 	fib->fib_Date.ds_Minute	= (seconds % (24 * 60 * 60)) / 60;
 	fib->fib_Date.ds_Tick	= (seconds % 60) * TICKS_PER_SECOND;
+
+	#if DEBUG
+	{
+		struct DateTime dat;
+		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+
+		memset(&dat,0,sizeof(dat));
+
+		memset(date,0,sizeof(date));
+		memset(time,0,sizeof(time));
+
+		dat.dat_Stamp	= fib->fib_Date;
+		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_StrDate	= date;
+		dat.dat_StrTime	= time;
+
+		if(DateToStr(&dat))
+		{
+			D(("days=%ld/minutes=%ld/ticks=%ld: %s %s", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick, date, time));
+		}
+		else
+		{
+			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
+		}
+	}
+	#endif /* DEBUG */
 
 	result = DOSTRUE;
 
@@ -7572,7 +7894,9 @@ Action_SetComment(
 	smba_file_t * file = NULL;
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
+	int name_len;
 	int error;
+	int i;
 
 	ENTER();
 
@@ -7609,9 +7933,25 @@ Action_SetComment(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	/* Ignore everything left of the colon character, if there is one.
+	 * This is necessary for assignments to work.
+	 */
+	name_len = strlen(name);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		if(name[i] == ':')
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+			break;
+		}
+	}
+
 	if (NOT ServerData->server.unicode_enabled)
 	{
-		error = translate_amiga_name_to_smb_name(name,strlen(name),sizeof(name));
+		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}

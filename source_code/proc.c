@@ -1294,7 +1294,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 				/* The following does not work consistently with multiple
 				 * SMB servers. Which is why we stick with generic read/write.
 				 */
-				/* desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE; */
+				/* desired_access = FILE_READ_DATA|FILE_WRITE_DATA|FILE_DELETE|FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES; */
 
 				desired_access = GENERIC_READ|GENERIC_WRITE;
 			}
@@ -1305,12 +1305,10 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 				/* The following does not work consistently with multiple
 				 * SMB servers. Which is why we stick with generic read.
 				 */
-				/* desired_access = FILE_READ_DATA; */
+				/* desired_access = FILE_READ_DATA|FILE_READ_ATTRIBUTES; */
 
 				desired_access = GENERIC_READ;
 			}
-
-			/* desired_access |= FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES; */
 
 			/* Allows others to read, write and delete the file just created.
 			 * This may be useful if smbfs hangs or you need to restart your
@@ -1354,6 +1352,9 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			/* Now for the data portion of the message */
 			if(server->unicode_enabled)
 			{
+				/* Add a padding byte so that the following Unicode string
+				 * will be word-aligned.
+				 */
 				(*data++) = 0;
 
 				(void) copy_latin1_to_utf16le(data, pathname_size, pathname, len);
@@ -2150,7 +2151,7 @@ smb_proc_mv (struct smb_server *server, const char *old_path, const int old_path
 	int result;
 
 	if(server->unicode_enabled)
-		size = 2 + 1 + 2 * (old_path_len+1) + 1 + 2 * (new_path_len+1);
+		size = 2 + 1 + 2 * (old_path_len+1) + 2 * (new_path_len+1);
 	else
 		size = 2 + 1 + (old_path_len+1) + 1 + (new_path_len+1);
 
@@ -2168,6 +2169,8 @@ smb_proc_mv (struct smb_server *server, const char *old_path, const int old_path
 		p += copy_latin1_to_utf16le(p,2 * (old_path_len+1),old_path,old_path_len);
 
 		(*p++) = 4; /* A null-terminated string follows. */
+
+		(*p++) = 0; /* Padding byte, allowing for the string to be word-aligned. */
 		(void) copy_latin1_to_utf16le(p,2 * (new_path_len+1),new_path,new_path_len);
 	}
 	else
@@ -2200,97 +2203,25 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 
  retry:
 
-	/* olsen (2018-05-20): The TRANSACT2_MKDIR command does not seem to
-	 *                     work correctly with Samba 3.0.25, although the
-	 *                     implementation appears to be sound (it follows
-	 *                     both the SNIA and Microsoft CIFS documentation,
-	 *                     as well as the 1996 Microsoft SMB file sharing
-	 *                     protocol documentation). The extended attributes
-	 *                     are documented as being optional, and we omit
-	 *                     them here.
-	 */
-	if (FALSE && server->protocol >= PROTOCOL_LANMAN2)
+	ASSERT( smb_payload_size(server, 0, 1 + path_size) >= 0 );
+
+	p = smb_setup_header (server, SMBmkdir, 0, 1 + path_size);
+
+	if(server->unicode_enabled)
 	{
-		unsigned char *outbuf = server->transmit_buffer;
-
-		ASSERT( smb_payload_size(server, 15, 3 + 4 + path_size) >= 0 );
-
-		smb_setup_header (server, SMBtrans2, 15, 3 + 4 + path_size);
-
-		WSET (outbuf, smb_tpscnt, 4 + path_size);							/* TotalParameterCount */
-		WSET (outbuf, smb_tdscnt, 0);										/* TotalDataCount */
-		WSET (outbuf, smb_mprcnt, 2);										/* MaxParameterCount */
-		WSET (outbuf, smb_mdrcnt, server->max_recv);						/* MaxDataCount */
-		WSET (outbuf, smb_msrcnt, 0);										/* MaxSetupCount+Reserved1 */
-		WSET (outbuf, smb_flags, 0);										/* Flags */
-		DSET (outbuf, smb_timeout, 0);										/* Timeout */
-																			/* Reserved2 */
-		WSET (outbuf, smb_pscnt, WVAL (outbuf, smb_tpscnt));				/* ParameterCount */
-		WSET (outbuf, smb_psoff, ((SMB_BUF (outbuf) + 3) - outbuf) - NETBIOS_HEADER_SIZE);	/* ParameterOffset */
-		WSET (outbuf, smb_dscnt, 0);										/* DataCount */
-		WSET (outbuf, smb_dsoff, 0);										/* DataOffset */
-		WSET (outbuf, smb_suwcnt, 1);										/* SetupCount+Reserved3 */
-		WSET (outbuf, smb_setup0, TRANSACT2_MKDIR);							/* Setup[0] */
-
-		p = SMB_BUF (outbuf);
-
-		/* Align to a 4-byte-boundary. */
-		(*p++) = '\0';
-		(*p++) = '\0';
-		(*p++) = '\0';
-
-		DSET (p, 0, 0);	/* Reserved */
-		p += 4;
-
-		if(server->unicode_enabled)
-		{
-			copy_latin1_to_utf16le(p,path_size,path,len);
-		}
-		else
-		{
-			memcpy(p,path,len);
-			p[len] = '\0';
-		}
-
-		result = smb_trans2_request (server, SMBtrans2, NULL, NULL, NULL, NULL, error_ptr);
-		if (result < 0)
-		{
-			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
-				goto retry;
-			else
-				goto out;
-		}
-
-		if(server->rcls != 0)
-		{
-			(*error_ptr) = error_check_smb_error;
-
-			result = -1;
-			goto out;
-		}
+		(*p++) = 4; /* A null-terminated string follows. */
+		(void) copy_latin1_to_utf16le(p,path_size,path,len);
 	}
 	else
 	{
-		ASSERT( smb_payload_size(server, 0, 1 + path_size) >= 0 );
+		(void) smb_encode_ascii (p, path, len);
+	}
 
-		p = smb_setup_header (server, SMBmkdir, 0, 1 + path_size);
-
-		if(server->unicode_enabled)
-		{
-			(*p++) = 4; /* A null-terminated string follows. */
-			(void) copy_latin1_to_utf16le(p,path_size,path,len);
-		}
-		else
-		{
-			(void) smb_encode_ascii (p, path, len);
-		}
-
-		result = smb_request_ok (server, SMBmkdir, 0, 0, error_ptr);
-		if (result < 0)
-		{
-			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
-				goto retry;
-		}
+	result = smb_request_ok (server, SMBmkdir, 0, 0, error_ptr);
+	if (result < 0)
+	{
+		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+			goto retry;
 	}
 
  out:
@@ -3847,9 +3778,9 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 		return(0);
 
 	if(server->unicode_enabled)
-		path_size = 1 + 2 * (len + 1 + 1);
+		path_size = 1 + 2 * (len + 1);
 	else
-		path_size = 1 + len + 1 + 1;
+		path_size = 1 + len + 1;
 
 	ASSERT( smb_payload_size(server, 8, path_size) >= 0 );
 
@@ -3893,17 +3824,20 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 	p = smb_setup_header (server, SMBsetatr, 8, path_size);
 	WSET (buf, smb_vwv0, attr);
 	DSET (buf, smb_vwv1, local_time);
+	WSET (buf, smb_vwv3, 0);
+	WSET (buf, smb_vwv4, 0);
+	WSET (buf, smb_vwv5, 0);
+	WSET (buf, smb_vwv6, 0);
+	WSET (buf, smb_vwv7, 0);
 
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A null-terminated string follows. */
 		p += copy_latin1_to_utf16le(p,2 * (len+1),path,len);
-		copy_latin1_to_utf16le(p,2 * (1),"",0);
 	}
 	else
 	{
 		p = smb_encode_ascii (p, path, len);
-		(void) smb_encode_ascii (p, "", 0);
 	}
 
 	result = smb_request_ok (server, SMBsetatr, 0, 0, error_ptr);

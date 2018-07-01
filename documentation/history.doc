@@ -2175,3 +2175,58 @@ smbfs 1.158 (27.6.2018)
   had to be reestablished and the file/directory in question had
   to be reopened because all the attribute and file information
   was overwritten. Fixed.
+
+
+smbfs 1.159 (29.6.2018)
+
+- Examine() did not use the creation time provided by the SMB
+  server in place of the modification time in case the modification
+  time was not currently set. Fixed.
+
+- Simplified the handling of the file/directory protection flags.
+  Because only two flags are actually reported by the SMB protocol
+  and may be changed, only these two now receive attention. smbfs
+  still makes up the rest (hold/script/pure/read/write/execute), but
+  the respective group/other read/write/execute/delete flags are
+  no longer filled in.
+
+
+smbfs 1.160 (30.6.2018)
+
+- The default for the "protocol" option is now "core" rather than
+  "nt1" because it appears to be generally the most compatible
+  choice.
+
+- Delete(), CreateDir(), Lock(), SetProtect(), Rename(), Open(), SetDate()
+  and SetComment() now ignore any part of the path name passed in which
+  includes the name of an assignment, volume or device name (e.g.
+  "smbfs0:directory/file") and only pay attention to the part which
+  follows it (e.g. for "smbfs0:directory/file" only "directory/file"
+  is considered relevant). This is necessary for assignments and also
+  soft links to work. Thanks go to Thomas Rapp for reporting the problem.
+
+- The SMB commands underlying the Delete() and Rename() operations support
+  MS-DOS wildcards for selecting the directory entries affected. This is
+  a major problem because there is no "escape" from the wildcard scheme.
+  Hence, attempting to delete a file called "*" will delete everything
+  in the same directory as the file "*". For now I have blocked the
+  use of the "*" and "?" characters in file/directory names for Delete(),
+  Rename(), Open(...,MODE_NEWFILE) and CreateDir(). It's possible that
+  the same restrictions will have to be applied to the '>', '"' and
+  '<' characters which are the Windows NT variants of the MS-DOS
+  '?', '.' and '*' characters used in wildcards.
+
+- The SMB_COM_RENAME command needed an extra alignment byte preceding
+  the destination name if Unicode support was enabled. Because the destination
+  name was misaligned, the individual characters were decoded incorrectly
+  by the SMB server. This is what caused the "renamed" directories to wind
+  up in the share's top level directory bearing names composed of Chinese,
+  Japanese and Korean ideographs, none of which were printable on the Amiga.
+  This caused the rename directory entries to disappear from view. Thanks go
+  to Thomas Rapp for finding the problem.
+
+- Removed the unused and non-working code for TRANS2_CREATE_DIRECTORY. What
+  remains is the working SMB_COM_CREATE_DIRECTORY support.
+
+- Cleaned up the SMB_COM_SET_INFORMATION command setup, which did not
+  zero out the reserved data and added an unnecessary empty string.

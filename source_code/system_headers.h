@@ -68,8 +68,6 @@
 
 #include <libraries/locale.h>
 
-/*#include <bsdsocket/socketbasetags.h>*/
-
 #include <utility/date.h>
 #include <utility/tagitem.h>
 
