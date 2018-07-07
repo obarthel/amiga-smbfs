@@ -48,6 +48,7 @@
 
 #include <smb/smb_fs_sb.h>
 #include <smb/smb_fs.h>
+#include <smb/smbno.h>
 #include <smb/smb.h>
 
 /****************************************************************************/
@@ -1575,7 +1576,7 @@ free_memory(APTR address)
 		#if DEBUG
 		{
 			total_memory_allocated -= size;
-			
+
 			if(GETDEBUGLEVEL() > 0)
 				memset(address,0xA3,size - sizeof(*mem));
 		}
@@ -2741,7 +2742,7 @@ setup(
 	BOOL			opt_prefer_core_protocol,
 	BOOL			opt_prefer_write_raw,
 	BOOL			opt_write_behind,
-	BOOL			opt_prefer_read_raw, 
+	BOOL			opt_prefer_read_raw,
 	const TEXT *	device_name,
 	const TEXT *	volume_name,
 	const TEXT *	translation_file)
@@ -2935,7 +2936,7 @@ setup(
 		opt_prefer_core_protocol,
 		opt_prefer_write_raw,
 		opt_write_behind,
-		opt_prefer_read_raw, 
+		opt_prefer_read_raw,
 		&error,
 		&smb_error_class,
 		&smb_error,
@@ -3757,7 +3758,8 @@ static int
 get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 {
 	STRPTR parent_name = NULL;
-	int error;	int i;
+	int error;
+	int i;
 
 	ENTER();
 
@@ -4177,7 +4179,7 @@ Action_DeleteObject(
 		LOG(("there is still a lock or file attached to %s\n", full_name));
 		goto out;
 	}
-	
+
 	/* We need to find this file's parent directory, so that
 	 * in case the directory contents are currently being
 	 * examined, that process is restarted.
@@ -4210,12 +4212,12 @@ Action_DeleteObject(
 		if(smba_rmdir(ServerData,full_name,&error) < 0)
 		{
 			int translated_error;
-			
+
 			if(error == error_check_smb_error)
 				translated_error = smb_errno(((struct smb_server *)ServerData)->rcls,((struct smb_server *)ServerData)->err);
 			else
 				translated_error = error;
-			
+
 			D(("that didn't work (error=%ld)", translated_error));
 
 			/* This is a little bit difficult to justify since
@@ -4233,13 +4235,13 @@ Action_DeleteObject(
 			if(translated_error == EACCES || translated_error == EPERM)
 			{
 				SHOWMSG("that directory might not be empty");
-				
+
 				error = ERROR_DIRECTORY_NOT_EMPTY;
 			}
 			else
 			{
 				SHOWMSG("could be some other problem");
-				
+
 				error = map_errno_to_ioerr(error);
 			}
 
@@ -4737,7 +4739,7 @@ Action_FreeLock(
 	}
 
 	for(ln = (struct LockNode *)LockList.mlh_Head ;
-		ln->ln_MinNode.mln_Succ != NULL ; 
+		ln->ln_MinNode.mln_Succ != NULL ;
 		ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 	{
 		if(ln == key)
@@ -5415,6 +5417,15 @@ Action_ExamineObject(
 
 		ASSERT( len < (int)sizeof(fib->fib_FileName) );
 
+		/* Just don't overrun the buffer. */
+		if(len >= (int)sizeof(fib->fib_FileName))
+		{
+			D(("root directory name is too long (%ld >= %ld)", len, sizeof(fib->fib_FileName)));
+
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
+
 		memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 		fib->fib_FileName[0] = len;
 
@@ -5464,6 +5475,15 @@ Action_ExamineObject(
 			SHOWVALUE(len);
 
 			ASSERT( len < (int)sizeof(fib->fib_FileName) );
+
+			/* Just don't overrun the buffer. */
+			if(len >= (int)sizeof(fib->fib_FileName))
+			{
+				D(("root directory name is too long (%ld >= %ld)", len, sizeof(fib->fib_FileName)));
+
+				error = ERROR_INVALID_COMPONENT_NAME;
+				goto out;
+			}
 
 			memcpy(&fib->fib_FileName[1],&volume_name[1],len);
 			fib->fib_FileName[0] = len;
@@ -5658,6 +5678,13 @@ name_is_acceptable(const TEXT * name)
 
 /****************************************************************************/
 
+/* This function is called by the directory scanner over and over again
+ * until the first entry is acceptable for it. This means that unusable
+ * entries can be skipped until eventually either the end of the directory
+ * is reached or one entry can be used.
+ *
+ * Returns FALSE to keep scanning, TRUE to stop scanning.
+ */
 static int
 dir_scan_callback_func_exnext(
 	struct FileInfoBlock *	fib,
@@ -5667,7 +5694,7 @@ dir_scan_callback_func_exnext(
 	int						eof,
 	const smba_stat_t *		st)
 {
-	int result = 0;
+	int stop_scanning = FALSE;
 	int name_len;
 	LONG seconds;
 	QUAD size_quad;
@@ -5734,7 +5761,7 @@ dir_scan_callback_func_exnext(
 		goto out;
 	}
 
-	/* Will the name fit? */
+	/* Is the name too large to fit? */
 	if(name_len >= (int)sizeof(fib->fib_FileName))
 	{
 		D(("   name is too long (%ld >= %ld)", name_len, sizeof(fib->fib_FileName)));
@@ -5808,14 +5835,15 @@ dir_scan_callback_func_exnext(
 	}
 	#endif /* DEBUG */
 
-	result = 1;
+	/* We received the one single entry which we came for. */
+	stop_scanning = TRUE;
 
  out:
 
 	fib->fib_DiskKey = eof ? -1 : nextpos;
 
-	RETURN(result);
-	return(result);
+	RETURN(stop_scanning);
+	return(stop_scanning);
 }
 
 static LONG
@@ -5828,8 +5856,7 @@ Action_ExamineNext(
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
 	int error = OK;
-	long offset;
-	int count;
+	LONG offset;
 
 	ENTER();
 
@@ -5886,25 +5913,29 @@ Action_ExamineNext(
 	SHOWMSG("calling 'smba_readdir'");
 	SHOWVALUE(offset);
 
-	count = smba_readdir(ln->ln_File,offset,fib,(smba_callback_t)dir_scan_callback_func_exnext,&error);
+	smba_readdir(ln->ln_File,offset,fib,(smba_callback_t)dir_scan_callback_func_exnext,&error);
 
-	SHOWVALUE(count);
-
-	if(error == OK && (count == 0 || fib->fib_FileName[0] == '\0'))
-	{
-		SHOWMSG("nothing to be read");
-		fib->fib_DiskKey = -1;
-
-		error = ERROR_NO_MORE_ENTRIES;
-		goto out;
-	}
-	else if (error != OK)
+	if(error != OK)
 	{
 		SHOWMSG("error whilst scanning");
 		SHOWVALUE(error);
 		fib->fib_DiskKey = -1;
 
 		error = map_errno_to_ioerr(error);
+		goto out;
+	}
+
+	/* If the name is not filled in it means that no directory
+	 * entry was acceptable for use, and the directory scanner
+	 * returned all the entries available. There are no
+	 * further entries to be delivered.
+	 */
+	if(fib->fib_FileName[0] == '\0')
+	{
+		SHOWMSG("nothing to be read");
+		fib->fib_DiskKey = -1;
+
+		error = ERROR_NO_MORE_ENTRIES;
 		goto out;
 	}
 
@@ -5923,15 +5954,22 @@ Action_ExamineNext(
 struct ExAllContext
 {
 	struct ExAllData *		ec_Last;
-	struct ExAllData *		ec_Next;
-	int						ec_BytesLeft;
-	int						ec_MinSize;
+	UBYTE *					ec_Buffer;
+	int						ec_BufferSize;
+	int						ec_RecordSize;
 	struct ExAllControl *	ec_Control;
-	ULONG					ec_Type;
+	LONG					ec_Type;
 	LONG					ec_Error;
-	BOOL					ec_FirstAttempt;
 };
 
+/* This function is called for every directory entry the directory scanner
+ * can find and attempts to convert it into a form usable by ExAll().
+ * Unsuitable entries are ignored, and the directory scanner gets another
+ * chance to supply a new entry until either the entire directory has been
+ * read with nothing to show for it, or the ExAll() buffer has been filled.
+ *
+ * Returns FALSE to keep scanning, TRUE to stop scanning.
+ */
 static int
 dir_scan_callback_func_exall(
 	struct ExAllContext *	ec,
@@ -5942,11 +5980,16 @@ dir_scan_callback_func_exall(
 	const smba_stat_t *		st)
 {
 	TEXT translated_name[MAX_FILENAME_LEN+1];
-	BOOL ignore_this_entry = FALSE;
-	int name_len = -1;
-	int result = 0;
+	int stop_scanning = FALSE;
+	int name_len;
+	LONG type = ec->ec_Type;
+	UBYTE * buffer = ec->ec_Buffer;
+	struct ExAllData * ed;
+	int complete_record_size;
 
 	ENTER();
+
+	ASSERT( ec->ec_Control->eac_LastKey != (ULONG)-1 );
 
 	#if DEBUG
 	{
@@ -5967,367 +6010,320 @@ dir_scan_callback_func_exall(
 	if (NOT name_is_acceptable(name))
 	{
 		D(("   name is not acceptable"));
-		ignore_this_entry = TRUE;
+		goto out;
 	}
-	else if (st->is_hidden && OmitHidden)
+
+	if (st->is_hidden && OmitHidden)
 	{
 		D(("   ignoring hidden directory entry"));
-		ignore_this_entry = TRUE;
+		goto out;
 	}
-	else if (NOT ServerData->server.unicode_enabled)
+
+	name_len = strlen(name);
+
+	if (NOT ServerData->server.unicode_enabled)
 	{
-		name_len = strlen(name);
-
-		if(name_len < (int)sizeof(translated_name))
-		{
-			/* Length includes the terminating NUL byte. */
-			memcpy(translated_name,name,name_len+1);
-
-			if(translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name)) == OK)
-			{
-				name = translated_name;
-				name_len = strlen(name);
-			}
-			else
-			{
-				D(("   name cannot be translated"));
-
-				ignore_this_entry = TRUE;
-			}
-		}
-		else
+		if(name_len >= (int)sizeof(translated_name))
 		{
 			D(("   name is too long (%ld >= %ld)", name_len, sizeof(translated_name)));
-
-			ignore_this_entry = TRUE;
-		}
-	}
-
-	/* Check if this is a usable Amiga file or directory name. */
-	if(NOT ignore_this_entry)
-	{
-		if(name_len == -1)
-			name_len = strlen(name);
-
-		if(validate_amigados_file_name(name, name_len) != OK)
-		{
-			D(("   final name contains unacceptable characters"));
-
-			ignore_this_entry = TRUE;
-		}
-	}
-
-	/* Skip file and drawer names that we wouldn't be
-	 * able to handle in the first place.
-	 */
-	if(NOT ignore_this_entry)
-	{
-		ULONG type = ec->ec_Type;
-		struct ExAllData * ed;
-		int ed_size;
-
-		if(name_len == -1)
-			name_len = strlen(name);
-
-		/* Figure out how large this entry needs to be, and
-		 * if necessary stop processing if there is not enough
-		 * room left to store it.
-		 */
-		ed_size = ec->ec_MinSize + name_len+1;
-
-		/* All entries need to begin on a word-aligned address,
-		 * which means that we need to pad the entry size to
-		 * a multiple of 2.
-		 */
-		if((ed_size % 2) > 0)
-			ed_size++;
-
-		if(ec->ec_Next == NULL || ec->ec_BytesLeft < ed_size)
-		{
-			D(("   Not enough room to return this entry: ec->ec_BytesLeft %ld < size %ld",ec->ec_BytesLeft,ed_size));
-
-			/* If this is the first directory entry,
-			 * stop the entire process before it has
-			 * really begun.
-			 */
-			if(ec->ec_FirstAttempt)
-			{
-				SHOWMSG("   this was the first read attempt -- aborting");
-				ec->ec_Control->eac_Entries = 0;
-				ec->ec_Error = ERROR_NO_FREE_STORE;
-			}
-			else
-			{
-				SHOWMSG("   the caller should try again");
-				ec->ec_Error = 0;
-			}
-
-			result = 1;
 			goto out;
 		}
 
-		/* Fill in this entry. */
-		ed = ec->ec_Next;
+		/* Length includes the terminating NUL byte. */
+		memcpy(translated_name,name,name_len+1);
 
-		/* Until we know better, assume that this will be
-		 * the last list entry.
-		 */
-		ed->ed_Next = NULL;
-
-		/* Copy the name, including the terminating NUL byte. */
-		ed->ed_Name = (STRPTR)(&((BYTE *)ed)[ec->ec_MinSize]);
-		memcpy(ed->ed_Name,name,name_len+1);
-
-		/* Fill in as many records as were requested. */
-		if(type >= ED_TYPE)
-			ed->ed_Type = st->is_dir ? ST_USERDIR : ST_FILE;
-
-		if(type >= ED_SIZE)
+		if(translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name)) != OK)
 		{
-			QUAD size_quad;
-
-			size_quad.Low	= st->size_low;
-			size_quad.High	= st->size_high;
-
-			ed->ed_Size = truncate_64_bit_position(&size_quad);
+			D(("   name cannot be translated"));
+			goto out;
 		}
 
-		if(type >= ED_PROTECTION)
+		name = translated_name;
+		name_len = strlen(name);
+	}
+
+	/* Check if this is a usable Amiga file or directory name. */
+	if(validate_amigados_file_name(name, name_len) != OK)
+	{
+		D(("   name contains unacceptable characters"));
+		goto out;
+	}
+
+	/* Check if the name matches the pattern provided, if any. */
+	if(ec->ec_Control->eac_MatchString != NULL)
+	{
+		D(("   checking name against match string '%s'", ec->ec_Control->eac_MatchString));
+
+		if(NOT MatchPatternNoCase(ec->ec_Control->eac_MatchString,(STRPTR)name))
 		{
-			ed->ed_Prot = 0;
-
-			D(("   is read only = %s",st->is_read_only ? "yes" : "no"));
-
-			if(st->is_read_only)
-				ed->ed_Prot |= FIBF_DELETE;
-
-			/* Careful: the 'archive' attribute has exactly the opposite
-			 *          meaning in the Amiga and the SMB worlds.
-			 */
-			D(("   is changed since last_archive = %s",st->is_changed_since_last_archive ? "yes" : "no"));
-
-			if(NOT st->is_changed_since_last_archive)
-				ed->ed_Prot |= FIBF_ARCHIVE;
-		}
-
-		if(type >= ED_DATE)
-		{
-			LONG seconds;
-
-			/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
-			seconds = (st->mtime == 0) ? st->ctime : st->mtime;
-
-			seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
-			if(seconds < 0)
-				seconds = 0;
-
-			ed->ed_Days		= (seconds / (24 * 60 * 60));
-			ed->ed_Mins		= (seconds % (24 * 60 * 60)) / 60;
-			ed->ed_Ticks	= (seconds % 60) * TICKS_PER_SECOND;
-
-			#if DEBUG
-			{
-				struct DateTime dat;
-				TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
-
-				memset(&dat,0,sizeof(dat));
-
-				memset(date,0,sizeof(date));
-				memset(time,0,sizeof(time));
-
-				dat.dat_Stamp.ds_Days	= ed->ed_Days;
-				dat.dat_Stamp.ds_Minute	= ed->ed_Mins;
-				dat.dat_Stamp.ds_Tick	= ed->ed_Ticks;
-				dat.dat_Format			= FORMAT_DEF;
-				dat.dat_StrDate			= date;
-				dat.dat_StrTime			= time;
-
-				if(DateToStr(&dat))
-				{
-					D(("   days=%ld/minutes=%ld/ticks=%ld: %s %s", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks, date, time));
-				}
-				else
-				{
-					D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks));
-				}
-			}
-			#endif /* DEBUG */
-		}
-
-		if(type >= ED_COMMENT)
-			ed->ed_Comment = "";
-
-		if(type >= ED_OWNER)
-			ed->ed_OwnerUID = ed->ed_OwnerGID = 0;
-
-		if(ec->ec_Control->eac_MatchString != NULL)
-		{
-			D(("   checking name against match string '%s'", ec->ec_Control->eac_MatchString));
-
-			if(NOT MatchPatternNoCase(ec->ec_Control->eac_MatchString,ed->ed_Name))
-			{
-				SHOWMSG("   name does not match");
-				ignore_this_entry = TRUE;
-			}
-		}
-
-		if(!ignore_this_entry && ec->ec_Control->eac_MatchFunc != NULL)
-		{
-			SHOWMSG("   checking if match function accepts the entry");
-
-			/* NOTE: the order of the parameters passed to the match hook
-			 *       function can be somewhat confusing. For standard
-			 *       hook functions, the order of the parameters and the
-			 *       registers they go into is hook=A0, object=A2,
-			 *       message=A1. However, the documentation for the 'ExAll()'
-			 *       function always lists them in ascending order, that is
-			 *       hook=A0, message=A1, object=A2, which can lead to
-			 *       quite some confusion and strange errors.
-			 */
-			if(NOT CallHookPkt(ec->ec_Control->eac_MatchFunc,&type,ed))
-			{
-				SHOWMSG("   match function rejected the entry");
-
-				ignore_this_entry = TRUE;
-			}
-		}
-
-		if(!ignore_this_entry)
-		{
-			SHOWMSG("   registering new entry");
-
-			/* Link the previous entry to the current one. */
-			if(ec->ec_Last != NULL)
-				ec->ec_Last->ed_Next = ed;
-
-			ec->ec_BytesLeft -= ed_size;
-
-			ec->ec_Next = ec->ec_BytesLeft > 0 ? (struct ExAllData *)(&((BYTE *)ed)[ed_size]) : NULL;
-			ec->ec_Last = ed;
-
-			ec->ec_Control->eac_Entries++;
-
-			D(("   ed->ed_Name = '%s'", ed->ed_Name));
+			SHOWMSG("   name does not match");
+			goto out;
 		}
 	}
 
-	ec->ec_Control->eac_LastKey = (ULONG)(eof ? -1 : nextpos);
+	/* Figure out how large this entry needs to be, and
+	 * if necessary stop processing if there is not enough
+	 * room left to store it.
+	 */
+	complete_record_size = ec->ec_RecordSize + name_len+1;
+
+	/* All entries need to begin on a word-aligned address,
+	 * which means that we need to pad the entry size to
+	 * a multiple of 2.
+	 */
+	if((complete_record_size % 2) > 0)
+		complete_record_size++;
+
+	D(("   buffer size left = %ld, record size = %ld",ec->ec_BufferSize,complete_record_size));
+
+	if(complete_record_size >= ec->ec_BufferSize)
+	{
+		SHOWMSG("   not enough room to return this entry");
+
+		/* If the buffer is still empty, stop the entire process before
+		 * it has really begun. Not even one directory entry will fit...
+		 */
+		if(ec->ec_Control->eac_Entries == 0)
+		{
+			SHOWMSG("   this was the first read attempt -- aborting");
+			ec->ec_Error = ERROR_NO_FREE_STORE;
+		}
+
+		stop_scanning = TRUE;
+		goto out;
+	}
+
+	/* Fill in this entry. */
+	ed = (struct ExAllData *)buffer;
+
+	ASSERT( (((ULONG)ed) % 2) == 0 );
+
+	/* Until we know better, assume that this will be
+	 * the last list entry.
+	 */
+	ed->ed_Next = NULL;
+
+	/* Copy the name, including the terminating NUL byte. */
+	ed->ed_Name = (STRPTR)&buffer[ec->ec_RecordSize];
+	memcpy(ed->ed_Name,name,name_len+1);
+
+	/* Fill in as many records as were requested. */
+	if(type >= ED_TYPE)
+	{
+		ed->ed_Type = st->is_dir ? ST_USERDIR : ST_FILE;
+
+		D(("   type=%ld", ed->ed_Type));
+	}
+
+	if(type >= ED_SIZE)
+	{
+		QUAD size_quad;
+
+		size_quad.Low	= st->size_low;
+		size_quad.High	= st->size_high;
+
+		ed->ed_Size = truncate_64_bit_position(&size_quad);
+
+		D(("   size=%ld", ed->ed_Size));
+	}
+
+	if(type >= ED_PROTECTION)
+	{
+		ed->ed_Prot = 0;
+
+		D(("   is read only = %s",st->is_read_only ? "yes" : "no"));
+
+		if(st->is_read_only)
+			ed->ed_Prot |= FIBF_DELETE;
+
+		/* Careful: the 'archive' attribute has exactly the opposite
+		 *          meaning in the Amiga and the SMB worlds.
+		 */
+		D(("   is changed since last_archive = %s",st->is_changed_since_last_archive ? "yes" : "no"));
+
+		if(NOT st->is_changed_since_last_archive)
+			ed->ed_Prot |= FIBF_ARCHIVE;
+
+		D(("   protection=0x%08lx", ed->ed_Prot));
+	}
+
+	if(type >= ED_DATE)
+	{
+		LONG seconds;
+
+		/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
+		seconds = (st->mtime == 0) ? st->ctime : st->mtime;
+
+		seconds -= UNIX_TIME_OFFSET + get_time_zone_delta();
+		if(seconds < 0)
+			seconds = 0;
+
+		ed->ed_Days		= (seconds / (24 * 60 * 60));
+		ed->ed_Mins		= (seconds % (24 * 60 * 60)) / 60;
+		ed->ed_Ticks	= (seconds % 60) * TICKS_PER_SECOND;
+
+		#if DEBUG
+		{
+			struct DateTime dat;
+			TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+
+			memset(&dat,0,sizeof(dat));
+
+			memset(date,0,sizeof(date));
+			memset(time,0,sizeof(time));
+
+			dat.dat_Stamp.ds_Days	= ed->ed_Days;
+			dat.dat_Stamp.ds_Minute	= ed->ed_Mins;
+			dat.dat_Stamp.ds_Tick	= ed->ed_Ticks;
+			dat.dat_Format			= FORMAT_DEF;
+			dat.dat_StrDate			= date;
+			dat.dat_StrTime			= time;
+
+			if(DateToStr(&dat))
+			{
+				D(("   days=%ld/minutes=%ld/ticks=%ld: %s %s", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks, date, time));
+			}
+			else
+			{
+				D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks));
+			}
+		}
+		#endif /* DEBUG */
+	}
+
+	/* If there is no comment, set the comment string
+	 * pointer to NULL. This is documented to be the
+	 * correct approach.
+	 */
+	if(type >= ED_COMMENT)
+	{
+		ed->ed_Comment = NULL;
+
+		D(("   comment=NULL"));
+	}
+
+	if(type >= ED_OWNER)
+	{
+		ed->ed_OwnerUID = ed->ed_OwnerGID = 0;
+
+		D(("   user/gid=0/0"));
+	}
+
+	if(ec->ec_Control->eac_MatchFunc != NULL)
+	{
+		SHOWMSG("   checking if match function accepts the entry");
+
+		/* NOTE: the order of the parameters passed to the match hook
+		 *       function can be somewhat confusing. For standard
+		 *       hook functions, the order of the parameters and the
+		 *       registers they go into is hook=A0, object=A2,
+		 *       message=A1. However, the documentation for the 'ExAll()'
+		 *       function always lists them in ascending order, that is
+		 *       hook=A0, message=A1, object=A2, which can lead to
+		 *       quite some confusion and strange errors.
+		 */
+		if(NOT CallHookPkt(ec->ec_Control->eac_MatchFunc,&type,ed))
+		{
+			SHOWMSG("   match function rejected the entry");
+			goto out;
+		}
+	}
+
+	D(("   registering new entry (total=%ld, space left=%ld)", ec->ec_Control->eac_Entries+1, ec->ec_BufferSize - complete_record_size));
+
+	/* Link the previous entry to the current, if there is one. */
+	if(ec->ec_Last != NULL)
+		ec->ec_Last->ed_Next = ed;
+
+	ec->ec_Last = ed;
+
+	ec->ec_BufferSize -= complete_record_size;
+
+	ASSERT( ec->ec_BufferSize >= 0 );
+
+	ec->ec_Buffer += complete_record_size;
+
+	ec->ec_Control->eac_Entries++;
+
+	D(("   ed->ed_Name = '%s'", ed->ed_Name));
 
  out:
 
-	ec->ec_FirstAttempt = FALSE;
+	/* Any more entries to deliver or stop right now? */
+	if(stop_scanning || eof)
+	{
+		ec->ec_Control->eac_LastKey = -1;
 
-	RETURN(result);
-	return(result);
+		SHOWMSG("   that was the last entry");
+	}
+	else
+	{
+		ec->ec_Control->eac_LastKey = nextpos;
+
+		SHOWMSG("   more entries may be available");
+	}
+
+	RETURN(stop_scanning);
+	return(stop_scanning);
 }
 
 static LONG
 Action_ExamineAll(
 	const struct MsgPort *	last_user,
 	struct FileLock *		lock,
-	struct ExAllData *		ed,
-	LONG					size,
-	ULONG					type,
+	UBYTE *					buffer,
+	LONG					buffer_size,
+	LONG					type,
 	struct ExAllControl *	eac,
 	LONG *					error_ptr)
 {
+	struct ExAllData * ed = (struct ExAllData *)buffer;
 	struct ExAllContext ec;
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
 	int error = OK;
 	LONG offset;
-	int count;
 
 	ENTER();
 
 	SHOWVALUE(lock);
-
+	SHOWPOINTER(buffer);
+	SHOWVALUE(buffer_size);
+	SHOWVALUE(type);
+	SHOWPOINTER(eac);
 	SHOWVALUE(eac->eac_LastKey);
 
 	eac->eac_Entries = 0;
 
-	if(size < (LONG)sizeof(ed->ed_Next))
+	/* The buffer has to be large enough for at
+	 * least the 'next entry' pointer to be stored.
+	 */
+	if(buffer_size < (LONG)sizeof(ed->ed_Next))
 	{
 		SHOWMSG("buffer is far too short.");
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
+	/* No next entry yet. */
 	ed->ed_Next = NULL;
 
 	if(eac->eac_LastKey == (ULONG)-1)
 	{
-		SHOWMSG("scanning finished.");
+		SHOWMSG("scanning already finished.");
+
 		error = ERROR_NO_MORE_ENTRIES;
 		goto out;
 	}
 
+	/* Check if the lock is suitable. */
 	if(lock == NULL)
 	{
 		SHOWMSG("invalid lock");
+
 		error = ERROR_INVALID_LOCK;
 		goto out;
 	}
-
-	if(type < ED_NAME || type > ED_OWNER)
-	{
-		D(("type %ld not supported",type));
-		error = ERROR_BAD_NUMBER;
-		goto out;
-	}
-
-	SHOWVALUE(type);
-
-	memset(&ec,0,sizeof(ec));
-
-	ec.ec_Next			= ed;
-	ec.ec_BytesLeft		= size;
-	ec.ec_Control		= eac;
-	ec.ec_Type			= type;
-	ec.ec_Error			= ERROR_NO_MORE_ENTRIES;
-	ec.ec_FirstAttempt	= TRUE;
-
-	switch(type)
-	{
-		case ED_NAME:
-
-			ec.ec_MinSize = offsetof(struct ExAllData,ed_Type);
-			break;
-
-		case ED_TYPE:
-
-			ec.ec_MinSize = offsetof(struct ExAllData,ed_Size);
-			break;
-
-		case ED_SIZE:
-
-			ec.ec_MinSize = offsetof(struct ExAllData,ed_Prot);
-			break;
-
-		case ED_PROTECTION:
-
-			ec.ec_MinSize = offsetof(struct ExAllData,ed_Days);
-			break;
-
-		case ED_DATE:
-
-			ec.ec_MinSize = offsetof(struct ExAllData,ed_Comment);
-			break;
-
-		case ED_COMMENT:
-
-			ec.ec_MinSize = offsetof(struct ExAllData,ed_OwnerUID);
-			break;
-
-		case ED_OWNER:
-
-			ec.ec_MinSize = sizeof(struct ExAllData);
-			break;
-	}
-
-	SHOWVALUE(ec.ec_MinSize);
-
-	offset = eac->eac_LastKey;
 
 	ln = (struct LockNode *)lock->fl_Key;
 
@@ -6341,16 +6337,78 @@ Action_ExamineAll(
 
 	ln->ln_LastUser = last_user;
 
-	/* Check if we should restart scanning the directory
-	 * contents. This is tricky at best and may produce
-	 * irritating results :(
-	 */
-	if(ln->ln_RestartExamine)
-	{
-		offset = 0;
+	memset(&ec,0,sizeof(ec));
 
-		ln->ln_RestartExamine = FALSE;
+	/* Assume that the name is always required. */
+	ec.ec_RecordSize	= offsetof(struct ExAllData,ed_Type);
+	ec.ec_Buffer		= buffer;
+	ec.ec_BufferSize	= buffer_size;
+	ec.ec_Control		= eac;
+	ec.ec_Type			= type;
+
+	/* Figure out how much space a single directory
+	 * entry will always require, with the name not
+	 * taken into account yet.
+	 */
+	switch(type)
+	{
+		case ED_NAME:
+
+			SHOWMSG("type=name");
+
+			/* Already taken care of. */
+			break;
+
+		case ED_TYPE:
+
+			SHOWMSG("type=type");
+
+			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Size);
+			break;
+
+		case ED_SIZE:
+
+			SHOWMSG("type=size");
+
+			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Prot);
+			break;
+
+		case ED_PROTECTION:
+
+			SHOWMSG("type=protection");
+
+			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Days);
+			break;
+
+		case ED_DATE:
+
+			SHOWMSG("type=date");
+
+			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Comment);
+			break;
+
+		case ED_COMMENT:
+
+			SHOWMSG("type=comment");
+
+			ec.ec_RecordSize = offsetof(struct ExAllData,ed_OwnerUID);
+			break;
+
+		case ED_OWNER:
+		default:
+
+			type = ED_OWNER;
+
+			SHOWMSG("type=owner");
+
+			ec.ec_RecordSize = sizeof(struct ExAllData);
+			break;
 	}
+
+	SHOWVALUE(ec.ec_RecordSize);
+
+	/* Start from the top? Check if the lock actually refers to a directory. */
+	offset = eac->eac_LastKey;
 
 	if(offset == 0)
 	{
@@ -6362,65 +6420,86 @@ Action_ExamineAll(
 		if(smba_getattr(ln->ln_File,&st,&error) < 0)
 		{
 			SHOWMSG("didn't work");
+
 			error = map_errno_to_ioerr(error);
-
-			eac->eac_LastKey = (ULONG)-1;
-
 			goto out;
 		}
 
 		if(NOT st.is_dir)
 		{
 			SHOWMSG("lock does not refer to a directory");
+
 			error = ERROR_OBJECT_WRONG_TYPE;
-
-			eac->eac_LastKey = (ULONG)-1;
-
 			goto out;
 		}
+	}
+
+	/* Check if we should restart scanning the directory
+	 * contents. This is tricky at best and may produce
+	 * irritating results :(
+	 */
+	if(ln->ln_RestartExamine)
+	{
+		SHOWMSG("restarting directory scanning");
+
+		offset = 0;
+
+		ln->ln_RestartExamine = FALSE;
 	}
 
 	SHOWMSG("calling 'smba_readdir'");
 	SHOWVALUE(offset);
 
-	count = smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&error);
+	smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&error);
 
-	SHOWVALUE(count);
-
-	if(error == OK && (count == 0 || eac->eac_Entries == 0))
+	if(error == OK && ec.ec_Error != OK)
 	{
-		SHOWMSG("nothing to be read");
-		if(ec.ec_Error != OK)
-		{
-			SHOWMSG("flagging an error");
-			SHOWVALUE(ec.ec_Error);
+		SHOWMSG("flagging an error");
 
-			eac->eac_LastKey = (ULONG)-1;
+		SHOWVALUE(ec.ec_Error);
 
-			error = ec.ec_Error;
-		}
-
-		goto out;
+		error = ec.ec_Error;
 	}
-	else if (error != OK)
+
+	if(error != OK)
 	{
 		SHOWMSG("error whilst scanning");
-
-		eac->eac_LastKey = (ULONG)-1;
 
 		error = map_errno_to_ioerr(error);
 		goto out;
 	}
+
+	/* The dir_scan_callback_func_exall() function will set the
+	 * last key (directory search position) to -1 when there
+	 * are no more entries to be read. If we didn't succeed
+	 * in reading anything at all, this means that we have to
+	 * throw in the towel...
+	 */
+	if(eac->eac_Entries == 0 && ec.ec_Control->eac_LastKey == (ULONG)-1)
+	{
+		SHOWMSG("nothing more to be read");
+
+		error = ERROR_NO_MORE_ENTRIES;
+		goto out;
+	}
+
+	ASSERT( ec.ec_Buffer <= &buffer[buffer_size] );
 
 	SHOWMSG("ok");
 	result = DOSTRUE;
 
  out:
 
+	if(result == DOSFALSE)
+	{
+		eac->eac_Entries = 0;
+		eac->eac_LastKey = (ULONG)-1;
+	}
+
 	#if DEBUG
 	{
 		int num_entries_found = 0;
-		
+
 		SHOWVALUE(eac->eac_Entries);
 
 		if(eac->eac_Entries > 0)
@@ -6434,7 +6513,7 @@ Action_ExamineAll(
 			}
 			while(ed != NULL);
 		}
-		
+
 		ASSERT( eac->eac_Entries == num_entries_found );
 	}
 	#endif /* DEBUG */
@@ -7255,7 +7334,7 @@ Action_ExamineFH(
 		error = map_errno_to_ioerr(error);
 		goto out;
 	}
-	
+
 	name = get_base_name(fn->fn_FullName,strlen(fn->fn_FullName));
 	name_len = strlen(name);
 
@@ -7558,6 +7637,15 @@ Action_FHFromLock(
 		goto out;
 	}
 
+	/* Is this a directory and not a file? */
+	if((ln->ln_File->dirent.attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0)
+	{
+		SHOWMSG("this is not a lock for a file");
+
+		error = ERROR_OBJECT_WRONG_TYPE;
+		goto out;
+	}
+
 	fn = allocate_memory(sizeof(*fn));
 	if(fn == NULL)
 	{
@@ -7565,6 +7653,7 @@ Action_FHFromLock(
 		goto out;
 	}
 
+	/* The file handle absorbs the lock. */
 	memset(fn,0,sizeof(*fn));
 
 	fn->fn_Handle	= fh;
@@ -7573,6 +7662,7 @@ Action_FHFromLock(
 	fn->fn_File		= ln->ln_File;
 	fn->fn_Mode		= fl->fl_Access;
 
+	/* The lock is no longer needed. */
 	Remove((struct Node *)ln);
 	ln->ln_Magic = 0;
 	free_memory(ln);
@@ -7620,15 +7710,21 @@ Action_RenameDisk(
 
 	D(("name = '%b'",MKBADDR(bcpl_name)));
 
-	/* Now for the really interesting part; the new name
-	 * is to be a NUL-terminated BCPL string, and as such
-	 * must be allocated via AllocVec().
-	 */
-
 	name = bcpl_name;
 
 	len = name[0];
 
+	/* Is this a proper name for a volume? */
+	if(NOT is_valid_device_name(name, len))
+	{
+		error = ERROR_INVALID_COMPONENT_NAME;
+		goto out;
+	}
+
+	/* Now for the really interesting part; the new name
+	 * is to be a NUL-terminated BCPL string, and as such
+	 * must be allocated via AllocVec().
+	 */
 	new_name = AllocVec(1 + len + 1,MEMF_ANY|MEMF_PUBLIC);
 	if(new_name == NULL)
 	{
@@ -7681,6 +7777,27 @@ Action_ChangeMode(
 	int error = OK;
 
 	ENTER();
+
+	/* Bug compatibility: the ChangeMode() autodocs used to suggest that the
+	 * 'new_mode' parameter should contain the new access mode without actually
+	 * explaining what that mode should be. Consequently, no two file systems
+	 * out of three are implementing this packet the same way. Some allow
+	 * SHARED_LOCK/EXCLUSIVE_LOCK for both file handles and file locks, some
+	 * try to allow MODE_OLDFILE/MODE_READWRITE/MODE_NEWFILE for file handles
+	 * but really assume that it should be SHARED_LOCK/EXCLUSIVE_LOCK with
+	 * hilarious/tragic consequences. The only file system which sort of got
+	 * this right was ram-handler.
+	 */
+	if(type == CHANGE_FH)
+	{
+		/* We convert what we know and let the unexpected through
+		 * to produce an error.
+		 */
+		if(new_mode == MODE_OLDFILE || new_mode == MODE_READWRITE)
+			new_mode = SHARED_LOCK;
+		else if (new_mode == MODE_NEWFILE)
+			new_mode = EXCLUSIVE_LOCK;
+	}
 
 	/* Sanity check; verify parameters */
 	if((type != CHANGE_LOCK && type != CHANGE_FH) ||
@@ -8546,7 +8663,7 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 					case ACTION_EXAMINE_ALL:
 						/* FileLock,ExAllData(APTR),Size,Type,ExAllControl(APTR) -> Bool */
 
-						res1 = Action_ExamineAll(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(struct ExAllData *)dp->dp_Arg2,
+						res1 = Action_ExamineAll(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(UBYTE *)dp->dp_Arg2,
 							dp->dp_Arg3,dp->dp_Arg4,(struct ExAllControl *)dp->dp_Arg5,&res2);
 
 						break;

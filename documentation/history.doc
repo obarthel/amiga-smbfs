@@ -430,7 +430,7 @@ smbfs 1.54 (27.6.2001)
 
 
 smbfs 1.55 (3.3.2002)
- 
+
 - At least samba 2.2.2-12 on linux can send total_data of 0 bytes. This
   caused sock.c/smb_receive_trans2() malloc() (==AllocVecPooled) to fail
   on smba_readdir(). Fixed [Harry Sintonen].
@@ -988,10 +988,10 @@ smbfs 1.104 (16.4.2016)
 - Simplified the raw read portion of smba_read() by removing the test
   that avoids dropping into a read loop below. The loop handles the
   special case well.
-  
+
 - Recalculated the overhead for SMB_COM_READ. It's still 52 bytes,
   but now the documentation states how this number comes about.
-  
+
 - Recalculated the overhead for SMB_COM_WRITE. It's 52 bytes and
   not 56 bytes.
 
@@ -1517,7 +1517,7 @@ smbfs 1.132 (19.5.2018)
   purpose of the error flagged, but at least you'll get an idea
   that something isn't accessible on the network, rather than
   file or directory might be missing.
-  
+
 - Open(...,MODE_NEWFILE), which translates into ACTION_FINDOUTPUT,
   can finally truncate an existing file, or will create it if it
   does not exist. This uses the SMB_COM_NT_CREATE_ANDX command, if
@@ -1528,7 +1528,7 @@ smbfs 1.132 (19.5.2018)
 
 - Added another (so far) unaccounted error code (123) to the list of
   errors for which we have labels.
-  
+
 - Verified that the directory scanner built on top of the
   SMB_COM_TRANSACTION2+TRANS2_FIND_FIRST2/TRANS2_FIND_NEXT2
   commands actually does work. The SMB_COM_TRANSACTION2 message
@@ -1564,7 +1564,7 @@ smbfs 1.132 (19.5.2018)
   requires figuring out if the OS/2 or MS-DOS server at the
   other end of the connection can handle extended file
   attributes (unless you desperately want to, of course).
-  
+
 - Changing the attributes of a file/directory (as in: flip the
   "read-only" and "was archived" bits) is now distinct from
   changing the size of a file.
@@ -1674,7 +1674,7 @@ smbfs 1.137 (24.5.2018)
 - Trying to delete a file or directory now first checks if there is
   still a file handle or file lock attached to it. That test has
   been missing for the past 18 years...
-  
+
 - When trying to delete a file or directory, smbfs now asks the
   server for write access permission first. The server might want
   to object to this request before everything gets really serious.
@@ -2143,7 +2143,7 @@ smbfs 1.156 (24.6.2018)
 
 - Slightly more robust handling of ExAll() due to the correct
   size of the the entry being known more early on.
-  
+
 - Printing the list of ExAll() entries to be returned crashed
   "reliably" if the number of entries was zero. Thanks go to
   Hubert Maier for reporting the problem.
@@ -2230,3 +2230,51 @@ smbfs 1.160 (30.6.2018)
 
 - Cleaned up the SMB_COM_SET_INFORMATION command setup, which did not
   zero out the reserved data and added an unnecessary empty string.
+
+
+smbfs 1.161 (6.7.2018)
+
+- Simplified the directory entry processing for ExAll().
+
+- The ExAll() entry processing did not handle buffer overflows safely.
+  It failed to detect the case of the first entry to be added to the
+  ExAllData buffer being too large, which should have always resulted
+  in the directory scanning process to be aborted.
+
+- All ExAllData buffer entries now have a NULL pointer in the
+  ed_Comment field instead of a pointer to an empty string. This
+  matches the documented behaviour of the Amiga ROM file system.
+
+- The ExAll() code now stops reading further directory entries from
+  the server either when it has completely filled the ExAllData buffer
+  or when an error has occured.
+
+- ExAll() now ends with result == DOSFALSE and error == ERROR_NO_MORE_ENTRIES
+  only if no directory entry could be read and the server has
+  stated that no more entries will be forthcoming.
+
+- ExAll() now assumes that entries of type ED_NAME need to be returned
+  as the minimum requirement. Any values outside the range of
+  ED_NAME..ED_OWNER will be treated like ED_OWNER.
+
+
+smbfs 1.162 (7.7.2018)
+
+- Added extra sanity checking for the Examine/ExamineFH code to make sure
+  that the length of the directory or file name in question, which might
+  be the name of the volume itself, does not overrun the FileInfoBlock
+  name buffer.
+
+- The FHFromLock code did not verify if the FileLock in question actually
+  did refer to a file. Fixed.
+  
+- The RenameDisk code did not check if the new volume was sound and
+  suitable for a volume. Fixed.
+
+- Added a "bug compatibility" fix for ChangeMode to the effect that
+  if the new mode is one of MODE_OLDFILE or MODE_READWRITE then the
+  mode will be converted to SHARED_LOCK, and if it is MODE_NEWFILE
+  then it will be converted to EXCLUSIVE_LOCK.
+
+- Added an example program of how to use ExAll(), for testing the
+  smbfs implementation of this function.
