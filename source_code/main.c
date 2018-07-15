@@ -241,6 +241,8 @@ static BOOL					TranslateNames;
 static TEXT					map_amiga_to_smb_name[256];
 static TEXT					map_smb_to_amiga_name[256];
 
+static LONG					MaxNameLen;
+
 /****************************************************************************/
 
 #if defined(__amigaos4__)
@@ -552,6 +554,7 @@ main(void)
 		KEY		ServerName;
 		KEY		DeviceName;
 		KEY		VolumeName;
+		NUMBER	MaxNameLen;
 		NUMBER	CacheSize;
 		NUMBER	MaxTransmit;
 		NUMBER	Timeout;
@@ -587,6 +590,7 @@ main(void)
 		"SERVER=SERVERNAME/K,"
 		"DEVICE=DEVICENAME/K,"
 		"VOLUME=VOLUMENAME/K,"
+		"MAXNAMELEN/N/K,"
 		"CACHE=CACHESIZE/N/K,"
 		"MAXTRANSMIT/N/K,"
 		"TIMEOUT/N/K,"
@@ -613,7 +617,7 @@ main(void)
 	TEXT program_name[MAX_FILENAME_LEN+1];
 	LONG result = RETURN_FAIL;
 	LONG number;
-	LONG tz_number, dst_number;
+	LONG tz_number, dst_number, debug_number;
 	LONG cache_size = 0;
 	LONG max_transmit = -1;
 	LONG timeout = 0;
@@ -787,19 +791,31 @@ main(void)
 				SPrintf(NewProgramName,"%s '%s'",WBStartup->sm_ArgList[0].wa_Name,str);
 		}
 
+		str = FindToolType(Icon->do_ToolTypes,"MAXNAMELEN");
+		if(str != NULL)
+		{
+			if(StrToLong(str,&number) == -1)
+			{
+				report_error("Invalid number '%s' for 'MAXNAMELEN' parameter.",str);
+				goto out;
+			}
+
+			MaxNameLen = number;
+		}
+
 		str = FindToolType(Icon->do_ToolTypes,"DEBUG");
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"DEBUGLEVEL");
 
 		if(str != NULL)
 		{
-			if(StrToLong(str,&number) == -1)
+			if(StrToLong(str,&debug_number) == -1)
 			{
 				report_error("Invalid number '%s' for 'DEBUG' parameter.",str);
 				goto out;
 			}
 
-			args.DebugLevel = &number;
+			args.DebugLevel = &debug_number;
 		}
 
 		str = FindToolType(Icon->do_ToolTypes,"DEBUGFILE");
@@ -976,6 +992,9 @@ main(void)
 			if(NewProgramName != NULL)
 				SPrintf(NewProgramName,"%s '%s'",name,args.Service);
 		}
+
+		if(args.MaxNameLen != NULL)
+			MaxNameLen = (*args.MaxNameLen);
 
 		if(args.CacheSize != NULL)
 			cache_size = (*args.CacheSize);
@@ -2435,6 +2454,9 @@ validate_amigados_file_name(const TEXT * name,int len)
 	int i, c;
 
 	if(len <= 0 || len > 255)
+		goto out;
+
+	if(MaxNameLen > 0 && len > MaxNameLen)
 		goto out;
 
 	for(i = 0 ; i < len ; i++)

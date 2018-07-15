@@ -1,6 +1,6 @@
 #define VERSION		1
-#define REVISION	162
-#define DATE		"7.7.2018"
-#define VERS		"smbfs 1.162"
-#define VSTRING		"smbfs 1.162 (7.7.2018)\r\n"
-#define VERSTAG		"\0$VER: smbfs 1.162 (7.7.2018)"
+#define REVISION	163
+#define DATE		"15.7.2018"
+#define VERS		"smbfs 1.163"
+#define VSTRING		"smbfs 1.163 (15.7.2018)\r\n"
+#define VERSTAG		"\0$VER: smbfs 1.163 (15.7.2018)"

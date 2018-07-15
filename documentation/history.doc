@@ -2278,3 +2278,17 @@ smbfs 1.162 (7.7.2018)
 
 - Added an example program of how to use ExAll(), for testing the
   smbfs implementation of this function.
+
+
+smbfs 1.163 (15.7.2018)
+
+- The service may now include a port number or TCP service name,
+  e.g //server-name:445/share-name would use port 445 when connecting
+  to the server named "server-name" rather than using the default
+  port number (which depends upon the use of the "netbios" option).
+
+- Added the MAXNAMELEN option which can be used to omit files
+  and drawers while drawer contents are searched and returned to
+  the Amiga. Names longer than what the MAXAMELEN option
+  states will be ignored. The MAXAMELEN option default is
+  not to omit any file and drawer names.

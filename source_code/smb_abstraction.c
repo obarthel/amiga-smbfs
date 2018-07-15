@@ -42,6 +42,7 @@ static int
 smba_connect (
 	smba_connect_parameters_t *	p,
 	in_addr_t					ip_addr,
+	const char *				tcp_service_name,
 	int							use_E,
 	const char *				workgroup_name,
 	int							cache_size,
@@ -146,7 +147,42 @@ smba_connect (
 	data.addr.sin_family		= AF_INET;
 	data.addr.sin_addr.s_addr	= ip_addr;
 
-	if(res->server.raw_smb)
+	/* Override the default TCP service name or port
+	 * number which smbfs should connect to on the
+	 * server?
+	 */
+	if(tcp_service_name[0] != '\0')
+	{
+		/* Try to find a service whose name matches. */
+		servent = getservbyname((char *)tcp_service_name,"tcp");
+		if(servent != NULL)
+		{
+			data.addr.sin_port = servent->s_port;
+		}
+		else
+		{
+			long int n;
+			char * s;
+
+			/* Try again, this time converting what's
+			 * hopefully a number in the range
+			 * valid for a TCP service.
+			 */
+			n = strtol(tcp_service_name,&s,10);
+			if(s != tcp_service_name && (*s) == '\0' && 0 < n && n < 65536)
+			{
+				data.addr.sin_port = htons (n);
+			}
+			else
+			{
+				report_error("Invalid service '%s'.", tcp_service_name);
+
+				(*error_ptr) = EINVAL;
+				goto error_occured;
+			}
+		}
+	}
+	else if (res->server.raw_smb)
 	{
 		servent = getservbyname("microsoft-ds","tcp");
 		if(servent != NULL)
@@ -1629,12 +1665,21 @@ smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr
 /*****************************************************************************/
 
 static int
-extract_service (const char *service, char *server, size_t server_size, char *share, size_t share_size,int * error_ptr)
+extract_service (
+	const char *	service,
+	char *			server,
+	size_t			server_size,
+	char *			tcp_service_name,
+	size_t			tcp_service_name_size,
+	char *			share,
+	size_t			share_size,
+	int *			error_ptr)
 {
 	char * share_start;
 	char * root_start;
 	char * complete_service;
 	char * service_copy;
+	char * service_name = NULL;
 	int result = -1;
 
 	service_copy = malloc(strlen(service)+1);
@@ -1687,6 +1732,28 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 	if (root_start != NULL)
 		(*root_start) = '\0';
 
+	/* Check if there's a port number encoded in the service name. */
+	service_name = strchr(complete_service,':');
+	if(service_name != NULL)
+	{
+		int len;
+
+		/* Cut off the TCP service name, but remember where
+		 * the name starts.
+		 */
+		(*service_name++) = '\0';
+
+		/* Skip leading and trailing blank spaces, just to be safe. */
+		while((*service_name) == ' ')
+			service_name++;
+
+		len = strlen(service_name);
+		while(len > 0 && (*service_name) == ' ')
+			len--;
+
+		service_name[len] = '\0';
+	}
+
 	if (strlen (complete_service) > 63)
 	{
 		report_error("Server name is too long in '%s' (max %ld characters).",service,63);
@@ -1707,6 +1774,7 @@ extract_service (const char *service, char *server, size_t server_size, char *sh
 
 	strlcpy (server, complete_service, server_size);
 	strlcpy (share, share_start, share_size);
+	strlcpy (tcp_service_name, service_name != NULL ? service_name : "", tcp_service_name_size);
 
 	result = 0;
 
@@ -1748,7 +1816,7 @@ smba_start(
 	char server_name[17], client_name[17]; /* Maximum length appears to be 16 characters for NetBIOS */
 	char username[64], password[64];
 	char workgroup[64]; /* Maximum length appears to be 15 characters */
-	char server[64], share[256];
+	char server[64], share[256], tcp_service_name[40];
 	in_addr_t server_ip_address;
 	int result = -1;
 
@@ -1760,7 +1828,7 @@ smba_start(
 	(*smba_server_ptr) = NULL;
 	(*username) = (*password) = (*server_name) = (*client_name) = '\0';
 
-	if(extract_service (service, server, sizeof(server), share, sizeof(share), error_ptr) < 0)
+	if(extract_service (service, server, sizeof(server), tcp_service_name, sizeof(tcp_service_name), share, sizeof(share), error_ptr) < 0)
 		goto out;
 
 	server_ip_address = inet_addr (server);
@@ -1918,6 +1986,7 @@ smba_start(
 	if(smba_connect (
 		&par,
 		server_ip_address,
+		tcp_service_name,
 		use_extended,
 		workgroup,
 		opt_cachesize,
