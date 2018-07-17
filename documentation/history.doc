@@ -2292,3 +2292,14 @@ smbfs 1.163 (15.7.2018)
   the Amiga. Names longer than what the MAXAMELEN option
   states will be ignored. The MAXAMELEN option default is
   not to omit any file and drawer names.
+
+
+smbfs 1.164 (17.7.2018)
+
+- The result of a successful gethostbyname() lookup does not contain
+  a list of IP addresses and protocol information which can be used
+  straight away. It must be copied to a 'struct sockaddr_in' before
+  it can be used with the connect() function, for example. This led
+  to problems on 68000 machines because the contents of the data
+  structure referenced are not guaranteed to be 16-bit word aligned,
+  for example. Thanks go to Timm Mueller for finding the problem!

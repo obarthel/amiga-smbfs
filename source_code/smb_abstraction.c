@@ -41,7 +41,7 @@ static int smba_setup_dircache (struct smba_server * server,int cache_size, int 
 static int
 smba_connect (
 	smba_connect_parameters_t *	p,
-	in_addr_t					ip_addr,
+	struct sockaddr_in			server_ip_addr,
 	const char *				tcp_service_name,
 	int							use_E,
 	const char *				workgroup_name,
@@ -142,10 +142,9 @@ smba_connect (
 
 	D(("local host name = '%s'",hostname));
 
-	D(("server ip address = %s",Inet_NtoA(ip_addr)));
+	D(("server ip address = %s",Inet_NtoA(server_ip_addr.sin_addr.s_addr)));
 
-	data.addr.sin_family		= AF_INET;
-	data.addr.sin_addr.s_addr	= ip_addr;
+	data.addr = server_ip_addr;
 
 	/* Override the default TCP service name or port
 	 * number which smbfs should connect to on the
@@ -162,14 +161,14 @@ smba_connect (
 		else
 		{
 			long int n;
-			char * s;
+			char * str;
 
 			/* Try again, this time converting what's
 			 * hopefully a number in the range
 			 * valid for a TCP service.
 			 */
-			n = strtol(tcp_service_name,&s,10);
-			if(s != tcp_service_name && (*s) == '\0' && 0 < n && n < 65536)
+			n = strtol(tcp_service_name,&str,10);
+			if(str != tcp_service_name && (*str) == '\0' && 0 < n && n < 65536)
 			{
 				data.addr.sin_port = htons (n);
 			}
@@ -1817,7 +1816,7 @@ smba_start(
 	char username[64], password[64];
 	char workgroup[64]; /* Maximum length appears to be 15 characters */
 	char server[64], share[256], tcp_service_name[40];
-	in_addr_t server_ip_address;
+	struct sockaddr_in server_ip_address;
 	int result = -1;
 
 	ASSERT( error_ptr != NULL );
@@ -1831,8 +1830,11 @@ smba_start(
 	if(extract_service (service, server, sizeof(server), tcp_service_name, sizeof(tcp_service_name), share, sizeof(share), error_ptr) < 0)
 		goto out;
 
-	server_ip_address = inet_addr (server);
-	if (server_ip_address == INADDR_NONE) /* name was given, not numeric */
+	memset(&server_ip_address,0,sizeof(server_ip_address));
+	server_ip_address.sin_family = AF_INET;
+
+	server_ip_address.sin_addr.s_addr = inet_addr (server);
+	if (server_ip_address.sin_addr.s_addr == INADDR_NONE) /* name was given, not numeric */
 	{
 		int lookup_error;
 
@@ -1845,9 +1847,9 @@ smba_start(
 
 		if (h != NULL)
 		{
-			server_ip_address = ((struct in_addr *)(h->h_addr))->s_addr;
+			memcpy(&server_ip_address.sin_addr,h->h_addr,h->h_length);
 		}
-		else if (strlen(server) >= 16 || BroadcastNameQuery(server,"",(UBYTE *)&server_ip_address) != 0)
+		else if (strlen(server) > 16 || BroadcastNameQuery(server,"",(UBYTE *)&server_ip_address.sin_addr) != 0)
 		{
 			if(lookup_error == 0)
 				report_error("Could not look up network address of '%s' (%ld, %s).",server,errno,posix_strerror(errno));
@@ -1858,17 +1860,18 @@ smba_start(
 			goto out;
 		}
 
-		LOG(("server network address found (%s)\n", Inet_NtoA(server_ip_address)));
+		LOG(("server network address found (%s)\n", Inet_NtoA(server_ip_address.sin_addr.s_addr)));
 	}
 	else
 	{
 		char host_name[MAXHOSTNAMELEN+1];
+		const char * name;
 
 		LOG(("server network address is %s\n", server));
 
 		h_errno = 0;
 
-		h = gethostbyaddr ((char *) &server_ip_address, sizeof (server_ip_address), AF_INET);
+		h = gethostbyaddr ((char *) &server_ip_address.sin_addr.s_addr, sizeof (server_ip_address.sin_addr.s_addr), server_ip_address.sin_family);
 		if (h == NULL)
 		{
 			if(h_errno == 0)
@@ -1888,8 +1891,10 @@ smba_start(
 
 			goto out;
 		}
+		
+		name = h->h_name;
 
-		LOG(("server host name found (%s)\n",h->h_name));
+		LOG(("server host name found (%s)\n",name));
 
 		/* Brian Willette: Now we will set the server name to the DNS
 		 * hostname, hopefully this will be the same as the NetBIOS name for
@@ -1900,8 +1905,8 @@ smba_start(
 		 * NOTE: If the names are different between DNS and NetBIOS on
 		 * the windows side, the user MUST use the -s option.
 		 */
-		for (i = 0; h->h_name[i] != '.' && h->h_name[i] != '\0' && i < 255; i++)
-			host_name[i] = h->h_name[i];
+		for (i = 0; i < MAXHOSTNAMELEN && name[i] != '.' && name[i] != '\0' ; i++)
+			host_name[i] = name[i];
 
 		host_name[i] = '\0';
 
