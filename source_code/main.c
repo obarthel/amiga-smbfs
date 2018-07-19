@@ -3323,97 +3323,117 @@ convert_from_c_to_bcpl_string(void * bstring,int bstring_size,const TEXT * cstri
 
 /****************************************************************************/
 
-/* Remove any double '\' in the path, which for AmigaDOS path name
- * semantics would mean "move up one directory level", but which is
- * either ambiguous or has no meaning for SMB and the file system
- * layer it sits upon.
+/* Return the next part (segment) of an AmigaDOS path name, which
+ * is either ":" (= go to root directory), "/" (= go to parent
+ * directory) or the name of a file or directory.
  *
- * Hence "foo\bar\\baz" becomes "foo\baz", "foo\\bar", becomes "bar",
- * "foo\\" becomes "" and "\foo" is not permitted and will result in
- * an error.
- *
- * A trailing path name separator will be removed since it has no
- * meaning for SMB path names, e.g. "Documents\" will become "Documents".
+ * The segment name will be copied into the provided buffer, and
+ * just to be sure, the total length of the segment name will be
+ * provided separately. If the segment name was truncated you
+ * can find out by comparing the segment buffer size with the
+ * segment length indicated.
  */
 static int
-reduce_path_name(TEXT * name,int len,int * new_len_ptr)
+get_next_path_segment(
+	const TEXT *	path,
+	int				path_len,
+	int				offset,
+	TEXT *			segment,
+	int				segment_size,
+	int *			segment_len_ptr)
 {
-	int error = ERROR_INVALID_COMPONENT_NAME;
-	int position;
+	ASSERT( path_len >= 0 );
+	ASSERT( path != NULL || path_len == 0 );
+	ASSERT( segment_size >= 0 );
+	ASSERT( segment != NULL || segment_size == 0 );
+	ASSERT( segment_len_ptr != NULL );
 
-	ENTER();
+	/* No segment processed yet. */
+	(*segment_len_ptr) = 0;
 
-	ASSERT( name != NULL );
-
-	SHOWSTRING(name);
-
-	position = len;
-
-	while(len > 1)
+	/* Is there still something to process? */
+	if(offset < path_len)
 	{
-		position--;
-		if(position == 0)
-			break;
+		TEXT c;
 
-		/* Do we have to remove the path component preceding
-		 * this separator character?
+		c = path[offset];
+
+		/* If there's a leading ":" or "/" character,
+		 * it means that this is not a path delimiter
+		 * but a control character instead. We return
+		 * that control character as is. Note that the
+		 * ":" only has meaning if it is the very first
+		 * character of the path string.
 		 */
-		if(position > 1 &&
-		   name[position] == SMB_PATH_SEPARATOR &&
-		   name[position - 1] == SMB_PATH_SEPARATOR &&
-		   name[position - 2] != SMB_PATH_SEPARATOR)
+		if((c == ':' && offset == 0) || c == '/')
 		{
-			int start, component_len;
+			(*segment_len_ptr) = 1;
 
-			start = position;
+			/* Return this as the next segment. */
+			if(segment_size > 0)
+			{
+				if(segment_size > 1)
+					(*segment++) = c;
 
-			position -= 2;
+				(*segment) = '\0';
+			}
 
-			/* Find the position of the path component we
-			 * will have to remove.
-			 */
-			while(position >= 0 && name[position] != SMB_PATH_SEPARATOR)
-				position--;
+			offset += 1;
+		}
+		/* Otherwise check if there is a directory
+		 * or file name which needs to be processed.
+		 */
+		else
+		{
+			int i;
 
-			if(position < 0 || name[position] == SMB_PATH_SEPARATOR)
-				position++;
+			for(i = offset ; i <= path_len ; i++)
+			{
+				/* We search for the end of the segment,
+				 * which is either the end of the path string
+				 * or where we found another path delimiter
+				 * character.
+				 */
+				if(i == path_len || path[i] == '/')
+				{
+					int len;
 
-			/* How many characters do we have to remove? */
-			component_len = start - position + 1;
+					len = i - offset;
 
-			/* Remove the path component from the path. */
-			memmove(&name[position],&name[position + component_len],len - (position + component_len));
+					(*segment_len_ptr) = len;
 
-			len -= component_len;
+					/* Return this as the next segment. */
+					if(segment_size > 0)
+					{
+						if(segment_size > 1)
+						{
+							segment_size--;
 
-			position = len;
+							if(segment_size < len)
+								len = segment_size;
+
+							memmove(segment,&path[offset],len);
+							segment += len;
+						}
+
+						(*segment) = '\0';
+					}
+
+					/* If the path ends with "/", skip the
+					 * trailing slash since nothing else
+					 * follows it.
+					 */
+					if(i+1 == path_len)
+						i++;
+
+					offset = i+1;
+					break;
+				}
+			}
 		}
 	}
 
-	/* "\foo" is not permitted. */
-	if(len > 0 && name[0] == SMB_PATH_SEPARATOR)
-	{
-		D(("leading '%lc' not permitted", SMB_PATH_SEPARATOR));
-		goto out;
-	}
-
-	/* There should never be a trailing path separator (since it would
-	 * not separate anything, and it has no meaning in SMB paths).
-	 */
-	if(len > 0 && name[len-1] == SMB_PATH_SEPARATOR)
-		len--;
-
-	name[len] = '\0';
-
-	if(new_len_ptr != NULL)
-		(*new_len_ptr) = len;
-
-	error = OK;
-
- out:
-
-	RETURN(error);
-	return(error);
+	return(offset);
 }
 
 /****************************************************************************/
@@ -3426,10 +3446,6 @@ reduce_path_name(TEXT * name,int len,int * new_len_ptr)
  * Note that the parent directory name uses SMB path name separator
  * characters ("\"), but the path name to be added ("name") uses the
  * AmigaDOS path name separator characters ("/").
- *
- * This function will return ERROR_NO_FREE_STORE if the memory allocation
- * failed, and ERROR_INVALID_COMPONENT_NAME if the combination of the
- * parent name and the name wound up referring to the root directory.
  */
 static int
 build_full_path_name(
@@ -3441,9 +3457,9 @@ build_full_path_name(
 	int parent_name_len;
 	int name_len;
 	STRPTR buffer;
+	STRPTR to;
 	int size;
 	int len;
-	int i;
 
 	ENTER();
 
@@ -3452,65 +3468,31 @@ build_full_path_name(
 	else
 		D(("parent_name = '%s'",escape_name(parent_name)));
 
-	D(("name = '%s'",escape_name(name)));
+	if(name == NULL)
+		D(("name = NULL"));
+	else
+		D(("name = '%s'",escape_name(name)));
 
 	(*result_ptr) = NULL;
 
 	if(name != NULL)
-	{
 		name_len = strlen(name);
-
-		/* Throw everything left of the colon away. */
-		for(i = 0 ; i < name_len ; i++)
-		{
-			/* A colon character is permitted in
-			 * path components, but is not
-			 * necessarily useful...
-			 */
-			if(name[i] == '/')
-				break;
-
-			if(name[i] == ':')
-			{
-				name = &name[i];
-				name_len -= i;
-
-				break;
-			}
-		}
-	}
 	else
-	{
 		name_len = 0;
-	}
 
-	if(parent_name != NULL)
-	{
-		/* Skip any leading delimiters. */
-		while((*parent_name) == SMB_PATH_SEPARATOR)
-			parent_name++;
+	/* A NULL parent name stands in for the ZERO lock,
+	 * which refers to the root directory of the volume.
+	 */
+	if(parent_name == NULL)
+		parent_name = SMB_ROOT_DIR_NAME;
 
-		parent_name_len = strlen(parent_name);
+	parent_name_len = strlen(parent_name);
 
-		/* Ignore any trailing delimiters. */
-		while(parent_name_len > 0 && parent_name[parent_name_len-1] == SMB_PATH_SEPARATOR)
-			parent_name_len--;
-	}
-	else
-	{
-		parent_name_len = 0;
-	}
-
-	/* Is the path to be added absolute? If so,
-	 * it will replace the parent name.
+	/* Is the path name to be added an absolute path? If so,
+	 * it will replace the parent path name.
 	 */
 	if(name_len > 0 && (*name) == ':')
 	{
-		int c;
-
-		name++;
-		name_len--;
-
 		size = 1 + name_len + 1;
 
 		buffer = allocate_memory(size);
@@ -3520,26 +3502,14 @@ build_full_path_name(
 			goto out;
 		}
 
-		buffer[0] = SMB_PATH_SEPARATOR;
+		to = buffer;
 
-		/* Copy the name, replacing the path name
-		 * separator characters.
-		 */
-		for(i = 0 ; i < name_len ; i++)
-		{
-			c = name[i];
-			if(c == '/')
-				c = SMB_PATH_SEPARATOR;
-
-			buffer[1 + i] = c;
-		}
-
-		len = 1 + name_len;
+		(*to++) = SMB_PATH_SEPARATOR;
 	}
-	/* Add the path name to the parent path. */
+	/* Add the path name to the parent path name. */
 	else
 	{
-		size = 1 + parent_name_len + 1 + name_len + 1;
+		size = parent_name_len + 1 + name_len + 1;
 
 		buffer = allocate_memory(size);
 		if(buffer == NULL)
@@ -3548,38 +3518,98 @@ build_full_path_name(
 			goto out;
 		}
 
-		buffer[0] = SMB_PATH_SEPARATOR;
-		len = 1;
+		to = buffer;
 
-		/* Add the parent path, if any. */
-		if(parent_name_len > 0)
+		memcpy(to,parent_name,parent_name_len);
+		to += parent_name_len;
+	}
+
+	ASSERT( buffer <= to );
+
+	len = (int)(to - buffer);
+
+	/* Add the path name to the full path, if available. */
+	if(name_len > 0)
+	{
+		TEXT segment[MAX_FILENAME_LEN+1];
+		int segment_len;
+		int offset;
+
+		for(offset = 0 ; offset < name_len ; NOTHING)
 		{
-			memcpy(&buffer[len],parent_name,parent_name_len);
-			len += parent_name_len;
-		}
+			offset = get_next_path_segment(name,name_len,offset,segment,sizeof(segment),&segment_len);
 
-		/* Add the path, if any. */
-		if(name_len > 0)
-		{
-			int c;
+			D(("segment = '%s', len=%ld, offset=%ld\n", segment, segment_len, offset));
 
-			/* Add a path separator, if necessary. */
-			if(parent_name_len > 0)
-				buffer[len++] = SMB_PATH_SEPARATOR;
-
-			/* Copy the name, replacing the path name
-			 * separator characters.
-			 */
-			for(i = 0 ; i < name_len ; i++)
+			if(segment_len > 0)
 			{
-				c = name[i];
-				if(c == '/')
-					c = SMB_PATH_SEPARATOR;
+				/* Segment Buffer overflow? */
+				if(segment_len > (int)sizeof(segment))
+				{
+					error = ERROR_BUFFER_OVERFLOW;
+					goto out;
+				}
 
-				buffer[len+i] = c;
+				/* Move up to the root directory? */
+				if (strcmp(segment,":") == SAME)
+				{
+					to = &buffer[1];
+					len = 1;
+				}
+				/* Move up to the parent directory? */
+				else if (strcmp(segment,"/") == SAME)
+				{
+					int i;
+
+					/* Are we already at the root directory level? */
+					if(len == 1)
+					{
+						/* Can't go any further. */
+						error = ERROR_OBJECT_NOT_FOUND;
+						goto out;
+					}
+
+					for(i = len-1 ; i >= 0 ; i--)
+					{
+						if(buffer[i] == SMB_PATH_SEPARATOR)
+						{
+							to = &buffer[i+1];
+							len = i+1;
+
+							break;
+						}
+					}
+				}
+				/* Add the file/drawer name to the full path. */
+				else
+				{
+					if(len == 1)
+					{
+						ASSERT( len + segment_len + 1 <= size );
+					}
+					else
+					{
+						/* Add a path delimiter. */
+						ASSERT( len + 1 + segment_len + 1 <= size );
+
+						(*to++) = SMB_PATH_SEPARATOR;
+						len++;
+					}
+
+					memmove(to,segment,segment_len);
+					to += segment_len;
+
+					len += segment_len;
+				}
+
+				#if DEBUG
+				{
+					buffer[len] = '\0';
+
+					D(("full path name = '%s', length = %ld", buffer, len));
+				}
+				#endif /* DEBUG */
 			}
-
-			len += name_len;
 		}
 	}
 
@@ -3590,25 +3620,6 @@ build_full_path_name(
 	D(("buffer = '%s'",escape_name(buffer)));
 	SHOWVALUE(size);
 	SHOWVALUE(len);
-
-	/* Remove any double '\' in the path, which for AmigaDOS path name
-	 * semantics would mean "move up one directory level", but which is
-	 * either ambiguous or has no meaning for SMB and the file system
-	 * layer it sits upon.
-	 */
-	if(len > 1)
-	{
-		int new_len;
-
-		error = reduce_path_name(&buffer[1],len-1,&new_len);
-		if(error != OK)
-			goto out;
-
-		ASSERT( new_len <= len-1 );
-
-		if(new_len < len-1)
-			D(("reduced buffer = '%s'",escape_name(buffer)));
-	}
 
 	(*result_ptr) = buffer;
 	buffer = NULL;
@@ -3689,7 +3700,7 @@ split_path_name(
 				/* We return this constant value as the
 				 * directory part (root directory).
 				 */
-				dir_part = "\\";
+				dir_part = SMB_ROOT_DIR_NAME;
 
 				/* If possible, return what follows the root
 				 * directory as the base part.
@@ -3796,7 +3807,7 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 		SHOWMSG("no parent directory found");
 
 		/* The root directory has no parent. */
-		error = ERROR_INVALID_COMPONENT_NAME;
+		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
 
@@ -3809,7 +3820,7 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 		SHOWMSG("no parent directory found");
 
 		/* The root directory has no parent. */
-		error = ERROR_INVALID_COMPONENT_NAME;
+		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
 
@@ -4000,7 +4011,12 @@ Action_Parent(
 
 	SHOWVALUE(parent);
 
-	/* The zero lock's parent is the zero lock. */
+	/* The ZERO lock's parent is the ZERO lock. Note that
+	 * this is not the same thing as trying to obtain a
+	 * lock on the "/" directory, relative to the root
+	 * directory (which must fail with the error code
+	 * ERROR_OBJECT_NOT_FOUND set).
+	 */
 	if(parent == NULL)
 	{
 		error = OK;
@@ -4024,9 +4040,10 @@ Action_Parent(
 	{
 		/* Check if we ended up having to return the parent of
 		 * the root directory. This is indicated by the
-		 * error code ERROR_INVALID_COMPONENT_NAME.
+		 * error code ERROR_OBJECT_NOT_FOUND. The parent directory
+		 * of the root directory is the ZERO lock.
 		 */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
+		if(error == ERROR_OBJECT_NOT_FOUND)
 			error = OK;
 
 		goto out;
@@ -4137,14 +4154,20 @@ Action_DeleteObject(
 	 */
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -4153,9 +4176,10 @@ Action_DeleteObject(
 		}
 	}
 
-	/* The SMB_COM_DELETE command supports renaming through
-	 * wildcards. Only the last part of the path (the name
-	 * of the file or directory) may contain the wildcard.
+	/* The SMB_COM_DELETE command supports deleting sets
+	 * of matching files/drawers through wildcards. Only
+	 * the last part of the path (the name of the file
+	 * or directory) may contain the wildcard.
 	 */
 	last_name = FilePart(name);
 	last_name_len = strlen(last_name);
@@ -4180,15 +4204,14 @@ Action_DeleteObject(
 
 	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
+		goto out;
+
+	/* Trying to delete the root directory, are you kidding? */
+	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
 	{
-		/* Trying to delete the root directory, are you kidding? */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-		{
-			LOG(("cannot delete the root directory\n"));
+		LOG(("cannot delete the root directory\n"));
 
-			error = ERROR_OBJECT_IN_USE;
-		}
-
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
@@ -4363,14 +4386,20 @@ Action_CreateDir(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -4402,11 +4431,14 @@ Action_CreateDir(
 
 	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
-	{
-		/* Trying to overwrite the root directory, are you kidding? */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_IN_USE;
+		goto out;
 
+	/* Trying to overwrite the root directory, are you kidding? */
+	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	{
+		LOG(("cannot overwrite the root directory\n"));
+
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
@@ -4533,14 +4565,20 @@ Action_LocateObject(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -4564,15 +4602,7 @@ Action_LocateObject(
 
 	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
-	{
-		/* Trying to get a lock on the root directory's parent?
-		 * My pleasure.
-		 */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_NOT_FOUND;
-
 		goto out;
-	}
 
 	ln = allocate_memory(sizeof(*ln));
 	if(ln == NULL)
@@ -4924,14 +4954,20 @@ Action_SetProtect(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -4949,13 +4985,16 @@ Action_SetProtect(
 
 	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
-	{
-		/* Trying to change the protection bits of the root
-		 * directory, are you kidding?
-		 */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_WRONG_TYPE;
+		goto out;
 
+	/* Trying to change the protection bits of the root
+	 * directory, are you kidding?
+	 */
+	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	{
+		LOG(("cannot change protection bits of the root directory\n"));
+
+		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
 	}
 
@@ -5104,14 +5143,20 @@ Action_RenameObject(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -5147,11 +5192,14 @@ Action_RenameObject(
 
 	error = build_full_path_name(parent_name,name,&full_source_name);
 	if(error != OK)
-	{
-		/* Trying to rename the root directory, are you kidding? */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_IN_USE;
+		goto out;
 
+	/* Trying to rename the root directory, are you kidding? */
+	if(full_source_name[0] == SMB_PATH_SEPARATOR && full_source_name[1] == '\0')
+	{
+		LOG(("cannot rename the root directory\n"));
+
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
@@ -5178,14 +5226,20 @@ Action_RenameObject(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -5217,11 +5271,14 @@ Action_RenameObject(
 
 	error = build_full_path_name(parent_name,name,&full_destination_name);
 	if(error != OK)
-	{
-		/* Trying to rename the root directory, are you kidding? */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_IN_USE;
+		goto out;
 
+	/* Trying to replace the root directory, are you kidding? */
+	if(full_destination_name[0] == SMB_PATH_SEPARATOR && full_destination_name[1] == '\0')
+	{
+		LOG(("cannot replace the root directory\n"));
+
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
@@ -5444,7 +5501,7 @@ Action_ExamineObject(
 		{
 			D(("root directory name is too long (%ld >= %ld)", len, sizeof(fib->fib_FileName)));
 
-			error = ERROR_INVALID_COMPONENT_NAME;
+			error = ERROR_BUFFER_OVERFLOW;
 			goto out;
 		}
 
@@ -5503,7 +5560,7 @@ Action_ExamineObject(
 			{
 				D(("root directory name is too long (%ld >= %ld)", len, sizeof(fib->fib_FileName)));
 
-				error = ERROR_INVALID_COMPONENT_NAME;
+				error = ERROR_BUFFER_OVERFLOW;
 				goto out;
 			}
 
@@ -5534,7 +5591,7 @@ Action_ExamineObject(
 				{
 					D(("name is too long (%ld >= %ld)", name_len, sizeof(translated_name)));
 
-					error = ERROR_INVALID_COMPONENT_NAME;
+					error = ERROR_BUFFER_OVERFLOW;
 					goto out;
 				}
 
@@ -5565,7 +5622,7 @@ Action_ExamineObject(
 			{
 				D(("name is too long (%ld >= %ld)", name_len, sizeof(fib->fib_FileName)));
 
-				error = ERROR_INVALID_COMPONENT_NAME;
+				error = ERROR_BUFFER_OVERFLOW;
 				goto out;
 			}
 
@@ -6614,14 +6671,20 @@ Action_Find(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -6665,11 +6728,14 @@ Action_Find(
 
 	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
-	{
-		/* Trying to open the root directory? */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_WRONG_TYPE;
+		goto out;
 
+	/* Trying to open the root directory? */
+	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	{
+		LOG(("cannot open the root directory\n"));
+
+		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
 	}
 
@@ -7217,14 +7283,20 @@ Action_SetDate(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -7242,11 +7314,14 @@ Action_SetDate(
 
 	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
-	{
-		/* Trying to change the date of the root directory? */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_IN_USE;
+		goto out;
 
+	/* Trying to change the date of the root directory? */
+	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	{
+		LOG(("cannot change the date of the root directory\n"));
+
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
@@ -7366,7 +7441,7 @@ Action_ExamineFH(
 		{
 			D(("name is too long (%ld >= %ld)", name_len, sizeof(translated_name)));
 
-			error = ERROR_INVALID_COMPONENT_NAME;
+			error = ERROR_BUFFER_OVERFLOW;
 			goto out;
 		}
 
@@ -7397,7 +7472,7 @@ Action_ExamineFH(
 	{
 		D(("name is too long (%ld >= %ld)", name_len, sizeof(fib->fib_FileName)));
 
-		error = ERROR_INVALID_COMPONENT_NAME;
+		error = ERROR_BUFFER_OVERFLOW;
 		goto out;
 	}
 
@@ -8072,14 +8147,20 @@ Action_SetComment(
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Ignore everything left of the colon character, if there is one.
-	 * This is necessary for assignments to work.
-	 */
 	name_len = strlen(name);
 
+	/* Remove a device, volume or assignment name
+	 * from the path name.
+	 */
 	for(i = 0 ; i < name_len ; i++)
 	{
-		if(name[i] == ':')
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
 
@@ -8097,11 +8178,14 @@ Action_SetComment(
 
 	error = build_full_path_name(parent_name,name,&full_name);
 	if(error != OK)
-	{
-		/* Trying to change the comment of the root directory? */
-		if(error == ERROR_INVALID_COMPONENT_NAME)
-			error = ERROR_OBJECT_IN_USE;
+		goto out;
 
+	/* Trying to change the comment of the root directory? */
+	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	{
+		LOG(("cannot change the comment of the root directory\n"));
+
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 

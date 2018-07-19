@@ -2303,3 +2303,33 @@ smbfs 1.164 (17.7.2018)
   to problems on 68000 machines because the contents of the data
   structure referenced are not guaranteed to be 16-bit word aligned,
   for example. Thanks go to Timm Mueller for finding the problem!
+
+
+smbfs 1.165 (19.7.2018)
+
+- The device, volume or assignment part of a fully qualified
+  path name must be removed, including the ":" character which
+  terminates it. Previously, the device/volume/assignment name
+  was removed, but a second step further down the line took
+  care of the ":" character. The new approach is more consistent.
+
+- Replaced the processing function whose purpose is to combine an
+  existing SMB path name with a translated form of an AmigaDOS
+  path name. The new code works very much like an actual local
+  disk based file system would in handling the ":" and "/" path
+  separators. Previously, the SMB path and the AmigaDOS path were
+  combined and then processed, which could have the effect of
+  quietly swallowing the effects of invalid path specifications.
+  The new code is able to detect these and will report them.
+
+- The handling of ACTION_PARENT with lock = root directory is now
+  different from what happens if ACTION_LOCATE_OBJECT is used with
+  name = "/" and the lock = root directory. ACTION_PARENT with
+  lock = root directory are valid parameters and will return the
+  "ZERO lock". ACTION_LOCATE_OBJECT with name = "/" and lock = root
+  directory is not a valid combination and must return failure
+  with error code = ERROR_OBJECT_NOT_FOUND. Without this distinction
+  software may be unable to successfully navigate the file system
+  tree and get stuck in a loop. The new path processing code
+  allows both cases to be different, whereas previously the results
+  could be identical.
