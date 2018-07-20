@@ -2333,3 +2333,36 @@ smbfs 1.165 (19.7.2018)
   tree and get stuck in a loop. The new path processing code
   allows both cases to be different, whereas previously the results
   could be identical.
+
+
+smbfs 1.166 (20.7.2018)
+
+- Added the DISABLEEXALL switch which can be used to completely
+  disable support for the dos.library/ExAll() function within
+  smbfs.
+
+  Disabling the ExAll() function is recommend if you intend to use
+  software with smbfs which reserves too little memory for the buffer
+  which smbfs is to fill when processing the directory contents it
+  is reading.
+
+  If there is not enough memory provided, smbfs may eventually stop
+  providing further directory entries, flagging an error. This can
+  give the appearance of smbfs losing directory entries during the
+  scanning process when in fact it stopped because was unable to
+  store the directory entry names in the buffer supplied by the
+  application which invoked it.
+
+  Stopping because it cannot continue may not necessarily be handled
+  well by the application, which may just treat it no different from
+  the any indication that smbfs has no further entries to provide
+  because the SMB server has already transmitted the last entry.
+
+- When running out of space trying store another directory entry, the
+  smbfs ExAll() function could fail to allow for scanning to resume.
+  This would cause smbfs to lose directory entries.
+
+- Updated the "exall-example" program to allow easier testing with
+  small buffer sizes. The default buffer size used to be 4096 bytes
+  which failed to reproduce most of the smbfs ExAll implementation
+  problems :-(

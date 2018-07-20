@@ -212,6 +212,7 @@ static BOOL					Quit;
 static BOOL					Quiet;
 static BOOL					CaseSensitive;
 static BOOL					OmitHidden;
+static BOOL					DisableExAll;
 
 static LONG					DSTOffset;
 static LONG					TimeZoneOffset;
@@ -556,6 +557,7 @@ main(void)
 		KEY		VolumeName;
 		NUMBER	MaxNameLen;
 		NUMBER	CacheSize;
+		SWITCH	DisableExAll;
 		NUMBER	MaxTransmit;
 		NUMBER	Timeout;
 		NUMBER	TimeZoneOffset;
@@ -592,6 +594,7 @@ main(void)
 		"VOLUME=VOLUMENAME/K,"
 		"MAXNAMELEN/N/K,"
 		"CACHE=CACHESIZE/N/K,"
+		"DISABLEEXALL/S,"
 		"MAXTRANSMIT/N/K,"
 		"TIMEOUT/N/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
@@ -738,6 +741,9 @@ main(void)
 
 		if(FindToolType(Icon->do_ToolTypes,"CHANGECASE") != NULL)
 			args.ChangeCase = TRUE;
+
+		if(FindToolType(Icon->do_ToolTypes,"DISABLEEXALL") != NULL)
+			args.DisableExAll = TRUE;
 
 		if(FindToolType(Icon->do_ToolTypes,"OMITHIDDEN") != NULL)
 			args.OmitHidden = TRUE;
@@ -1064,8 +1070,9 @@ main(void)
 		TranslateNames = TRUE;
 	}
 
-	CaseSensitive = (BOOL)args.CaseSensitive;
-	OmitHidden = (BOOL)args.OmitHidden;
+	DisableExAll = (BOOL)(args.DisableExAll != 0);
+	CaseSensitive = (BOOL)(args.CaseSensitive != 0);
+	OmitHidden = (BOOL)(args.OmitHidden != 0);
 
 	/* You don't need to provide a specific workgroup name. smbfs will
 	 * work perfectly find with modern (and somewhat older) SMB implementations
@@ -6052,7 +6059,7 @@ struct ExAllContext
 static int
 dir_scan_callback_func_exall(
 	struct ExAllContext *	ec,
-	int						unused_fpos,
+	int						fpos,
 	int						nextpos,
 	const TEXT *			name,
 	int						eof,
@@ -6061,6 +6068,7 @@ dir_scan_callback_func_exall(
 	TEXT translated_name[MAX_FILENAME_LEN+1];
 	int stop_scanning = FALSE;
 	int name_len;
+	int resume_position = -1;
 	LONG type = ec->ec_Type;
 	UBYTE * buffer = ec->ec_Buffer;
 	struct ExAllData * ed;
@@ -6166,6 +6174,13 @@ dir_scan_callback_func_exall(
 		{
 			SHOWMSG("   this was the first read attempt -- aborting");
 			ec->ec_Error = ERROR_NO_FREE_STORE;
+		}
+		else
+		{
+			/* Assuming that the client wants to know the next
+			 * entry, resume with the one which we couldn't store.
+			 */
+			resume_position = fpos;
 		}
 
 		stop_scanning = TRUE;
@@ -6331,7 +6346,7 @@ dir_scan_callback_func_exall(
 	/* Any more entries to deliver or stop right now? */
 	if(stop_scanning || eof)
 	{
-		ec->ec_Control->eac_LastKey = -1;
+		ec->ec_Control->eac_LastKey = resume_position;
 
 		SHOWMSG("   that was the last entry");
 	}
@@ -6379,7 +6394,8 @@ Action_ExamineAll(
 	 */
 	if(buffer_size < (LONG)sizeof(ed->ed_Next))
 	{
-		SHOWMSG("buffer is far too short.");
+		D(("buffer is far too short (%ld bytes, minimum is %ld).",buffer_size, sizeof(ed->ed_Next)));
+
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
@@ -6387,7 +6403,7 @@ Action_ExamineAll(
 	/* No next entry yet. */
 	ed->ed_Next = NULL;
 
-	if(eac->eac_LastKey == (ULONG)-1)
+	if((LONG)eac->eac_LastKey == -1)
 	{
 		SHOWMSG("scanning already finished.");
 
@@ -6531,20 +6547,19 @@ Action_ExamineAll(
 
 	smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&error);
 
-	if(error == OK && ec.ec_Error != OK)
-	{
-		SHOWMSG("flagging an error");
-
-		SHOWVALUE(ec.ec_Error);
-
-		error = ec.ec_Error;
-	}
-
 	if(error != OK)
 	{
-		SHOWMSG("error whilst scanning");
+		D(("error whilst scanning (errno=%ld)", error));
 
 		error = map_errno_to_ioerr(error);
+		goto out;
+	}
+
+	if(error == OK && ec.ec_Error != OK)
+	{
+		D(("flagging an error (ioerr=%ld)", ec.ec_Error));
+
+		error = ec.ec_Error;
 		goto out;
 	}
 
@@ -6554,7 +6569,7 @@ Action_ExamineAll(
 	 * in reading anything at all, this means that we have to
 	 * throw in the towel...
 	 */
-	if(eac->eac_Entries == 0 && ec.ec_Control->eac_LastKey == (ULONG)-1)
+	if(eac->eac_Entries == 0 && (LONG)ec.ec_Control->eac_LastKey == -1)
 	{
 		SHOWMSG("nothing more to be read");
 
@@ -6579,7 +6594,7 @@ Action_ExamineAll(
 	{
 		int num_entries_found = 0;
 
-		SHOWVALUE(eac->eac_Entries);
+		D(("number of entries available = %ld",eac->eac_Entries));
 
 		if(eac->eac_Entries > 0)
 		{
@@ -8768,6 +8783,14 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 
 					case ACTION_EXAMINE_ALL:
 						/* FileLock,ExAllData(APTR),Size,Type,ExAllControl(APTR) -> Bool */
+
+						/* Pretend that we do not support the ExAll() functionality? */
+						if(DisableExAll)
+						{
+							res1 = DOSFALSE;
+							res2 = ERROR_ACTION_NOT_KNOWN;
+							break;
+						}
 
 						res1 = Action_ExamineAll(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(UBYTE *)dp->dp_Arg2,
 							dp->dp_Arg3,dp->dp_Arg4,(struct ExAllControl *)dp->dp_Arg5,&res2);
