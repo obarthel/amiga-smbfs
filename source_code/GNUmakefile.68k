@@ -63,6 +63,9 @@ $(PROJECT): $(OBJS)
 	strip --strip-all -o $@ $@.debug
 	protect $@ +e
 
+exall-example: exall-example.c
+	gcc -o $@ exall-example.c
+
 ###############################################################################
 
 assert.o : assert.c
@@ -79,4 +82,4 @@ sock.o : sock.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h 
 ###############################################################################
 
 clean:
-	-delete #?.o #?.map $(PROJECT)(%|.debug)
+	-delete #?.o #?.map $(PROJECT)(%|.debug) exall-example

@@ -68,6 +68,9 @@ $(PROJECT): $(OBJS)
 	@$(CC) -o $@.debug $(CFLAGS) $(LFLAGS) $(OBJS) $(LIBS) -Wl,--cref,-M,-Map=$@.map
 	ppc-amigaos-strip -R.comment -o $@ $@.debug
 
+exall-example: exall-example.c
+	$(CC) -o $@ -D__USE_INLINE__ exall-example.c
+
 ###########################################################################
 
 assert.o : assert.c
@@ -84,4 +87,4 @@ sock.o : sock.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h 
 ###########################################################################
 
 clean:
-	-rm *.o $(PROJECT) $(PROJECT).debug $(PROJECT).map
+	-rm *.o $(PROJECT) $(PROJECT).debug $(PROJECT).map exall-example

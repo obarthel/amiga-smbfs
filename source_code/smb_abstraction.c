@@ -1352,7 +1352,7 @@ invalidate_dircache (struct smba_server * server)
 /*****************************************************************************/
 
 int
-smba_create (smba_file_t * dir, const char *name, int * error_ptr)
+smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 {
 	struct smb_dirent entry;
 	int ignored_error;
@@ -1385,7 +1385,7 @@ smba_create (smba_file_t * dir, const char *name, int * error_ptr)
 
 	if (!dir->server->server.prefer_core_protocol && dir->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
-		result = smb_proc_open (&dir->server->server, path, strlen(path), open_writable, open_truncate, &entry, error_ptr);
+		result = smb_proc_open (&dir->server->server, path, strlen(path), open_writable, truncate, &entry, error_ptr);
 		if(result < 0)
 			goto out;
 	}

@@ -3580,8 +3580,20 @@ build_full_path_name(
 					{
 						if(buffer[i] == SMB_PATH_SEPARATOR)
 						{
-							to = &buffer[i+1];
-							len = i+1;
+							/* Don't move above the root, e.g "\foo" must become "foo". */
+							if(i == 0)
+							{
+								to = &buffer[i+1];
+								len = i+1;
+							}
+							/* Remove the final part of the path name, including
+							 * the path delimiter, e.g. "\foo\bar" must become "\foo".
+							 */
+							else
+							{
+								to = &buffer[i];
+								len = i;
+							}
 
 							break;
 						}
@@ -4197,6 +4209,10 @@ Action_DeleteObject(
 		{
 			D(("found a wildcard in '%s'",name));
 
+			/* Do not try to delete sets of matching files
+			 * and drawers. We only came to delete a single
+			 * directory entry.
+			 */
 			error = ERROR_OBJECT_NOT_FOUND;
 			goto out;
 		}
@@ -4415,6 +4431,10 @@ Action_CreateDir(
 		}
 	}
 
+	/* Do not allow for a directory to be created whose
+	 * name contains MS-DOS wildcard characters. This will
+	 * only end in tears later...
+	 */
 	last_name = FilePart(name);
 	last_name_len = strlen(last_name);
 
@@ -5040,9 +5060,15 @@ Action_SetProtect(
 
 		strlcpy(owner_bits, "hsparwed", sizeof(owner_bits));
 
-		for(i = 0 ; i < 8 ; i++)
+		for(i = 0 ; i < 4 ; i++)
 		{
 			if((mask & (1 << (7 - i))) != 0)
+				owner_bits[i] = '-';
+		}
+
+		for(i = 4 ; i < 8 ; i++)
+		{
+			if((mask & (1 << (7 - i))) == 0)
 				owner_bits[i] = '-';
 		}
 
@@ -5185,6 +5211,10 @@ Action_RenameObject(
 		{
 			D(("found a wildcard in the source path '%s'",name));
 
+			/* Do not rename/move sets of matching files and
+			 * directories. We only came to rename/move a
+			 * single directory entry.
+			 */
 			error = ERROR_OBJECT_NOT_FOUND;
 			goto out;
 		}
@@ -5264,6 +5294,10 @@ Action_RenameObject(
 		{
 			D(("found a wildcard in the destination path '%s'",name));
 
+			/* Do not allow the destination name to contain
+			 * MS-DOS wildcard characters. This will only end
+			 * in tears later...
+			 */
 			error = ERROR_OBJECT_NOT_FOUND;
 			goto out;
 		}
@@ -6059,16 +6093,16 @@ struct ExAllContext
 static int
 dir_scan_callback_func_exall(
 	struct ExAllContext *	ec,
-	int						fpos,
-	int						nextpos,
+	int						current_pos,
+	int						next_pos,
 	const TEXT *			name,
-	int						eof,
+	int						eof,	/* if true this means that this is the last entry available. */
 	const smba_stat_t *		st)
 {
 	TEXT translated_name[MAX_FILENAME_LEN+1];
 	int stop_scanning = FALSE;
 	int name_len;
-	int resume_position = -1;
+	int resume_position = next_pos;
 	LONG type = ec->ec_Type;
 	UBYTE * buffer = ec->ec_Buffer;
 	struct ExAllData * ed;
@@ -6076,7 +6110,18 @@ dir_scan_callback_func_exall(
 
 	ENTER();
 
-	ASSERT( ec->ec_Control->eac_LastKey != (ULONG)-1 );
+	/* We already delivered the last entry? */
+	if((LONG)ec->ec_Control->eac_LastKey == -1)
+	{
+		/* We didn't deliver even one entry? */
+		if(ec->ec_Control->eac_Entries == 0)
+			ec->ec_Error = ERROR_NO_MORE_ENTRIES;
+
+		eof = TRUE;
+
+		stop_scanning = TRUE;
+		goto out;
+	}
 
 	#if DEBUG
 	{
@@ -6087,7 +6132,7 @@ dir_scan_callback_func_exall(
 
 		D((" '%s'",escape_name(name)));
 		D(("   is directory=%s, is read-only=%ls, is hidden=%s, size=%s", st->is_dir ? "yes" : "no",st->is_read_only ? "yes" : "no",st->is_hidden ? "yes" : "no",convert_quad_to_string(&st_size_quad)));
-		D(("   nextpos=%ld eof=%ld",nextpos,eof));
+		D(("   next_pos=%ld eof=%ld",next_pos,eof));
 	}
 	#endif /* DEBUG */
 
@@ -6163,7 +6208,7 @@ dir_scan_callback_func_exall(
 
 	D(("   buffer size left = %ld, record size = %ld",ec->ec_BufferSize,complete_record_size));
 
-	if(complete_record_size >= ec->ec_BufferSize)
+	if(complete_record_size > ec->ec_BufferSize)
 	{
 		SHOWMSG("   not enough room to return this entry");
 
@@ -6173,14 +6218,23 @@ dir_scan_callback_func_exall(
 		if(ec->ec_Control->eac_Entries == 0)
 		{
 			SHOWMSG("   this was the first read attempt -- aborting");
+
 			ec->ec_Error = ERROR_NO_FREE_STORE;
+
+			eof = TRUE;
 		}
+		/* No more room to store another entry, but we can deliver
+		 * what was already stored. The client can call ExAll()
+		 * again and pick up the next entry.
+		 */
 		else
 		{
 			/* Assuming that the client wants to know the next
 			 * entry, resume with the one which we couldn't store.
 			 */
-			resume_position = fpos;
+			resume_position = current_pos;
+
+			eof = FALSE;
 		}
 
 		stop_scanning = TRUE;
@@ -6200,6 +6254,8 @@ dir_scan_callback_func_exall(
 	/* Copy the name, including the terminating NUL byte. */
 	ed->ed_Name = (STRPTR)&buffer[ec->ec_RecordSize];
 	memcpy(ed->ed_Name,name,name_len+1);
+
+	D(("   ed->ed_Name = '%s'", ed->ed_Name));
 
 	/* Fill in as many records as were requested. */
 	if(type >= ED_TYPE)
@@ -6285,12 +6341,12 @@ dir_scan_callback_func_exall(
 		#endif /* DEBUG */
 	}
 
-	/* If there is no comment, set the comment string
-	 * pointer to NULL. This is documented to be the
-	 * correct approach.
-	 */
 	if(type >= ED_COMMENT)
 	{
+		/* If there is no comment, set the comment string
+		 * pointer to NULL. This is documented to be the
+		 * correct approach.
+		 */
 		ed->ed_Comment = NULL;
 
 		D(("   comment=NULL"));
@@ -6339,23 +6395,21 @@ dir_scan_callback_func_exall(
 
 	ec->ec_Control->eac_Entries++;
 
-	D(("   ed->ed_Name = '%s'", ed->ed_Name));
-
  out:
 
 	/* Any more entries to deliver or stop right now? */
-	if(stop_scanning || eof)
-	{
-		ec->ec_Control->eac_LastKey = resume_position;
-
+	if(eof)
 		SHOWMSG("   that was the last entry");
-	}
 	else
-	{
-		ec->ec_Control->eac_LastKey = nextpos;
-
 		SHOWMSG("   more entries may be available");
-	}
+
+	/* If this was the last entry to be delivered (eof != FALSE)
+	 * make sure that the next invocation of this function will
+	 * cease delivering more directory entries. Otherwise allow
+	 * the next call to ExAll() to resume reading more directory
+	 * entries.
+	 */
+	ec->ec_Control->eac_LastKey = eof ? -1 : resume_position;
 
 	RETURN(stop_scanning);
 	return(stop_scanning);
@@ -6372,9 +6426,10 @@ Action_ExamineAll(
 	LONG *					error_ptr)
 {
 	struct ExAllData * ed = (struct ExAllData *)buffer;
+	LONG call_exall_again = DOSFALSE;
 	struct ExAllContext ec;
 	struct LockNode * ln;
-	LONG result = DOSFALSE;
+	int record_size;
 	int error = OK;
 	LONG offset;
 
@@ -6432,15 +6487,6 @@ Action_ExamineAll(
 
 	ln->ln_LastUser = last_user;
 
-	memset(&ec,0,sizeof(ec));
-
-	/* Assume that the name is always required. */
-	ec.ec_RecordSize	= offsetof(struct ExAllData,ed_Type);
-	ec.ec_Buffer		= buffer;
-	ec.ec_BufferSize	= buffer_size;
-	ec.ec_Control		= eac;
-	ec.ec_Type			= type;
-
 	/* Figure out how much space a single directory
 	 * entry will always require, with the name not
 	 * taken into account yet.
@@ -6451,60 +6497,89 @@ Action_ExamineAll(
 
 			SHOWMSG("type=name");
 
-			/* Already taken care of. */
+			record_size = offsetof(struct ExAllData,ed_Name) + sizeof(ed->ed_Name);
 			break;
 
 		case ED_TYPE:
 
 			SHOWMSG("type=type");
 
-			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Size);
+			record_size = offsetof(struct ExAllData,ed_Type) + sizeof(ed->ed_Type);
 			break;
 
 		case ED_SIZE:
 
 			SHOWMSG("type=size");
 
-			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Prot);
+			record_size = offsetof(struct ExAllData,ed_Size) + sizeof(ed->ed_Size);
 			break;
 
 		case ED_PROTECTION:
 
 			SHOWMSG("type=protection");
 
-			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Days);
+			record_size = offsetof(struct ExAllData,ed_Prot) + sizeof(ed->ed_Prot);
 			break;
 
 		case ED_DATE:
 
 			SHOWMSG("type=date");
 
-			ec.ec_RecordSize = offsetof(struct ExAllData,ed_Comment);
+			record_size = offsetof(struct ExAllData,ed_Days) + (sizeof(ed->ed_Days) + sizeof(ed->ed_Mins) + sizeof(ed->ed_Ticks));
 			break;
 
 		case ED_COMMENT:
 
 			SHOWMSG("type=comment");
 
-			ec.ec_RecordSize = offsetof(struct ExAllData,ed_OwnerUID);
+			record_size = offsetof(struct ExAllData,ed_Comment) + sizeof(ed->ed_Comment);
 			break;
 
 		case ED_OWNER:
 		default:
 
+			/* Note: If the requested type is not known, we default to return
+			 *       everything, i.e. ED_OWNER. For this "promotion" to stick,
+			 *       we have to update the type field.
+			 */
 			type = ED_OWNER;
 
 			SHOWMSG("type=owner");
 
-			ec.ec_RecordSize = sizeof(struct ExAllData);
+			record_size = offsetof(struct ExAllData,ed_OwnerUID) + (sizeof(ed->ed_OwnerUID) + sizeof(ed->ed_OwnerGID));
 			break;
 	}
 
+	memset(&ec,0,sizeof(ec));
+
+	ec.ec_RecordSize	= record_size;
+	ec.ec_Buffer		= buffer;
+	ec.ec_BufferSize	= buffer_size;
+	ec.ec_Control		= eac;
+	ec.ec_Type			= type;
+
 	SHOWVALUE(ec.ec_RecordSize);
 
-	/* Start from the top? Check if the lock actually refers to a directory. */
+	/* If this 0, we start reading the directory contents beginning
+	 * with the first entry. A value > 0 is supposed to resume
+	 * directory scanning at the given directory entry index.
+	 */
 	offset = eac->eac_LastKey;
 
+	/* Check if we should restart scanning the directory
+	 * contents. This is tricky at best and may produce
+	 * irritating results :(
+	 */
+	if(ln->ln_RestartExamine)
+	{
+		SHOWMSG("restarting directory scanning");
+
+		offset = 0;
+
+		ln->ln_RestartExamine = FALSE;
+	}
+
+	/* Start from the top? Check if the lock actually refers to a directory. */
 	if(offset == 0)
 	{
 		smba_stat_t st;
@@ -6529,24 +6604,12 @@ Action_ExamineAll(
 		}
 	}
 
-	/* Check if we should restart scanning the directory
-	 * contents. This is tricky at best and may produce
-	 * irritating results :(
-	 */
-	if(ln->ln_RestartExamine)
-	{
-		SHOWMSG("restarting directory scanning");
-
-		offset = 0;
-
-		ln->ln_RestartExamine = FALSE;
-	}
-
 	SHOWMSG("calling 'smba_readdir'");
 	SHOWVALUE(offset);
 
 	smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&error);
 
+	/* Did the smba_readdir() run into trouble? */
 	if(error != OK)
 	{
 		D(("error whilst scanning (errno=%ld)", error));
@@ -6554,10 +6617,10 @@ Action_ExamineAll(
 		error = map_errno_to_ioerr(error);
 		goto out;
 	}
-
-	if(error == OK && ec.ec_Error != OK)
+	/* Did dir_scan_callback_func_exall() run into trouble? */
+	else if (ec.ec_Error != OK)
 	{
-		D(("flagging an error (ioerr=%ld)", ec.ec_Error));
+		D(("error whilst scanning (ioerr=%ld)", ec.ec_Error));
 
 		error = ec.ec_Error;
 		goto out;
@@ -6580,11 +6643,13 @@ Action_ExamineAll(
 	ASSERT( ec.ec_Buffer <= &buffer[buffer_size] );
 
 	SHOWMSG("ok");
-	result = DOSTRUE;
+
+	call_exall_again = DOSTRUE;
 
  out:
 
-	if(result == DOSFALSE)
+	/* Don't allow ExAll() to call smba_readdir() again. */
+	if(call_exall_again == DOSFALSE)
 	{
 		eac->eac_Entries = 0;
 		eac->eac_LastKey = (ULONG)-1;
@@ -6594,9 +6659,9 @@ Action_ExamineAll(
 	{
 		int num_entries_found = 0;
 
-		D(("number of entries available = %ld",eac->eac_Entries));
+		D(("number of entries available = %ld, call ExAll() again = %s",eac->eac_Entries, call_exall_again ? "yes": "no"));
 
-		if(eac->eac_Entries > 0)
+		if(call_exall_again && eac->eac_Entries > 0)
 		{
 			do
 			{
@@ -6613,6 +6678,29 @@ Action_ExamineAll(
 	#endif /* DEBUG */
 
 	(*error_ptr) = error;
+
+	RETURN(call_exall_again);
+	return(call_exall_again);
+}
+
+/****************************************************************************/
+
+static LONG
+Action_ExamineAllEnd(
+	const struct MsgPort *	last_user,
+	struct FileLock *		lock,
+	UBYTE *					buffer,
+	LONG					buffer_size,
+	LONG					type,
+	struct ExAllControl *	eac,
+	LONG *					error_ptr)
+{
+	LONG result = DOSTRUE;
+
+	ENTER();
+
+	/* Make Action_ExamineAll() return no more entries. */
+	eac->eac_LastKey = (ULONG)-1;
 
 	RETURN(result);
 	return(result);
@@ -6635,7 +6723,9 @@ Action_Find(
 	struct FileNode * fn = NULL;
 	const TEXT * parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
+	BOOL name_contains_wildcard_characters = FALSE;
 	int name_len;
+	BOOL create_new_file = FALSE;
 	STRPTR temp = NULL;
 	smba_stat_t st;
 	int error;
@@ -6653,6 +6743,8 @@ Action_Find(
 		case ACTION_FINDOUTPUT:
 
 			D(("ACTION_FINDOUTPUT [Open(\"%b\",MODE_NEWFILE)]",MKBADDR(bcpl_name)));
+
+			create_new_file = TRUE;
 			break;
 
 		case ACTION_FINDUPDATE:
@@ -6708,7 +6800,10 @@ Action_Find(
 		}
 	}
 
-	if(action == ACTION_FINDOUTPUT)
+	/* Do not allow MS-DOS wildcard characters to be used
+	 * when creating a new file.
+	 */
+	if(action != ACTION_FINDINPUT)
 	{
 		TEXT * last_name;
 		int last_name_len;
@@ -6722,8 +6817,19 @@ Action_Find(
 			{
 				D(("found a wildcard in '%s'",name));
 
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
+				if(action == ACTION_FINDOUTPUT)
+				{
+					error = ERROR_INVALID_COMPONENT_NAME;
+					goto out;
+				}
+
+				/* We don't know yet if MODE_READWRITE will
+				 * succeed in opening the file whose name
+				 * contains wildcard characters. This will
+				 * be checked later, if needed.
+				 */
+				name_contains_wildcard_characters = TRUE;
+				break;
 			}
 		}
 	}
@@ -6766,7 +6872,7 @@ Action_Find(
 	fn->fn_Handle	= fh;
 	fn->fn_Magic	= ID_SMB_DISK;
 	fn->fn_FullName	= full_name;
-	fn->fn_Mode		= (action == ACTION_FINDINPUT) ? SHARED_LOCK : EXCLUSIVE_LOCK;
+	fn->fn_Mode		= (action == ACTION_FINDOUTPUT) ? EXCLUSIVE_LOCK : SHARED_LOCK;
 
 	error = check_access_mode_collision(full_name,fn->fn_Mode);
 	if(error != OK)
@@ -6774,11 +6880,47 @@ Action_Find(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	/* Create a new file, or truncate an existing file? */
-	if(action == ACTION_FINDOUTPUT)
+	/* Open an existing file for write access, create it if
+	 * it doesn't exist yet?
+	 */
+	if(action == ACTION_FINDUPDATE)
+	{
+		D(("trying to open '%s' for write access, no truncation", full_name));
+
+		if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&fn->fn_File,&error) < 0)
+		{
+			int translated_error;
+
+			if(error == error_check_smb_error)
+				translated_error = smb_errno(((struct smb_server *)ServerData)->rcls,((struct smb_server *)ServerData)->err);
+			else
+				translated_error = error;
+
+			if(translated_error == ENOENT)
+			{
+				/* We couldn't open an existing file, so we'll have to create one. */
+				create_new_file = TRUE;
+
+				SHOWMSG("file didn't open, so we'll try to create it without truncating it now");
+			}
+		}
+	}
+
+	/* Create a new file for MODE_NEWFILE or MODE_READWRITE? */
+	if(create_new_file)
 	{
 		STRPTR dir_name,base_name;
 		smba_file_t * dir;
+
+		/* Do not create a file whose name would contain
+		 * MS-DOS wildcard characters. This will only
+		 * end in tears later...
+		 */
+		if(name_contains_wildcard_characters)
+		{
+			error = ERROR_INVALID_COMPONENT_NAME;
+			goto out;
+		}
 
 		if(WriteProtected)
 		{
@@ -6805,32 +6947,35 @@ Action_Find(
 		SHOWMSG("now trying to create the file");
 		D(("base name = '%s'",escape_name(base_name)));
 
-		if(smba_create(dir,base_name,&error) < 0)
-		{
-			SHOWMSG("didn't work.");
-			SHOWVALUE(error);
-
-			smba_close(ServerData,dir);
-
-			error = map_errno_to_ioerr(error);
-
-			SHOWVALUE(error);
-
-			goto out;
-		}
-
-		SHOWMSG("good.");
+		/* Try to create a new file if it does not exist, but if
+		 * it exists, can be opened and MODE_NEWFILE is used, set
+		 * its size to 0.
+		 *
+		 * We don't care yet if it can be created, as the real test
+		 * will be in opening the file.
+		 */
+		smba_create(dir,base_name,action == ACTION_FINDOUTPUT,&error);
 
 		smba_close(ServerData,dir);
 	}
 
-	/* Open the file for read access if ACTION_FINDINPUT is used,
-	 * and for write access for ACTION_FINDOUTPUT/ACTION_FINDUPDATE.
+	/* The file may have been opened for ACTION_FINDUPDATE already,
+	 * so don't reopen it by mistake.
 	 */
-	if(smba_open(ServerData,full_name,(action != ACTION_FINDINPUT),open_dont_truncate,&fn->fn_File,&error) < 0)
+	if(fn->fn_File == NULL)
 	{
-		error = map_errno_to_ioerr(error);
-		goto out;
+		/* Open the file for read access if MODE_OLDFILE is used and
+		 * for write access if MODE_NEWFILE or MODE_READWRITE
+		 * is used.
+		 *
+		 * If the file opens and MODE_NEWFILE is used, set the
+		 * file size to 0.
+		 */
+		if(smba_open(ServerData,full_name,(action != ACTION_FINDINPUT),(action == ACTION_FINDOUTPUT),&fn->fn_File,&error) < 0)
+		{
+			error = map_errno_to_ioerr(error);
+			goto out;
+		}
 	}
 
 	/* Make sure that we ended opening a file, and not a directory.
@@ -6849,6 +6994,8 @@ Action_Find(
 		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
 	}
+
+	D(("all clear: '%s' is a file and not a directory",escape_name(full_name)));
 
 	fh->fh_Arg1 = (LONG)fn;
 
@@ -8549,7 +8696,85 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 			{
 				dp = (struct DosPacket *)mn->mn_Node.ln_Name;
 
-				D(("got packet; sender '%s'",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
+				#if DEBUG
+				{
+					const struct Process * sender = (struct Process *)dp->dp_Port->mp_SigTask;
+
+					if(sender == NULL || TypeOfMem((APTR)sender) == 0)
+					{
+						D(("got packet; sender 0x%08lx", sender));
+					}
+					else
+					{
+						if (sender->pr_Task.tc_Node.ln_Type == NT_TASK)
+						{
+							D(("got packet; sender '%s' (Task)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
+						}
+						else if (sender->pr_Task.tc_Node.ln_Type == NT_PROCESS && sender->pr_CLI != (BPTR)NULL)
+						{
+							const struct CommandLineInterface * cli = BADDR(sender->pr_CLI);
+							LONG cli_number = 0;
+							LONG max_cli, i;
+							TEXT command_name[256];
+
+							command_name[0] = '\0';
+
+							if (TypeOfMem((APTR)cli) != 0)
+							{
+								for(max_cli = MaxCli(), i = 1 ; i <= max_cli ; i++)
+								{
+									if (FindCliProc(i) == sender)
+									{
+										cli_number = i;
+										break;
+									}
+								}
+
+								if(cli->cli_Module != (BPTR)NULL)
+								{
+									TEXT * cmd = BADDR(cli->cli_CommandName);
+									int len;
+
+									len = cmd[0];
+									memcpy(command_name,&cmd[1],len);
+									command_name[len] = '\0';
+								}
+							}
+							else
+							{
+								cli = NULL;
+							}
+
+							if(cli != NULL)
+							{
+								if(command_name[0] != '\0')
+								{
+									if(cli_number > 0)
+										D(("got packet; sender '%s' (CLI #%ld)", command_name, cli_number));
+									else
+										D(("got packet; sender '%s' (CLI)", command_name));
+								}
+								else
+								{
+									D(("got packet; sender '%s' (CLI)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
+								}
+							}
+							else
+							{
+								D(("got packet; sender '%s' (Process)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
+							}
+						}
+						else if (sender->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+						{
+							D(("got packet; sender '%s' (Process)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
+						}
+						else
+						{
+							D(("got packet; sender '%s'",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
+						}
+					}
+				}
+				#endif /* DEBUG */
 
 				res2 = 0;
 
@@ -8806,7 +9031,9 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 					case ACTION_EXAMINE_ALL_END:
 						/* FileLock,ExAllData(APTR),Size,Type,ExAllControl(APTR) -> Bool */
 
-						res1 = DOSTRUE;
+						res1 = Action_ExamineAllEnd(dp->dp_Port,(struct FileLock *)BADDR(dp->dp_Arg1),(UBYTE *)dp->dp_Arg2,
+							dp->dp_Arg3,dp->dp_Arg4,(struct ExAllControl *)dp->dp_Arg5,&res2);
+
 						break;
 
 					case ACTION_LOCK_RECORD:

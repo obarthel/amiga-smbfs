@@ -99,6 +99,9 @@ system_headers.gst: system_headers.h system_headers.c
 	gst unload $@
 	sc $(CFLAGS) nodebug noobjname nogst makegst=$@ system_headers.c
 
+exall-example: exall-example.c
+	sc link exall-example.c
+
 ###############################################################################
 
 assert.o : assert.c
@@ -116,7 +119,7 @@ swap_stack_and_call.o : swap_stack_and_call.asm
 ###############################################################################
 
 clean:
-	-delete \#?.o $(PROJECT)(%|.debug)
+	-delete \#?.o $(PROJECT)(%|.debug) exall-example(%|.lnk)
 
 realclean: clean
 	-delete system_headers.gst tags tagfiles \#?.map ID all

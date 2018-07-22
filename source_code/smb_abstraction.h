@@ -126,7 +126,7 @@ int smba_lockrec(smba_file_t *f, long offset, long len, long mode, int unlocked,
 int smba_getattr(smba_file_t *f, smba_stat_t *data, int *error_ptr);
 int smba_setattr(smba_file_t *f, const smba_stat_t *data, const QUAD *const size, int *error_ptr);
 int smba_readdir(smba_file_t *f, int offs, void *callback_data, smba_callback_t callback, int *error_ptr);
-int smba_create(smba_file_t *dir, const char *name, int *error_ptr);
+int smba_create(smba_file_t *dir, const char *name, int truncate, int *error_ptr);
 int smba_mkdir(smba_file_t *dir, const char *name, int *error_ptr);
 int smba_remove(smba_server_t *s, const char *path, int *error_ptr);
 int smba_rmdir(smba_server_t *s, const char *path, int *error_ptr);

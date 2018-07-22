@@ -2366,3 +2366,52 @@ smbfs 1.166 (20.7.2018)
   small buffer sizes. The default buffer size used to be 4096 bytes
   which failed to reproduce most of the smbfs ExAll implementation
   problems :-(
+
+
+smbfs 1.167 (20.7.2018)
+
+- Added real support for ExAllEnd(). Previously, the implementation
+  was only pretending that it was stopping directory scanning.
+
+- Rewrote the ExAll() code again to be clearer with regard to how the
+  data structures are initialized and what its return code means.
+
+  It now always returns DOSFALSE after the last directory entry
+  has been delivered, since the ExAll() implementation is to mirror
+  what ExAll() would do in the same situation: return FALSE only if
+  it is certain that no more entries can be delivered.
+
+
+smbfs 1.168 (21.7.2018)
+
+- Added more detailed information about the sender of a packet, which
+  can now be traced to the CLI number and the name of the command
+  involved, if any.
+
+- Open(..,MODE_READWRITE) now attempts to create a file if it does
+  not yet exist, otherwise it opens it for write access. This hasn't
+  worked properly yet. Thanks go to Hubert Maier who provided a
+  test case.
+
+
+smbfs 1.169 (22.7.2018)
+
+- Open(..,MODE_READWRITE) implies a shared lock.
+
+- The test for MS-DOS characters in the names of files to be created
+  is now delayed for Open(..,MODE_READWRITE) until it is certain that
+  a file needs to be created.
+
+- When creating a new file for Open(..,MODE_NEWFILE) or for
+  Open(..,MODE_READWRITE), the process is no longer aborted if
+  the creation fails. Failure may just be the result of a different
+  SMB client succeeding in creating it first. smbfs now tries to
+  create the file and the later attempts to open it. Failure to open
+  the file is then reported as an error.
+
+
+smbfs 1.170 (22.7.2018)
+
+- Path name processing failed to deal properly subdirectories of
+  directories which were located in the root directory. Thanks go
+  to Hubert Maier who reported the problem.
