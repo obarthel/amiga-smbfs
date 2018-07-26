@@ -2412,6 +2412,24 @@ smbfs 1.169 (22.7.2018)
 
 smbfs 1.170 (22.7.2018)
 
-- Path name processing failed to deal properly subdirectories of
+- Path name processing failed to deal properly with subdirectories of
   directories which were located in the root directory. Thanks go
   to Hubert Maier who reported the problem.
+
+
+smbfs 1.171 (24.7.2018)
+
+- Calling Info((BPTR)NULL, parameterBlock) would trash memory. Fixed.
+
+- Replaced all the various checks for valid locks and files with
+  common code.
+
+
+smbfs 1.172 (26.7.2018)
+
+- SetFileSize() never checked if the volume was write-protected. Ouch.
+
+- ExAll() now checks if the type of records it should return is valid,
+  which in this case means if it is > 0. Previously, it treated 0
+  just like it would treat values > ED_OWNER. Now it rejects 0 with
+  the error code ERROR_BAD_NUMBER.

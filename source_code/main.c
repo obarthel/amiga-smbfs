@@ -80,6 +80,8 @@ struct FileNode
 
 	ULONG				fn_Magic;
 
+	struct DosList *	fn_Volume;
+
 	struct FileHandle *	fn_Handle;
 
 	QUAD				fn_OffsetQuad;
@@ -104,7 +106,7 @@ struct LockNode
 
 	const struct MsgPort *	ln_LastUser;
 
-	unsigned int			ln_RestartExamine:1;
+	BOOL					ln_RestartExamine;
 };
 
 /****************************************************************************/
@@ -1436,6 +1438,8 @@ display_error_message_list(void)
 					message[message_len++] = '\n';
 			}
 
+			ASSERT( message_len < size );
+
 			message[message_len] = '\0';
 		}
 	}
@@ -1558,14 +1562,23 @@ report_error(const TEXT * fmt,...)
 		{
 			struct Process * this_process = (struct Process *)FindTask(NULL);
 			TEXT program_name[MAX_FILENAME_LEN+1];
+			BOOL close_output = FALSE;
 			BPTR output;
 
 			GetProgramName(program_name,sizeof(program_name));
 
 			if(this_process->pr_CES != ZERO)
+			{
 				output = this_process->pr_CES;
+			}
 			else
-				output = Output();
+			{
+				output = Open("CONSOLE:", MODE_NEWFILE);
+				if(output != ZERO)
+					close_output = TRUE;
+				else
+					output = Output();
+			}
 
 			LocalFPrintf(output, "%s: ",FilePart(program_name));
 
@@ -1584,6 +1597,9 @@ report_error(const TEXT * fmt,...)
 			#endif /* __amigaos4__ */
 
 			LocalFPrintf(output, "\n");
+
+			if(close_output)
+				Close(output);
 		}
 	}
 }
@@ -1604,7 +1620,11 @@ free_memory(APTR address)
 			total_memory_allocated -= size;
 
 			if(GETDEBUGLEVEL() > 0)
+			{
+				ASSERT( size >= sizeof(*mem) );
+
 				memset(address,0xA3,size - sizeof(*mem));
+			}
 		}
 		#endif /* DEBUG */
 
@@ -1632,7 +1652,11 @@ allocate_memory(LONG size)
 			#if DEBUG
 			{
 				if(GETDEBUGLEVEL() > 0)
+				{
+					ASSERT( mem[-1] >= sizeof(*mem) );
+
 					memset(mem,0xA5,mem[-1] - sizeof(*mem));
+				}
 
 				total_memory_allocated += size;
 				if(max_memory_allocated < total_memory_allocated)
@@ -1838,7 +1862,7 @@ struct nmb_header
 	unsigned short arcount;
 };
 
-static UBYTE *
+static void
 L1_Encode(UBYTE * dst, const UBYTE * name, const UBYTE pad, const UBYTE sfx)
 {
 	int i = 0;
@@ -1865,8 +1889,6 @@ L1_Encode(UBYTE * dst, const UBYTE * name, const UBYTE pad, const UBYTE sfx)
 	dst[30] = 'A' + ((sfx & 0xF0) >> 4);
 	dst[31] = 'A' + (sfx & 0x0F);
 	dst[32] = '\0';
-
-	return(dst);
 }
 
 static int
@@ -1876,8 +1898,7 @@ L2_Encode(UBYTE * dst, const UBYTE * name, const UBYTE pad, const UBYTE sfx, con
 	int i;
 	int j;
 
-	if(NULL == L1_Encode(&dst[1], name, pad, sfx))
-		return(-1);
+	L1_Encode(&dst[1], name, pad, sfx);
 
 	dst[0] = 0x20;
 	lenpos = 33;
@@ -1953,6 +1974,8 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 		goto out;
 	}
 
+	memset(&sox,0,sizeof(sox));
+
 	sox.sin_family = AF_INET;
 	sox.sin_addr.s_addr = htonl(0xFFFFFFFF);
 
@@ -1965,16 +1988,14 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 	memcpy(buffer, header, (total_len = sizeof(header)));
 
 	n = L2_Encode(&buffer[total_len], name, ' ', '\0', scope);
-	if(n < 0)
-	{
-		SHOWMSG("name encoding failed");
-		result = EINVAL;
-		goto out;
-	}
-
 	total_len += n;
+
+	ASSERT( total_len <= (int)sizeof(buffer) );
+
 	memcpy(&buffer[total_len], query_tail, sizeof(query_tail));
 	total_len += sizeof(query_tail);
+
+	ASSERT( total_len <= (int)sizeof(buffer) );
 
 	result = ENOENT;
 	n = 0;
@@ -2024,7 +2045,9 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 			/* Find the NB/IP fields which directly follow
 			 * the name.
 			 */
-			for(i = sizeof(header) + strlen(&buffer[sizeof(header)])+1 ; i < n - (int)sizeof(query_tail) ; i++)
+			for(i = sizeof(header) + strlen(&buffer[sizeof(header)])+1 ;
+			    i < n - (int)sizeof(query_tail) ;
+			    i++)
 			{
 				if(memcmp(&buffer[i], query_tail, sizeof(query_tail)) == SAME)
 				{
@@ -2244,18 +2267,14 @@ static BOOL
 is_reserved_name(const TEXT * name)
 {
 	BOOL result = TRUE;
-	TEXT c;
 
 	/* Disallow "." and "..". */
 	if(name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0')))
 		goto out;
 
 	/* Disallow the use of the backslash in file names. */
-	while((c = (*name++)) != '\0')
-	{
-		if(c == SMB_PATH_SEPARATOR)
-			goto out;
-	}
+	if(strchr(name,SMB_PATH_SEPARATOR) != NULL)
+		goto out;
 
 	result = FALSE;
 
@@ -3580,7 +3599,7 @@ build_full_path_name(
 					{
 						if(buffer[i] == SMB_PATH_SEPARATOR)
 						{
-							/* Don't move above the root, e.g "\foo" must become "foo". */
+							/* Don't move above the root, e.g "\foo" must become "\". */
 							if(i == 0)
 							{
 								to = &buffer[i+1];
@@ -4014,6 +4033,112 @@ restart_directory_scanning(const struct MsgPort * user,const TEXT * parent_dir_n
 
 /****************************************************************************/
 
+/* Check if a file lock was not created by this file system
+ * through CreateDir(), Lock(), ParentDir(), ParentOfFH(),
+ * DupLock() or DupLockFromFH(). Returns TRUE if this is case,
+ * FALSE otherwise. If this function returns FALSE, then the
+ * file lock has a valid LockNode attached.
+ *
+ * Note that the ZERO lock is always rejected as invalid
+ * by this function.
+ */
+static BOOL
+lock_is_invalid(const struct FileLock * lock,int * error_ptr)
+{
+	int error = ERROR_INVALID_LOCK;
+	const struct LockNode * ln;
+	BOOL is_invalid = TRUE;
+
+	/* The ZERO lock is considered invalid. */
+	if(lock == NULL)
+	{
+		SHOWMSG("ZERO lock not permitted");
+		goto out;
+	}
+
+	/* The lock has to be associated with this
+	 * file system's volume node.
+	 */
+	if(lock->fl_Volume != MKBADDR(VolumeNode))
+	{
+		SHOWMSG("volume node does not match");
+
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
+	/* We need a valid lock node to be associated
+	 * with the file lock.
+	 */
+	ln = (struct LockNode *)lock->fl_Key;
+
+	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("lock doesn't look right");
+		goto out;
+	}
+
+	is_invalid = FALSE;
+
+	error = OK;
+
+ out:
+
+	if(error_ptr != NULL)
+		(*error_ptr) = error;
+
+	return(is_invalid);
+}
+
+/****************************************************************************/
+
+/* Check if a file node was not created by this file system
+ * through Open() or OpenFromLock(). Returns TRUE if this is case,
+ * FALSE otherwise.
+ */
+static BOOL
+file_is_invalid(const struct FileNode * fn,int * error_ptr)
+{
+	int error = ERROR_INVALID_LOCK;
+	BOOL is_invalid = TRUE;
+
+	if(fn == NULL)
+	{
+		SHOWMSG("no file node found");
+		goto out;
+	}
+
+	/* The file has to be associated with this
+	 * file system's volume node.
+	 */
+	if(fn->fn_Volume != VolumeNode)
+	{
+		SHOWMSG("volume node does not match");
+
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
+	if(fn->fn_Magic != ID_SMB_DISK)
+	{
+		SHOWMSG("file doesn't look right");
+		goto out;
+	}
+
+	is_invalid = FALSE;
+
+	error = OK;
+
+ out:
+
+	if(error_ptr != NULL)
+		(*error_ptr) = error;
+
+	return(is_invalid);
+}
+
+/****************************************************************************/
+
 static BPTR
 Action_Parent(
 	const struct MsgPort *	user,
@@ -4042,15 +4167,10 @@ Action_Parent(
 		goto out;
 	}
 
-	parent_ln = (struct LockNode *)parent->fl_Key;
-
-	if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("lock doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(lock_is_invalid(parent,&error))
 		goto out;
-	}
+
+	parent_ln = (struct LockNode *)parent->fl_Key;
 
 	parent_ln->ln_LastUser = user;
 
@@ -4127,7 +4247,6 @@ Action_DeleteObject(
 	STRPTR full_parent_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
-	struct LockNode * ln;
 	smba_stat_t st;
 	TEXT * last_name;
 	int last_name_len;
@@ -4146,15 +4265,12 @@ Action_DeleteObject(
 
 	if(parent != NULL)
 	{
-		ln = (struct LockNode *)parent->fl_Key;
+		struct LockNode * ln;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(parent,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)parent->fl_Key;
 
 		parent_name = ln->ln_FullName;
 
@@ -4186,6 +4302,9 @@ Action_DeleteObject(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -4230,7 +4349,7 @@ Action_DeleteObject(
 		goto out;
 
 	/* Trying to delete the root directory, are you kidding? */
-	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot delete the root directory\n"));
 
@@ -4386,15 +4505,12 @@ Action_CreateDir(
 
 	if(parent != NULL)
 	{
-		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
+		struct LockNode * parent_ln;
 
-		if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(parent,&error))
 			goto out;
-		}
+
+		parent_ln = (struct LockNode *)parent->fl_Key;
 
 		parent_ln->ln_LastUser = user;
 
@@ -4422,6 +4538,9 @@ Action_CreateDir(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -4461,7 +4580,7 @@ Action_CreateDir(
 		goto out;
 
 	/* Trying to overwrite the root directory, are you kidding? */
-	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot overwrite the root directory\n"));
 
@@ -4569,15 +4688,12 @@ Action_LocateObject(
 
 	if(parent != NULL)
 	{
-		struct LockNode * parent_ln = (struct LockNode *)parent->fl_Key;
+		struct LockNode * parent_ln;
 
-		if(parent_ln == NULL || parent_ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(parent,&error))
 			goto out;
-		}
+
+		parent_ln = (struct LockNode *)parent->fl_Key;
 
 		parent_ln->ln_LastUser = user;
 
@@ -4605,6 +4721,9 @@ Action_LocateObject(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -4691,13 +4810,15 @@ Action_CopyDir(
 	struct LockNode * ln = NULL;
 	const TEXT * source_name;
 	int source_name_len;
-	LONG source_mode;
 	int error;
 
 	ENTER();
 
 	SHOWVALUE(lock);
 
+	/* If a specific lock is to be duplicated, then that
+	 * better be a shared lock.
+	 */
 	if(lock != NULL && lock->fl_Access != SHARED_LOCK)
 	{
 		SHOWMSG("cannot duplicate exclusive lock");
@@ -4714,27 +4835,26 @@ Action_CopyDir(
 
 	memset(ln,0,sizeof(*ln));
 
+	/* Duplicate a specific lock? */
 	if(lock != NULL)
 	{
-		struct LockNode * source = (struct LockNode *)lock->fl_Key;
+		struct LockNode * source;
 
-		if(source == NULL || source->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(lock,&error))
 			goto out;
-		}
+
+		source = (struct LockNode *)lock->fl_Key;
 
 		source->ln_LastUser = user;
 
 		source_name = source->ln_FullName;
-		source_mode = source->ln_FileLock.fl_Access;
 	}
+	/* We are asked to duplicate the ZERO lock, which refers
+	 * to the disk's root directory.
+	 */
 	else
 	{
 		source_name = SMB_ROOT_DIR_NAME;
-		source_mode = SHARED_LOCK;
 	}
 
 	source_name_len = strlen(source_name);
@@ -4751,7 +4871,7 @@ Action_CopyDir(
 
 	ln->ln_FileLock.fl_Key		= (LONG)ln;
 	ln->ln_Magic				= ID_SMB_DISK;
-	ln->ln_FileLock.fl_Access	= source_mode;
+	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
 	ln->ln_FileLock.fl_Task		= FileSystemPort;
 	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
 	ln->ln_FullName				= full_name;
@@ -4794,28 +4914,24 @@ Action_FreeLock(
 	const struct LockNode * key;
 	struct LockNode * found;
 	struct LockNode * ln;
-	int error = OK;
 
 	ENTER();
 
 	SHOWVALUE(lock);
 
+	/* Passing ZERO is harmless. */
 	if(lock == NULL)
 		goto out;
 
 	/* Make sure that no lock is released twice, and that we
 	 * know which locks are ours.
 	 */
-	found = NULL;
-	key = (struct LockNode *)lock->fl_Key;
-
-	if(key == NULL || key->ln_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("lock doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(lock_is_invalid(lock,NULL))
 		goto out;
-	}
+
+	found = NULL;
+
+	key = (struct LockNode *)lock->fl_Key;
 
 	for(ln = (struct LockNode *)LockList.mlh_Head ;
 		ln->ln_MinNode.mln_Succ != NULL ;
@@ -4829,10 +4945,7 @@ Action_FreeLock(
 	}
 
 	if(found == NULL)
-	{
-		error = ERROR_INVALID_LOCK;
 		goto out;
-	}
 
 	Remove((struct Node *)found);
 
@@ -4845,7 +4958,7 @@ Action_FreeLock(
 
  out:
 
-	(*error_ptr) = error;
+	(*error_ptr) = OK;
 
 	RETURN(result);
 	return(result);
@@ -4872,15 +4985,12 @@ Action_SameLock(
 
 	if(lock1 != NULL)
 	{
-		struct LockNode * ln = (struct LockNode *)lock1->fl_Key;
+		struct LockNode * ln;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(lock1,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)lock1->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -4893,15 +5003,12 @@ Action_SameLock(
 
 	if(lock2 != NULL)
 	{
-		struct LockNode * ln = (struct LockNode *)lock2->fl_Key;
+		struct LockNode * ln;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(lock2,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)lock2->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -4958,15 +5065,12 @@ Action_SetProtect(
 
 	if(parent != NULL)
 	{
-		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+		struct LockNode * ln;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(parent,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)parent->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -4994,6 +5098,9 @@ Action_SetProtect(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -5017,7 +5124,7 @@ Action_SetProtect(
 	/* Trying to change the protection bits of the root
 	 * directory, are you kidding?
 	 */
-	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot change protection bits of the root directory\n"));
 
@@ -5155,15 +5262,10 @@ Action_RenameObject(
 
 	if(source_lock != NULL)
 	{
-		ln = (struct LockNode *)source_lock->fl_Key;
-
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(source_lock,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)source_lock->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -5189,6 +5291,9 @@ Action_RenameObject(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -5232,7 +5337,7 @@ Action_RenameObject(
 		goto out;
 
 	/* Trying to rename the root directory, are you kidding? */
-	if(full_source_name[0] == SMB_PATH_SEPARATOR && full_source_name[1] == '\0')
+	if(strcmp(full_source_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot rename the root directory\n"));
 
@@ -5242,15 +5347,10 @@ Action_RenameObject(
 
 	if(destination_lock != NULL)
 	{
-		ln = (struct LockNode *)destination_lock->fl_Key;
-
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(destination_lock,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)destination_lock->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -5276,6 +5376,9 @@ Action_RenameObject(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -5298,7 +5401,7 @@ Action_RenameObject(
 			 * MS-DOS wildcard characters. This will only end
 			 * in tears later...
 			 */
-			error = ERROR_OBJECT_NOT_FOUND;
+			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
 		}
 	}
@@ -5315,7 +5418,7 @@ Action_RenameObject(
 		goto out;
 
 	/* Trying to replace the root directory, are you kidding? */
-	if(full_destination_name[0] == SMB_PATH_SEPARATOR && full_destination_name[1] == '\0')
+	if(strcmp(full_destination_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot replace the root directory\n"));
 
@@ -5402,7 +5505,7 @@ Action_DiskInfo(
 		if(block_size <= 0)
 			block_size = 512;
 
-		if(block_size < 512)
+		if (block_size < 512)
 		{
 			num_blocks		/= (512 / block_size);
 			num_blocks_free	/= (512 / block_size);
@@ -5459,36 +5562,27 @@ Action_Info(
 	struct InfoData *		id,
 	LONG *					error_ptr)
 {
-	struct LockNode * ln;
 	LONG result = DOSFALSE;
-	LONG error = OK;
+	int error = OK;
 
 	ENTER();
 
 	SHOWVALUE(lock);
 
 	/* We need to check if the lock matches the volume node. However,
-	 * a NULL lock is valid, too.
+	 * a ZERO lock is valid, too.
 	 */
-	if(lock != NULL && lock->fl_Volume != MKBADDR(VolumeNode))
+	if(lock != NULL)
 	{
-		SHOWMSG("volume node does not match");
+		struct LockNode * ln;
 
-		error = ERROR_NO_DISK;
-		goto out;
+		if(lock_is_invalid(lock, &error))
+			goto out;
+
+		ln = (struct LockNode *)lock->fl_Key;
+
+		ln->ln_LastUser = user;
 	}
-
-	ln = (struct LockNode *)lock->fl_Key;
-
-	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("lock doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
-		goto out;
-	}
-
-	ln->ln_LastUser = user;
 
 	result = Action_DiskInfo(id,error_ptr);
 
@@ -5509,6 +5603,7 @@ Action_ExamineObject(
 	struct FileInfoBlock *	fib,
 	LONG *					error_ptr)
 {
+	BOOL is_root_directory = TRUE;
 	LONG result = DOSFALSE;
 	int error = OK;
 
@@ -5520,52 +5615,19 @@ Action_ExamineObject(
 
 	fib->fib_DiskKey = -1;
 
-	if(lock == NULL)
+	/* If the ZERO lock is involved, it stands in for the
+	 * root directory. Otherwise it might be a lock on a
+	 * file or directory.
+	 */
+	if(lock != NULL)
 	{
-		const TEXT * volume_name;
-		int len;
-
-		SHOWMSG("ZERO root lock");
-
-		ASSERT( VolumeNode != NULL );
-
-		volume_name = BADDR(VolumeNode->dol_Name);
-		len = volume_name[0];
-
-		SHOWPOINTER(volume_name);
-		SHOWVALUE(len);
-
-		ASSERT( len < (int)sizeof(fib->fib_FileName) );
-
-		/* Just don't overrun the buffer. */
-		if(len >= (int)sizeof(fib->fib_FileName))
-		{
-			D(("root directory name is too long (%ld >= %ld)", len, sizeof(fib->fib_FileName)));
-
-			error = ERROR_BUFFER_OVERFLOW;
-			goto out;
-		}
-
-		memcpy(&fib->fib_FileName[1],&volume_name[1],len);
-		fib->fib_FileName[0] = len;
-
-		fib->fib_DirEntryType	= ST_ROOT;
-		fib->fib_EntryType		= ST_ROOT;
-		fib->fib_NumBlocks		= 1;
-		fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
-	}
-	else
-	{
-		struct LockNode * ln = (struct LockNode *)lock->fl_Key;
+		struct LockNode * ln;
 		smba_stat_t st;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(lock,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)lock->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -5579,42 +5641,8 @@ Action_ExamineObject(
 
 		D(("ln->ln_FullName = '%s'",escape_name(ln->ln_FullName)));
 
-		if(strcmp(ln->ln_FullName,SMB_ROOT_DIR_NAME) == SAME)
-		{
-			const TEXT * volume_name;
-			int len;
-
-			SHOWMSG("root lock");
-
-			ASSERT( VolumeNode != NULL );
-
-			volume_name = BADDR(VolumeNode->dol_Name);
-			len = volume_name[0];
-
-			SHOWPOINTER(volume_name);
-			SHOWVALUE(len);
-
-			ASSERT( len < (int)sizeof(fib->fib_FileName) );
-
-			/* Just don't overrun the buffer. */
-			if(len >= (int)sizeof(fib->fib_FileName))
-			{
-				D(("root directory name is too long (%ld >= %ld)", len, sizeof(fib->fib_FileName)));
-
-				error = ERROR_BUFFER_OVERFLOW;
-				goto out;
-			}
-
-			memcpy(&fib->fib_FileName[1],&volume_name[1],len);
-			fib->fib_FileName[0] = len;
-
-			fib->fib_DirEntryType	= ST_ROOT;
-			fib->fib_EntryType		= ST_ROOT;
-			fib->fib_NumBlocks		= 1;
-			fib->fib_DiskKey		= 0;
-			fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
-		}
-		else
+		/* Is this a file or directory rather than the root directory? */
+		if(strcmp(ln->ln_FullName,SMB_ROOT_DIR_NAME) != SAME)
 		{
 			QUAD size_quad;
 			QUAD num_blocks_quad;
@@ -5622,6 +5650,10 @@ Action_ExamineObject(
 			const TEXT * name;
 			int name_len;
 			LONG seconds;
+
+			SHOWMSG("file or directory");
+
+			is_root_directory = FALSE;
 
 			name = get_base_name(ln->ln_FullName,strlen(ln->ln_FullName));
 			name_len = strlen(name);
@@ -5714,9 +5746,47 @@ Action_ExamineObject(
 
 			D(("is directory = %s",st.is_dir ? "yes" : "no"));
 
+			/* If this is a directory, make calls to ExNext() possible. */
 			if(st.is_dir)
 				fib->fib_DiskKey = 0;
 		}
+	}
+
+	/* So this is actually the root directory. */
+	if(is_root_directory)
+	{
+		const TEXT * volume_name;
+		int len;
+
+		SHOWMSG("root directory");
+
+		ASSERT( VolumeNode != NULL );
+
+		volume_name = BADDR(VolumeNode->dol_Name);
+		len = volume_name[0];
+
+		SHOWPOINTER(volume_name);
+		SHOWVALUE(len);
+
+		ASSERT( len < (int)sizeof(fib->fib_FileName) );
+
+		/* Just don't overrun the buffer. */
+		if(len >= (int)sizeof(fib->fib_FileName))
+		{
+			D(("root directory name is too long (%ld >= %ld)", len, sizeof(fib->fib_FileName)));
+
+			error = ERROR_BUFFER_OVERFLOW;
+			goto out;
+		}
+
+		memcpy(&fib->fib_FileName[1],&volume_name[1],len);
+		fib->fib_FileName[0] = len;
+
+		fib->fib_DirEntryType	= ST_ROOT;
+		fib->fib_EntryType		= ST_ROOT;
+		fib->fib_NumBlocks		= 1;
+		fib->fib_DiskKey		= 0;
+		fib->fib_Date			= VolumeNode->dol_misc.dol_volume.dol_VolumeDate;
 	}
 
 	result = DOSTRUE;
@@ -5982,36 +6052,23 @@ Action_ExamineNext(
 
 	SHOWVALUE(lock);
 
+	if(lock_is_invalid(lock,&error))
+	{
+		fib->fib_DiskKey = -1;
+		goto out;
+	}
+
+	ln = (struct LockNode *)lock->fl_Key;
+
+	ln->ln_LastUser = user;
+
+	/* Is the job finished already? */
 	if(fib->fib_DiskKey == -1)
 	{
 		SHOWMSG("scanning finished.");
 		error = ERROR_NO_MORE_ENTRIES;
 		goto out;
 	}
-
-	if(lock == NULL)
-	{
-		SHOWMSG("invalid lock");
-
-		fib->fib_DiskKey = -1;
-
-		error = ERROR_INVALID_LOCK;
-		goto out;
-	}
-
-	ln = (struct LockNode *)lock->fl_Key;
-
-	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("lock doesn't look right");
-
-		fib->fib_DiskKey = -1;
-
-		error = ERROR_INVALID_LOCK;
-		goto out;
-	}
-
-	ln->ln_LastUser = user;
 
 	/* Check if we should restart scanning the directory
 	 * contents. This is tricky at best and may produce
@@ -6444,6 +6501,14 @@ Action_ExamineAll(
 
 	eac->eac_Entries = 0;
 
+	/* Check if the lock is suitable. */
+	if(lock_is_invalid(lock, &error))
+		goto out;
+
+	ln = (struct LockNode *)lock->fl_Key;
+
+	ln->ln_LastUser = last_user;
+
 	/* The buffer has to be large enough for at
 	 * least the 'next entry' pointer to be stored.
 	 */
@@ -6466,26 +6531,16 @@ Action_ExamineAll(
 		goto out;
 	}
 
-	/* Check if the lock is suitable. */
-	if(lock == NULL)
+	/* Is this even a valid type parameter? All supported
+	 * type values are > 1.
+	 */
+	if(type < ED_NAME)
 	{
-		SHOWMSG("invalid lock");
+		D(("type %ld is not supported", type));
 
-		error = ERROR_INVALID_LOCK;
+		error = ERROR_BAD_NUMBER;
 		goto out;
 	}
-
-	ln = (struct LockNode *)lock->fl_Key;
-
-	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("lock doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
-		goto out;
-	}
-
-	ln->ln_LastUser = last_user;
 
 	/* Figure out how much space a single directory
 	 * entry will always require, with the name not
@@ -6548,6 +6603,14 @@ Action_ExamineAll(
 
 			record_size = offsetof(struct ExAllData,ed_OwnerUID) + (sizeof(ed->ed_OwnerUID) + sizeof(ed->ed_OwnerGID));
 			break;
+	}
+
+	if(buffer_size < record_size)
+	{
+		D(("buffer is too short (%ld bytes, record size is %ld).",buffer_size, record_size));
+
+		error = ERROR_NO_FREE_STORE;
+		goto out;
 	}
 
 	memset(&ec,0,sizeof(ec));
@@ -6695,12 +6758,28 @@ Action_ExamineAllEnd(
 	struct ExAllControl *	eac,
 	LONG *					error_ptr)
 {
-	LONG result = DOSTRUE;
+	LONG result = DOSFALSE;
+	struct LockNode * ln;
+	int error = OK;
 
 	ENTER();
 
+	/* Check if the lock is suitable. */
+	if(lock_is_invalid(lock,&error))
+		goto out;
+
+	ln = (struct LockNode *)lock->fl_Key;
+
+	ln->ln_LastUser = last_user;
+
 	/* Make Action_ExamineAll() return no more entries. */
 	eac->eac_LastKey = (ULONG)-1;
+
+	result = DOSTRUE;
+
+ out:
+
+	(*error_ptr) = error;
 
 	RETURN(result);
 	return(result);
@@ -6757,15 +6836,12 @@ Action_Find(
 
 	if(parent != NULL)
 	{
-		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+		struct LockNode * ln;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(parent,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)parent->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -6791,6 +6867,9 @@ Action_Find(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -6852,7 +6931,7 @@ Action_Find(
 		goto out;
 
 	/* Trying to open the root directory? */
-	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot open the root directory\n"));
 
@@ -6871,6 +6950,7 @@ Action_Find(
 
 	fn->fn_Handle	= fh;
 	fn->fn_Magic	= ID_SMB_DISK;
+	fn->fn_Volume	= VolumeNode;
 	fn->fn_FullName	= full_name;
 	fn->fn_Mode		= (action == ACTION_FINDOUTPUT) ? EXCLUSIVE_LOCK : SHARED_LOCK;
 
@@ -6912,6 +6992,12 @@ Action_Find(
 		STRPTR dir_name,base_name;
 		smba_file_t * dir;
 
+		if(WriteProtected)
+		{
+			error = ERROR_DISK_WRITE_PROTECTED;
+			goto out;
+		}
+
 		/* Do not create a file whose name would contain
 		 * MS-DOS wildcard characters. This will only
 		 * end in tears later...
@@ -6919,12 +7005,6 @@ Action_Find(
 		if(name_contains_wildcard_characters)
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
-			goto out;
-		}
-
-		if(WriteProtected)
-		{
-			error = ERROR_DISK_WRITE_PROTECTED;
 			goto out;
 		}
 
@@ -7032,13 +7112,8 @@ Action_Read(
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(fn,&error))
 		goto out;
-	}
 
 	SHOWVALUE(length);
 
@@ -7078,19 +7153,14 @@ Action_Write(
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
-		goto out;
-	}
-
 	if(WriteProtected)
 	{
 		error = ERROR_DISK_WRITE_PROTECTED;
 		goto out;
 	}
+
+	if(file_is_invalid(fn,&error))
+		goto out;
 
 	SHOWVALUE(length);
 
@@ -7128,13 +7198,8 @@ Action_End(
 	struct FileNode * found;
 	int error = OK;
 
-	if(which_fn == NULL || which_fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(which_fn,&error))
 		goto out;
-	}
 
 	found = NULL;
 
@@ -7193,13 +7258,8 @@ Action_Seek(
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(fn,&error))
 		goto out;
-	}
 
 	previous_position_quad = fn->fn_OffsetQuad;
 
@@ -7295,13 +7355,14 @@ Action_SetFileSize(
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
+	if(WriteProtected)
 	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+		error = ERROR_DISK_WRITE_PROTECTED;
 		goto out;
 	}
+
+	if(file_is_invalid(fn,&error))
+		goto out;
 
 	previous_position_quad = fn->fn_OffsetQuad;
 
@@ -7422,15 +7483,12 @@ Action_SetDate(
 
 	if(parent != NULL)
 	{
-		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+		struct LockNode * ln;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(parent,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)parent->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -7458,6 +7516,9 @@ Action_SetDate(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -7479,7 +7540,7 @@ Action_SetDate(
 		goto out;
 
 	/* Trying to change the date of the root directory? */
-	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot change the date of the root directory\n"));
 
@@ -7580,13 +7641,8 @@ Action_ExamineFH(
 
 	fib->fib_DiskKey = -1;
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(fn,&error))
 		goto out;
-	}
 
 	if(smba_getattr(fn->fn_File,&st,&error) < 0)
 	{
@@ -7730,13 +7786,8 @@ Action_ParentFH(
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(fn,&error))
 		goto out;
-	}
 
 	error = get_parent_dir_name(fn->fn_FullName,strlen(fn->fn_FullName),&parent_dir_name);
 	if(error != OK)
@@ -7800,13 +7851,8 @@ Action_CopyDirFH(
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(fn,&error))
 		goto out;
-	}
 
 	if(fn->fn_Mode != SHARED_LOCK)
 	{
@@ -7886,15 +7932,10 @@ Action_FHFromLock(
 
 	SHOWVALUE(fl);
 
-	ln = (struct LockNode *)fl->fl_Key;
-
-	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("lock doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(lock_is_invalid(fl,&error))
 		goto out;
-	}
+
+	ln = (struct LockNode *)fl->fl_Key;
 
 	/* Is this a directory and not a file? */
 	if((ln->ln_File->dirent.attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0)
@@ -7917,6 +7958,7 @@ Action_FHFromLock(
 
 	fn->fn_Handle	= fh;
 	fn->fn_Magic	= ID_SMB_DISK;
+	fn->fn_Volume	= VolumeNode;
 	fn->fn_FullName	= ln->ln_FullName;
 	fn->fn_File		= ln->ln_File;
 	fn->fn_Mode		= fl->fl_Access;
@@ -7955,15 +7997,15 @@ Action_RenameDisk(
 
 	ENTER();
 
-	if(NOT VolumeNodeAdded)
-	{
-		error = ERROR_OBJECT_IN_USE;
-		goto out;
-	}
-
 	if(WriteProtected)
 	{
 		error = ERROR_DISK_WRITE_PROTECTED;
+		goto out;
+	}
+
+	if(NOT VolumeNodeAdded)
+	{
+		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
@@ -8071,17 +8113,12 @@ Action_ChangeMode(
 	 */
 	if(type == CHANGE_LOCK)
 	{
+		if(lock_is_invalid(fl,&error))
+			goto out;
+
 		fl = object;
 
 		ln = (struct LockNode *)fl->fl_Key;
-
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
-			goto out;
-		}
 
 		name = ln->ln_FullName;
 		old_mode = fl->fl_Access;
@@ -8094,13 +8131,8 @@ Action_ChangeMode(
 
 		fn = (struct FileNode *)fh->fh_Arg1;
 
-		if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("file doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(file_is_invalid(fn,&error))
 			goto out;
-		}
 
 		name = fn->fn_FullName;
 		old_mode = fn->fn_Mode;
@@ -8288,15 +8320,12 @@ Action_SetComment(
 
 	if(parent != NULL)
 	{
-		struct LockNode * ln = (struct LockNode *)parent->fl_Key;
+		struct LockNode * ln;
 
-		if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
-		{
-			SHOWMSG("lock doesn't look right");
-
-			error = ERROR_INVALID_LOCK;
+		if(lock_is_invalid(parent,&error))
 			goto out;
-		}
+
+		ln = (struct LockNode *)parent->fl_Key;
 
 		ln->ln_LastUser = user;
 
@@ -8322,6 +8351,9 @@ Action_SetComment(
 		if(name[i] == '/')
 			break;
 
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
 		if(name[i] == ':' && i > 0)
 		{
 			name_len -= i+1;
@@ -8343,7 +8375,7 @@ Action_SetComment(
 		goto out;
 
 	/* Trying to change the comment of the root directory? */
-	if(full_name[0] == SMB_PATH_SEPARATOR && full_name[1] == '\0')
+	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
 		LOG(("cannot change the comment of the root directory\n"));
 
@@ -8378,7 +8410,7 @@ Action_SetComment(
 /****************************************************************************/
 
 static LONG
-Action_LockRecord (
+Action_LockRecord(
 	struct FileNode *	fn,
 	LONG				offset,
 	LONG				length,
@@ -8392,13 +8424,8 @@ Action_LockRecord (
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(fn,&error))
 		goto out;
-	}
 
 	/* Sanity checks... */
 	if (mode < REC_EXCLUSIVE || mode > REC_SHARED_IMMED)
@@ -8449,7 +8476,7 @@ Action_LockRecord (
 /****************************************************************************/
 
 static LONG
-Action_FreeRecord (
+Action_FreeRecord(
 	struct FileNode *	fn,
 	LONG				offset,
 	LONG				length,
@@ -8460,13 +8487,8 @@ Action_FreeRecord (
 
 	ENTER();
 
-	if(fn == NULL || fn->fn_Magic != ID_SMB_DISK)
-	{
-		SHOWMSG("file doesn't look right");
-
-		error = ERROR_INVALID_LOCK;
+	if(file_is_invalid(fn,&error))
 		goto out;
-	}
 
 	/* Sanity checks... */
 	if(offset < 0 || length <= 0 || offset + length < offset)
@@ -8494,7 +8516,11 @@ Action_FreeRecord (
 /****************************************************************************/
 
 static void
-file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * volume_name,const TEXT * service_name)
+file_system_handler(
+	BOOL			raise_priority,
+	const TEXT *	device_name,
+	const TEXT *	volume_name,
+	const TEXT *	service_name)
 {
 	struct Process * this_process = (struct Process *)FindTask(NULL);
 	BOOL sign_off = FALSE;
@@ -8513,6 +8539,7 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 		struct CommandLineInterface * cli;
 
 		cli = Cli();
+
 		if(NOT cli->cli_Background)
 		{
 			TEXT name[MAX_FILENAME_LEN+1];
@@ -8553,8 +8580,8 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 					break;
 			}
 
-			LocalFPrintf(ZERO, "Connected '%s' to '%s:'; \"Break %ld\" or [Ctrl-C] to stop... ",
-			service_name,name,which);
+			LocalFPrintf(ZERO, "Connected '%s' to '%s:'; \"Break %ld\" or [Ctrl+C] to stop... ",
+				service_name,name,which);
 
 			Flush(Output());
 
@@ -8664,7 +8691,7 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 			D(("signals = 0x%08lx",signals));
 
 			/* We don't want to call FD_ZERO() on each loop
-			 * count, because it is costly. This is why we
+			 * count because it is costly. This is why we
 			 * clear the socket which we previously used on
 			 * WaitSelect(), just in case the next loop
 			 * iteration may end up changing the value of
@@ -8698,29 +8725,39 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 
 				#if DEBUG
 				{
-					const struct Process * sender = (struct Process *)dp->dp_Port->mp_SigTask;
+					/* We try to provide as much detail about the sender as
+					 * possible.
+					 */
+					if((dp->dp_Port->mp_Flags & PF_ACTION) == PA_SIGNAL)
+					{
+						const struct Process * sender = (struct Process *)dp->dp_Port->mp_SigTask;
 
-					if(sender == NULL || TypeOfMem((APTR)sender) == 0)
-					{
-						D(("got packet; sender 0x%08lx", sender));
-					}
-					else
-					{
-						if (sender->pr_Task.tc_Node.ln_Type == NT_TASK)
+						/* Is this even a valid address? */
+						if(sender == NULL || TypeOfMem((APTR)sender) == 0)
+						{
+							D(("got packet; sender 0x%08lx", sender));
+						}
+						/* Is the sender a Task? */
+						else if (sender->pr_Task.tc_Node.ln_Type == NT_TASK)
 						{
 							D(("got packet; sender '%s' (Task)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
 						}
+						/* Is this a Process with a CLI attached, e.g. a shell
+						 * command may have sent this packet?
+						 */
 						else if (sender->pr_Task.tc_Node.ln_Type == NT_PROCESS && sender->pr_CLI != (BPTR)NULL)
 						{
 							const struct CommandLineInterface * cli = BADDR(sender->pr_CLI);
-							LONG cli_number = 0;
-							LONG max_cli, i;
-							TEXT command_name[256];
-
-							command_name[0] = '\0';
 
 							if (TypeOfMem((APTR)cli) != 0)
 							{
+								LONG cli_number = 0;
+								LONG max_cli, i;
+								TEXT command_name[256];
+
+								/* Is this a known interactive shell or just
+								 * a pointer which looks good enough?
+								 */
 								for(max_cli = MaxCli(), i = 1 ; i <= max_cli ; i++)
 								{
 									if (FindCliProc(i) == sender)
@@ -8730,6 +8767,9 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 									}
 								}
 
+								/* Try to figure out the name of the shell
+								 * command, if possible.
+								 */
 								if(cli->cli_Module != (BPTR)NULL)
 								{
 									TEXT * cmd = BADDR(cli->cli_CommandName);
@@ -8739,39 +8779,46 @@ file_system_handler(BOOL raise_priority, const TEXT * device_name,const TEXT * v
 									memcpy(command_name,&cmd[1],len);
 									command_name[len] = '\0';
 								}
-							}
-							else
-							{
-								cli = NULL;
-							}
+								else
+								{
+									command_name[0] = '\0';
+								}
 
-							if(cli != NULL)
-							{
+								/* Is a this a shell command? */
 								if(command_name[0] != '\0')
 								{
+									/* Is this a known interactive shell? */
 									if(cli_number > 0)
 										D(("got packet; sender '%s' (CLI #%ld)", command_name, cli_number));
 									else
-										D(("got packet; sender '%s' (CLI)", command_name));
+										D(("got packet; sender '%s' (CLI 0x%08lx)", command_name, cli));
 								}
+								/* No, it's just a shell. */
 								else
 								{
-									D(("got packet; sender '%s' (CLI)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
+									D(("got packet; sender '%s' (CLI 0x%08lx)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name, cli));
 								}
 							}
+							/* Doesn't look like a valid CLI pointer. */
 							else
 							{
 								D(("got packet; sender '%s' (Process)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
 							}
 						}
+						/* Just a process, no CLI. */
 						else if (sender->pr_Task.tc_Node.ln_Type == NT_PROCESS)
 						{
 							D(("got packet; sender '%s' (Process)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
 						}
+						/* Something else (hopefully). */
 						else
 						{
 							D(("got packet; sender '%s'",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name));
 						}
+					}
+					else
+					{
+						D(("got packet (MsgPort=0x%08lx)", dp->dp_Port));
 					}
 				}
 				#endif /* DEBUG */
