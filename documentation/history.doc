@@ -2433,3 +2433,16 @@ smbfs 1.172 (26.7.2018)
   which in this case means if it is > 0. Previously, it treated 0
   just like it would treat values > ED_OWNER. Now it rejects 0 with
   the error code ERROR_BAD_NUMBER.
+
+
+smbfs 1.173 (5.8.2018)
+
+- Turns out that there is a counterpart to the broadcast name query
+  which Christopher R. Hertel provided me with. It is possible to ask
+  an SMB server about its own name if you send it a NetBIOS status
+  query, and if it responds to the query. Normally, you'd ask the
+  primary domain controller, which maintains the browse list of all
+  SMB servers in the neighbourhood, but this can work, too.
+
+  Anyway, you no longer need to add a local DNS record which associates
+  the IPv4 address of a SMB server with the name of that server.

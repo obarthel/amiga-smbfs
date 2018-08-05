@@ -1869,57 +1869,64 @@ smba_start(
 
 		LOG(("server network address is %s\n", server));
 
-		h_errno = 0;
-
-		h = gethostbyaddr ((char *) &server_ip_address.sin_addr.s_addr, sizeof (server_ip_address.sin_addr.s_addr), server_ip_address.sin_family);
-		if (h == NULL)
+		if(SendNetBIOSStatusQuery(server_ip_address,server_name,sizeof(server_name),NULL,0) == 0)
 		{
-			if(h_errno == 0)
-			{
-				report_error("Could not look up name of server with network address %s (%ld, %s).",server,errno,posix_strerror(errno));
+			D(("server %s provided its own name '%s'",Inet_NtoA(server_ip_address.sin_addr.s_addr),server_name));
+		}
+		else
+		{
+			h_errno = 0;
 
-				if(errno != 0)
-					(*error_ptr) = errno;
+			h = gethostbyaddr ((char *) &server_ip_address.sin_addr.s_addr, sizeof (server_ip_address.sin_addr.s_addr), server_ip_address.sin_family);
+			if (h == NULL)
+			{
+				if(h_errno == 0)
+				{
+					report_error("Could not look up name of server with network address %s (%ld, %s).",server,errno,posix_strerror(errno));
+
+					if(errno != 0)
+						(*error_ptr) = errno;
+					else
+						(*error_ptr) = ENOENT;
+				}
 				else
+				{
+					report_error("Could not look up name of server with network address %s (%ld, %s).",server,h_errno,host_strerror(h_errno));
 					(*error_ptr) = ENOENT;
+				}
+
+				goto out;
 			}
-			else
+			
+			name = h->h_name;
+
+			LOG(("server host name found (%s)\n",name));
+
+			/* Brian Willette: Now we will set the server name to the DNS
+			 * hostname, hopefully this will be the same as the NetBIOS name for
+			 * the server.
+			 *
+			 * We do this because the user supplied no hostname, and we
+			 * need one for NetBIOS, this is the best guess choice we have
+			 * NOTE: If the names are different between DNS and NetBIOS on
+			 * the windows side, the user MUST use the -s option.
+			 */
+			for (i = 0; i < MAXHOSTNAMELEN && name[i] != '.' && name[i] != '\0' ; i++)
+				host_name[i] = name[i];
+
+			host_name[i] = '\0';
+
+			/* Make sure the hostname is 16 characters or less (for NetBIOS) */
+			if (!opt_raw_smb && strlen (host_name) > 16)
 			{
-				report_error("Could not look up name of server with network address %s (%ld, %s).",server,h_errno,host_strerror(h_errno));
-				(*error_ptr) = ENOENT;
+				report_error("Server name '%s' is too long (max %ld characters).", host_name, 16);
+
+				(*error_ptr) = ENAMETOOLONG;
+				goto out;
 			}
 
-			goto out;
+			strlcpy (server_name, host_name, sizeof(server_name));
 		}
-		
-		name = h->h_name;
-
-		LOG(("server host name found (%s)\n",name));
-
-		/* Brian Willette: Now we will set the server name to the DNS
-		 * hostname, hopefully this will be the same as the NetBIOS name for
-		 * the server.
-		 *
-		 * We do this because the user supplied no hostname, and we
-		 * need one for NetBIOS, this is the best guess choice we have
-		 * NOTE: If the names are different between DNS and NetBIOS on
-		 * the windows side, the user MUST use the -s option.
-		 */
-		for (i = 0; i < MAXHOSTNAMELEN && name[i] != '.' && name[i] != '\0' ; i++)
-			host_name[i] = name[i];
-
-		host_name[i] = '\0';
-
-		/* Make sure the hostname is 16 characters or less (for NetBIOS) */
-		if (!opt_raw_smb && strlen (host_name) > 16)
-		{
-			report_error("Server name '%s' is too long (max %ld characters).", host_name, 16);
-
-			(*error_ptr) = ENAMETOOLONG;
-			goto out;
-		}
-
-		strlcpy (server_name, host_name, sizeof(server_name));
 	}
 
 	if(opt_password != NULL)

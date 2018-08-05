@@ -2096,6 +2096,252 @@ out:
 	return(result);
 }
 
+/* This is the counterpart to the BroadcastNameQuery() function
+ * which not only retrieves the name of the workstation, but also
+ * the name of the workgroup, if possible.
+ */
+int
+SendNetBIOSStatusQuery(
+	struct sockaddr_in	sox,
+	char *				server_name,
+	int					server_name_size,
+	char *				workgroup_name,
+	int					workgroup_name_size)
+{
+	static const UBYTE query[] =
+	{
+		0x07, 0xB2,	/* 1970 == 0x07B2. */
+		0x00, 0x00,	/* Binary 0 0000 0010001 0000 */
+		0x00, 0x01,	/* One name query. */
+		0x00, 0x00,	/* Zero answers. */
+		0x00, 0x00,	/* Zero authorities. */
+		0x00, 0x00,	/* Zero additional. */
+
+		/* Question name: "*" padded with \0 bytes, layer 2 encoded, NUL-terminated. */
+		0x20,	/* NetBIOS name format. */
+		0x43, 0x4b, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+		0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+		0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+		0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+		0x00,
+
+		/* Question type: NBSTAT = 33 (NetBIOS status query) */
+		0x00, 0x21,
+
+		/* Question class: IN = 1 */
+		0x00, 0x01
+	};
+
+	static const UBYTE query_tail[4] =
+	{
+		0x00, 0x21,
+		0x00, 0x01
+	};
+
+	struct timeval tv;
+	fd_set read_fds;
+	int sock_fd;
+	struct nmb_header nmb_header;
+	UBYTE buffer[512];
+	int i,n;
+	int result;
+	struct servent * s;
+
+	ENTER();
+
+	if(server_name_size > 0)
+	{
+		server_name_size--;
+		server_name[0] = '\0';
+	}
+
+	if(workgroup_name != NULL && workgroup_name_size > 0)
+	{
+		workgroup_name_size--;
+		workgroup_name[0] = '\0';
+	}
+
+	sock_fd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if(sock_fd < 0)
+	{
+		SHOWMSG("couldn't get the socket");
+		result = errno;
+		goto out;
+	}
+
+	s = getservbyname("netbios-ns","udp");
+	if(s != NULL)
+		sox.sin_port = s->s_port;
+	else
+		sox.sin_port = htons(137);
+
+	result = ENOENT;
+	n = 0;
+
+	/* Send the query packet; retry five times with a one second
+	 * delay in between.
+	 */
+	for(i = 0 ; i < 5 ; i++)
+	{
+		if(sendto(sock_fd, (void *) query, sizeof(query), 0, (struct sockaddr *)&sox, sizeof(sox)) < 0)
+		{
+			SHOWMSG("could not send the packet");
+			result = errno;
+			goto out;
+		}
+
+		/* Wait for a response to arrive. */
+		tv.tv_secs = 1;
+		tv.tv_micro = 0;
+
+		FD_ZERO(&read_fds);
+		FD_SET(sock_fd,&read_fds);
+
+		if(WaitSelect(sock_fd+1, &read_fds, NULL, NULL, &tv, NULL) > 0)
+		{
+			n = recv(sock_fd, buffer, sizeof(buffer), 0);
+			if(n < 0)
+			{
+				SHOWMSG("could not pick up the response packet");
+				result = errno;
+				goto out;
+			}
+			else if (n > 0)
+			{
+				break;
+			}
+		}
+	}
+
+	/* Did we get anything at all? */
+	if(n > (int)sizeof(nmb_header))
+	{
+		/* Check whether the query was successful, is a response,
+		 * and if there is an answer in it.
+		 */
+		memcpy(&nmb_header, buffer, sizeof(nmb_header));
+		if((nmb_header.flags & 0xF) == OK &&
+		   (nmb_header.flags & 0x8000) != 0 &&
+		   nmb_header.ancount > 0)
+		{
+			/* Find the NB/IP fields which directly follow
+			 * the name.
+			 */
+			for(i = sizeof(nmb_header) + strlen(&buffer[sizeof(nmb_header)])+1 ;
+			    i < n - (int)sizeof(query_tail) ;
+			    i++)
+			{
+				if(memcmp(&buffer[i], query_tail, sizeof(query_tail)) == SAME)
+				{
+					int start;
+
+					/* This should be the start of the interesting bits;
+					 * we skip the NB/IP fields and the TTL field.
+					 */
+					start = i + sizeof(query_tail) + sizeof(long);
+					if(start < n)
+					{
+						unsigned short data_length;
+
+						/* Get the data length. */
+						memcpy(&data_length, &buffer[start], 2);
+						start += 2;
+
+						if(data_length > 0 && start + data_length <= n)
+						{
+							int number_of_names;
+
+							number_of_names = buffer[start++];
+							if(number_of_names > 0)
+							{
+								const char * server_name_record = NULL;
+								const char * workgroup_name_record = NULL;
+								const char * s;
+								unsigned short flags;
+								int type;
+								int j, l;
+
+								for(j = 0 ;
+								    j < number_of_names && (server_name_record == NULL || workgroup_name_record == NULL) ;
+									j++)
+								{
+									l = 15;
+
+									s = (char *)&buffer[start];
+									start += l;
+
+									/* Remove padding. */
+									while(l > 0 && s[l-1] == ' ')
+										l--;
+
+									type = buffer[start++];
+
+									memcpy(&flags, &buffer[start], 2);
+									start += 2;
+
+									/* Not a group name, and name is active? */
+									if((flags & 0x8400) == 0x0400)
+									{
+										if(type == 0x00) /* workstation/redirector */
+										{
+											if(server_name_record == NULL)
+											{
+												server_name_record = s;
+
+												if(l > server_name_size)
+													l = server_name_size;
+
+												memcpy(server_name, s, l);
+												server_name[l] = '\0';
+
+												D(("server name is '%s'", server_name));
+
+												result = OK;
+											}
+										}
+									}
+									/* Group name, and name is active? */
+									else if ((flags & 0x8400) == 0x8400)
+									{
+										if(type == 0x00) /* workstation/redirector */
+										{
+											if(workgroup_name_record == NULL)
+											{
+												workgroup_name_record = s;
+
+												if(workgroup_name != NULL && workgroup_name_size >= 0)
+												{
+													if(l > workgroup_name_size)
+														l = workgroup_name_size;
+
+													memcpy(workgroup_name, s, l);
+													workgroup_name[l] = '\0';
+
+													D(("workgroup name is '%s'", workgroup_name));
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+
+					break;
+				}
+			}
+		}
+	}
+
+out:
+
+	if(sock_fd >= 0)
+		CloseSocket(sock_fd);
+
+	RETURN(result);
+	return(result);
+}
+
 /****************************************************************************/
 
 /* Send a disk change notification message which will be picked up

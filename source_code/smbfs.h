@@ -136,6 +136,7 @@ extern int h_errno;
 /****************************************************************************/
 
 extern int BroadcastNameQuery(const char *name, const char *scope, UBYTE *address);
+extern int SendNetBIOSStatusQuery(struct sockaddr_in sox,char * server_name,int server_name_size,char * workgroup_name,int workgroup_name_size);
 extern LONG compare_names(const TEXT * a,const TEXT * b);
 extern LONG get_time_zone_delta(void);
 extern STRPTR posix_strerror(int error);
