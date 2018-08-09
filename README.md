@@ -373,7 +373,11 @@ The **smbfs** program talks to the file server using a protocol called **SMBv1**
 
 There are several versions of the **SMBv1** protocol in use, and depending upon how old the server software is, **smbfs** may not work well with the file server.
 
-It may help if you change the protocol level which the **smbfs** program uses. The default is `PROTOCOL=core` which should work well enough with *SMB* server software available before 2009. The alternative is `PROTOCOL=nt1` which might provide better compatibility and performance.
+It may help if you change the protocol level which the **smbfs** program uses. The default is `PROTOCOL=core` which should work well enough with *SMB* server software available before 2009, and which is particularly suited for use with the *Samba* server software. How do you know if the *Samba* server software is being used? Unless you are connecting to a *Microsoft Windows* server, you can practically assume that *Samba* will provide the shared network file system.
+
+The alternative is `PROTOCOL=nt1` which might provide better compatibility and performance with *Microsoft Windows* systems.
+
+When in doubt, stick with `PROTOCOL=core`.
 
 ### 5.5. Time conversion
 
