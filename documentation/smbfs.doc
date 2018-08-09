@@ -15,7 +15,7 @@ Workbench or utilities such as Directory Opus as if the file server were a
 local disk drive.
 
 You may find smbfs useful if you want to access a NAS
-(network-attached-storage) drive, or even a Linux file server.
+(network-attached storage) drive, or even a Linux file server.
 
 
 2. What do you need to get started?
@@ -78,7 +78,7 @@ The share name to connect to would be "ALL".
 You may need to know which login name and which password are required to
 connect to the shared resource.
 
-Very rarely, you would need to know the name of the workgroup or domain which
+Very rarely, you would need to know the name of the work group or domain which
 the file server is a member of. In the example above, the name of the domain
 would be "ARBEITSGRUPPE".
 
@@ -126,7 +126,7 @@ error messages it may produce.
 
 4.2. Stopping the file system
 
-How do you 'unmount' the file system? Stopping the smbfs program will
+How do you "unmount" the file system? Stopping the smbfs program will
 unmount the file system. This can be accomplished by either hitting the
 [Ctrl]+C keys or by using the "Status" shell command and then the "Break"
 command.
@@ -301,7 +301,7 @@ it to be translated to all upper case characters.
 5.1.6. "DOMAIN=WORKGROUP/K"
 
 This option may be omitted, in which case the smbfs program will ask the file
-server about the workgroup which it is a member of. Should the server fail to
+server about the work group which it is a member of. Should the server fail to
 respond with this information, the smbfs program will use "WORKGROUP" as the
 domain name.
 
@@ -674,7 +674,7 @@ If the file already exists, debug output will be appended to it.
 
 By default the smbfs program operates in silent mode. It does not report what
 it is doing, it just tries to respond to file system requests. To obtain
-debugging output you may want to use the `DEBUG` option and specify a debug
+debugging output you may want to use the "DEBUG" option and specify a debug
 level greater than 0, e.g. "DEBUG=2". The larger the number you specify the
 more debugging output will be created.
 
@@ -690,7 +690,7 @@ background.
 6. Known problems
 
 The design of smbfs follows the original file system concept behind the
-code which the 'Sharity-Light' file system is based upon. And that is a
+code which the "Sharity-Light" file system is based upon. And that is a
 Unix file system which differs from Amiga specific file systems in many
 ways which can lead to problems which are discussed briefly below:
 
@@ -717,7 +717,7 @@ ways which can lead to problems which are discussed briefly below:
      Unix file systems, but it is very different with Amiga file systems.
      In smbfs this data separation can cause problems when deleting
      files from a directory while that directory is being scanned,
-     such as how this is being done by the 'Delete' shell command. The
+     such as how this is being done by the "Delete" shell command. The
      effects of these problems are that a directory may not be deleted
      even though it is empty or that for the same directory the same
      file may be reported twice in the listing.

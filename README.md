@@ -8,7 +8,7 @@ This file system can be used to access files made available by file servers whic
 
 These files can be accessed using shell commands such as `List`, the *Workbench* or utilities such as *Directory Opus* as if the file server were a local disk drive.
 
-You may find **smbfs** useful if you want to access a NAS (*network-attached-storage*) drive, or even a Linux file server.
+You may find **smbfs** useful if you want to access a NAS (*network-attached storage*) drive, or even a Linux file server.
 
 
 ## 2. What do you need to get started?
@@ -61,7 +61,7 @@ The share name to connect to would be `ALL`.
 
 You may need to know which login name and which password are required to connect to the shared resource.
 
-Very rarely, you would need to know the name of the workgroup or domain which the file server is a member of. In the example above, the name of the domain would be `ARBEITSGRUPPE`.
+Very rarely, you would need to know the name of the work group or domain which the file server is a member of. In the example above, the name of the domain would be `ARBEITSGRUPPE`.
 
 
 ## 4. Starting and stopping the file system
@@ -92,7 +92,7 @@ If you have trouble setting up the **smbfs** program, first make sure that it wo
 
 ### 4.2. Stopping the file system
 
-How do you 'unmount' the file system? Stopping the **smbfs** program will unmount the file system. This can be accomplished by either hitting the `[Ctrl]+C` keys or by using the `Status` shell command and then the `Break` command.
+How do you "unmount" the file system? Stopping the **smbfs** program will unmount the file system. This can be accomplished by either hitting the `[Ctrl]+C` keys or by using the `Status` shell command and then the `Break` command.
 
 For example, the `Status` shell command may produce the following output:
 
@@ -205,7 +205,7 @@ You need not provide for a password on the command line. Alternatively, you may 
 
 <pre>
 SetEnv smbfs_password *your password*
-Copy ENV:smbfs_password ENVARC:`
+Copy ENV:smbfs_password ENVARC:
 </pre>
 
 Keep in mind that passwords like these really should not be exposed by storing them in environment variables. But then the protocol **smbfs** uses is almost as insecure as it gets anyway.
@@ -226,14 +226,14 @@ However, it may be required to change the password to all-uppercase characters b
 
 #### 5.1.6. `DOMAIN=WORKGROUP/K`
 
-This option may be omitted, in which case the **smbfs** program will ask the file server about the workgroup which it is a member of. Should the server fail to respond with this information, the **smbfs** program will use `WORKGROUP` as the domain name.
+This option may be omitted, in which case the **smbfs** program will ask the file server about the work group which it is a member of. Should the server fail to respond with this information, the **smbfs** program will use `WORKGROUP` as the domain name.
 
 You should not need to specify the name of the work group or domain which the file server to connect to is a member of. However, if you do need to use it, you must make sure that the name is not longer than 16 characters. The name you provide will be translated to all upper case characters.
 
 You need not provide for a work group or domain name on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
 
 <pre>
-SetEnv smbfs_workgroup *name of domain or workgroup*
+SetEnv smbfs_workgroup *name of domain or work group*
 Copy ENV:smbfs_workgroup ENVARC:
 </pre>
 

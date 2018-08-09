@@ -51,9 +51,7 @@ smba_connect (
 	int							opt_raw_smb,
 	int							opt_unicode,
 	int							opt_prefer_core_protocol,
-	int							opt_prefer_write_raw,
 	int							opt_write_behind,
-	int							opt_prefer_read_raw,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
 	int *						smb_error_ptr,
@@ -101,20 +99,10 @@ smba_connect (
 
 	D(("prefer core protocol = %s",opt_prefer_core_protocol ? "yes" : "no"));
 
-	/* Prefer SMB_COM_WRITE_RAW over SMB_COM_WRITE_ANDX? */
-	res->server.prefer_write_raw = opt_prefer_write_raw;
-
-	D(("prefer SMB_COM_WRITE_RAW over SMB_COM_WRITE_ANDX = %s",opt_prefer_write_raw ? "yes" : "no"));
-
 	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
 	res->server.write_behind = opt_write_behind;
 
 	D(("use asynchronous SMB_COM_WRITE_RAW operations = %s",opt_write_behind ? "yes" : "no"));
-
-	/* Prefer SMB_COM_READ_RAW over SMB_COM_READ_ANDX? */
-	res->server.prefer_read_raw = opt_prefer_read_raw;
-
-	D(("prefer SMB_COM_READ_RAW over SMB_COM_READ_ANDX = %s",opt_prefer_read_raw ? "yes" : "no"));
 
 	D(("cache size = %ld entries", cache_size));
 
@@ -612,7 +600,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 	D(("read %ld bytes from offset %ld",len,offset));
 
 	/* SMB_COM_READ_ANDX supported? */
-	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_read_raw && !f->server->server.prefer_core_protocol)
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_core_protocol)
 	{
 		QUAD position_quad = (*offset);
 		int max_readx_size;
@@ -810,7 +798,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 	max_buffer_size = f->server->server.max_buffer_size;
 
 	/* SMB_COM_WRITE_ANDX supported? */
-	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_write_raw && !f->server->server.prefer_core_protocol)
+	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_core_protocol)
 	{
 		QUAD position_quad = (*offset);
 		int max_writex_size;
@@ -1799,9 +1787,7 @@ smba_start(
 	int					opt_raw_smb,
 	int					opt_unicode,
 	int					opt_prefer_core_protocol,
-	int					opt_prefer_write_raw,
 	int					opt_write_behind,
-	int					opt_prefer_read_raw,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,
@@ -1861,17 +1847,38 @@ smba_start(
 		}
 
 		LOG(("server network address found (%s)\n", Inet_NtoA(server_ip_address.sin_addr.s_addr)));
+
+		/* No workgroup given? Ask the server... */
+		if(opt_workgroup == NULL)
+		{
+			char workgroup_name[16];
+
+			if(SendNetBIOSStatusQuery(server_ip_address,NULL,0,workgroup_name,sizeof(workgroup_name)) == 0)
+			{
+				if(workgroup_name[0] != '\0')
+					strlcpy (workgroup, workgroup_name, sizeof(workgroup));
+			}
+		}
 	}
 	else
 	{
 		char host_name[MAXHOSTNAMELEN+1];
+		char workgroup_name[16];
 		const char * name;
 
 		LOG(("server network address is %s\n", server));
 
-		if(SendNetBIOSStatusQuery(server_ip_address,server_name,sizeof(server_name),NULL,0) == 0)
+		/* Ask the server about its name and its workgroup. We need to
+		 * know the name to continue, and the workgroup name may
+		 * be useful, too.
+		 */
+		if(SendNetBIOSStatusQuery(server_ip_address,server_name,sizeof(server_name),workgroup_name,sizeof(workgroup_name)) == 0 && server_name[0] != '\0')
 		{
-			D(("server %s provided its own name '%s'",Inet_NtoA(server_ip_address.sin_addr.s_addr),server_name));
+			D(("server %s provided its own name '%s', with workgroup '%s'",Inet_NtoA(server_ip_address.sin_addr.s_addr),server_name,workgroup_name));
+
+			/* No workgroup given? Use what the server told us... */
+			if(opt_workgroup == NULL && workgroup_name[0] != '\0')
+				strlcpy (workgroup, workgroup_name, sizeof(workgroup));
 		}
 		else
 		{
@@ -1953,8 +1960,17 @@ smba_start(
 	strlcpy(username,opt_username,sizeof(username));
 	string_toupper(username);
 
-	strlcpy (workgroup, opt_workgroup, sizeof(workgroup));
-	string_toupper (workgroup);
+	/* Use the workgroup name provided? */
+	if (opt_workgroup != NULL)
+	{
+		strlcpy (workgroup, opt_workgroup, sizeof(workgroup));
+		string_toupper (workgroup);
+	}
+	/* Use the default workgroup name instead. */
+	else
+	{
+		strlcpy (workgroup, "WORKGROUP", sizeof(workgroup));
+	}
 
 	if(opt_servername != NULL)
 	{
@@ -2007,9 +2023,7 @@ smba_start(
 		opt_raw_smb,
 		opt_unicode,
 		opt_prefer_core_protocol,
-		opt_prefer_write_raw,
 		opt_write_behind,
-		opt_prefer_read_raw,
 		error_ptr,
 		smb_error_class_ptr,
 		smb_error_ptr,

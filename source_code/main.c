@@ -58,6 +58,13 @@ TEXT Version[] = VERSTAG;
 
 /****************************************************************************/
 
+/* This macro lets us long-align structures on the stack */
+#define D_S(type, name) \
+	UBYTE a_##name[sizeof(type) + 3]; \
+	type * name = (type *)((ULONG)(a_##name + 3) & ~3)
+
+/****************************************************************************/
+
 #define UNIX_TIME_OFFSET 252460800
 #define MAX_FILENAME_LEN 255
 
@@ -154,7 +161,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static void VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_prefer_write_raw, BOOL opt_write_behind, BOOL opt_prefer_read_raw, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_write_behind, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -566,9 +573,7 @@ main(void)
 		NUMBER	DSTOffset;
 		KEY		Protocol;
 		SWITCH	NetBIOSTransport;
-		SWITCH	PreferWriteRaw;
 		SWITCH	WriteBehind;
-		SWITCH	PreferReadRaw;
 		KEY		Unicode;
 		SWITCH	CP437;
 		SWITCH	CP850;
@@ -603,21 +608,19 @@ main(void)
 		"DST=DSTOFFSET/N/K,"
 		"PROTOCOL/K,"
 		"NETBIOS/S,"
-		"PREFERWRITERAW/S,"
 		"WRITEBEHIND/S,"
-		"PREFERREADRAW/S,"
 		"UNICODE/K,"
 		"CP437/S,"
 		"CP850/S,"
 		"TRANSLATE=TRANSLATIONFILE/K,"
-		"SERVICE/A,"
+		"SHARE=SERVICE/A,"
 		"DEBUGLEVEL=DEBUG/N/K,"
 		"DEBUGFILE/K,"
 		"DUMPSMB/S,"
 		"DUMPSMBLEVEL/N/K,"
 		"DUMPSMBFILE/K";
 
-	BPTR debug_file = (BPTR)NULL;
+	BPTR debug_file = ZERO;
 	BOOL close_debug_file = FALSE;
 	TEXT program_name[MAX_FILENAME_LEN+1];
 	LONG result = RETURN_FAIL;
@@ -662,6 +665,8 @@ main(void)
 		 */
 		strlcpy(program_name,WBStartup->sm_ArgList[n].wa_Name,sizeof(program_name));
 
+		SETPROGRAMNAME(FilePart(program_name));
+
 		/* Now open icon.library and read that icon. */
 		IconBase = OpenLibrary("icon.library",0);
 
@@ -702,18 +707,65 @@ main(void)
 		 * information to fill the startup parameter
 		 * data structure.
 		 */
+		str = FindToolType(Icon->do_ToolTypes,"DEBUG");
+		if(str == NULL)
+			str = FindToolType(Icon->do_ToolTypes,"DEBUGLEVEL");
+
+		if(str != NULL)
+		{
+			if(StrToLong(str,&debug_number) == -1)
+			{
+				report_error("Invalid number '%s' for 'DEBUG' parameter.",str);
+				goto out;
+			}
+
+			args.DebugLevel = &debug_number;
+		}
+
+		str = FindToolType(Icon->do_ToolTypes,"DEBUGFILE");
+		if(str != NULL)
+			args.DebugFile = str;
+
+		/* Configure the debugging options. */
+		if(args.DebugLevel != NULL)
+			SETDEBUGLEVEL(*args.DebugLevel);
+		else
+			SETDEBUGLEVEL(0);
+
+		#if DEBUG
+		{
+			if(args.DebugFile != NULL)
+			{
+				/* Try to append the output to an existing file
+				 * or create a new file instead.
+				 */
+				debug_file = Open(args.DebugFile,MODE_READWRITE);
+				if(debug_file != ZERO)
+				{
+					D_S(struct FileInfoBlock, fib);
+
+					Seek(debug_file,0,OFFSET_END);
+
+					close_debug_file = TRUE;
+
+					/* If the debug file is not empty, add a few
+					 * line feeds to it, so that any new output
+					 * will be separated from the old contents.
+					 */
+					if(ExamineFH(debug_file, fib) && fib->fib_Size)
+						FPrintf(debug_file,"\n\n");
+
+					SETDEBUGFILE(debug_file);
+
+					D(("%s (%s)", VERS, DATE));
+				}
+			}
+		}
+		#endif /* DEBUG */
+
 		str = FindToolType(Icon->do_ToolTypes,"DOMAIN");
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"WORKGROUP");
-
-		if(str == NULL)
-		{
-			if(GetVar("smbfs_domain",env_workgroup_name,sizeof(env_workgroup_name),0) > 0 ||
-			   GetVar("smbfs_workgroup",env_workgroup_name,sizeof(env_workgroup_name),0) > 0)
-			{
-				str = env_workgroup_name;
-			}
-		}
 
 		args.Workgroup = str;
 
@@ -721,25 +773,9 @@ main(void)
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"USERNAME");
 
-		if(str == NULL)
-		{
-			if(GetVar("smbfs_user",env_user_name,sizeof(env_user_name),0) > 0 ||
-			   GetVar("smbfs_username",env_user_name,sizeof(env_user_name),0) > 0)
-			{
-				str = env_user_name;
-			}
-		}
-
 		args.UserName = str;
 
-		str = FindToolType(Icon->do_ToolTypes,"PASSWORD");
-		if(str == NULL)
-		{
-			if(GetVar("smbfs_password",env_password,sizeof(env_password),0) > 0)
-				str = env_password;
-		}
-
-		args.Password = str;
+		args.Password = FindToolType(Icon->do_ToolTypes,"PASSWORD");
 
 		if(FindToolType(Icon->do_ToolTypes,"CHANGECASE") != NULL)
 			args.ChangeCase = TRUE;
@@ -787,6 +823,9 @@ main(void)
 		args.VolumeName = str;
 
 		str = FindToolType(Icon->do_ToolTypes,"SERVICE");
+		if(str == NULL)
+			str = FindToolType(Icon->do_ToolTypes,"SHARE");
+
 		args.Service = str;
 
 		if(str != NULL)
@@ -810,25 +849,6 @@ main(void)
 
 			MaxNameLen = number;
 		}
-
-		str = FindToolType(Icon->do_ToolTypes,"DEBUG");
-		if(str == NULL)
-			str = FindToolType(Icon->do_ToolTypes,"DEBUGLEVEL");
-
-		if(str != NULL)
-		{
-			if(StrToLong(str,&debug_number) == -1)
-			{
-				report_error("Invalid number '%s' for 'DEBUG' parameter.",str);
-				goto out;
-			}
-
-			args.DebugLevel = &debug_number;
-		}
-
-		str = FindToolType(Icon->do_ToolTypes,"DEBUGFILE");
-		if(str != NULL)
-			args.DebugFile = str;
 
 		str = FindToolType(Icon->do_ToolTypes,"TZ");
 		if(str == NULL)
@@ -860,26 +880,13 @@ main(void)
 			args.DSTOffset = &dst_number;
 		}
 
-		str = FindToolType(Icon->do_ToolTypes,"PROTOCOL");
-		if(str == NULL)
-		{
-			if(GetVar("smbfs_protocol",env_protocol,sizeof(env_protocol),0) > 0)
-				str = env_protocol;
-		}
-
-		args.Protocol = str;
+		args.Protocol = FindToolType(Icon->do_ToolTypes,"PROTOCOL");
 
 		if(FindToolType(Icon->do_ToolTypes,"NETBIOS") != NULL)
 			args.NetBIOSTransport = TRUE;
 
-		if(FindToolType(Icon->do_ToolTypes,"PREFERWRITERAW") != NULL)
-			args.PreferWriteRaw = TRUE;
-
 		if(FindToolType(Icon->do_ToolTypes,"WRITEBEHIND") != NULL)
 			args.WriteBehind = TRUE;
-
-		if(FindToolType(Icon->do_ToolTypes,"PREFERREADRAW") != NULL)
-			args.PreferReadRaw = TRUE;
 
 		str = FindToolType(Icon->do_ToolTypes,"TRANSLATE");
 		if(str == NULL)
@@ -952,6 +959,8 @@ main(void)
 
 		GetProgramName(program_name,sizeof(program_name));
 
+		SETPROGRAMNAME(FilePart(program_name));
+
 		Parameters = ReadArgs(cmd_template,(LONG *)&args,NULL);
 		if(Parameters == NULL)
 		{
@@ -959,35 +968,46 @@ main(void)
 			goto out;
 		}
 
-		if(args.Workgroup == NULL)
+		/* Configure the debugging options. */
+		if(args.DebugLevel != NULL)
+			SETDEBUGLEVEL(*args.DebugLevel);
+		else
+			SETDEBUGLEVEL(0);
+
+		#if DEBUG
 		{
-			if(GetVar("smbfs_domain",env_workgroup_name,sizeof(env_workgroup_name),0) > 0 ||
-			   GetVar("smbfs_workgroup",env_workgroup_name,sizeof(env_workgroup_name),0) > 0)
+			if(args.DebugFile != NULL)
 			{
-				args.Workgroup = env_workgroup_name;
-			}
-		}
+				/* Try to append the output to an existing file
+				 * or create a new file instead.
+				 */
+				debug_file = Open(args.DebugFile,MODE_READWRITE);
+				if(debug_file != ZERO)
+				{
+					D_S(struct FileInfoBlock, fib);
 
-		if(args.UserName == NULL)
-		{
-			if(GetVar("smbfs_user",env_user_name,sizeof(env_user_name),0) > 0 ||
-			   GetVar("smbfs_username",env_user_name,sizeof(env_user_name),0) > 0)
+					Seek(debug_file,0,OFFSET_END);
+
+					close_debug_file = TRUE;
+
+					/* If the debug file is not empty, add a few
+					 * line feeds to it, so that any new output
+					 * will be separated from the old contents.
+					 */
+					if(ExamineFH(debug_file, fib) && fib->fib_Size)
+						FPrintf(debug_file,"\n\n");
+				}
+			}
+			else
 			{
-				args.UserName = env_user_name;
+				debug_file = Output();
 			}
-		}
 
-		if(args.Password == NULL)
-		{
-			if(GetVar("smbfs_password",env_password,sizeof(env_password),0) > 0)
-				args.Password = env_password;
+			SETDEBUGFILE(debug_file);
 		}
+		#endif /* DEBUG */
 
-		if(args.Protocol == NULL)
-		{
-			if(GetVar("smbfs_protocol",env_protocol,sizeof(env_protocol),0) > 0)
-				args.Protocol = env_protocol;
-		}
+		D(("%s (%s)", VERS, DATE));
 
 		if(args.Service != NULL)
 		{
@@ -1014,17 +1034,99 @@ main(void)
 			timeout = (*args.Timeout);
 	}
 
+	/* If no workgroup/domain was given, try the environment variables. */
+	if(args.Workgroup == NULL)
+	{
+		static const char * names[] =
+		{
+			"smbfs_domain",
+			"smbfs_workgroup",
+			NULL
+		};
+
+		int i;
+
+		for(i = 0 ; names[i] != NULL ; i++)
+		{
+			if(GetVar(names[i],env_workgroup_name,sizeof(env_workgroup_name),0) > 0)
+			{
+				D(("using WORKGROUP='%s' stored in '%s' environment variable.", env_workgroup_name, names[i]));
+
+				args.Workgroup = env_workgroup_name;
+				break;
+			}
+		}
+	}
+
+	/* If no user name was given, try the environment variables. */
+	if(args.UserName == NULL)
+	{
+		static const char * names[] =
+		{
+			"smbfs_user",
+			"smbfs_username",
+			NULL
+		};
+
+		int i;
+
+		for(i = 0 ; names[i] != NULL ; i++)
+		{
+			if(GetVar(names[i],env_user_name,sizeof(env_user_name),0) > 0)
+			{
+				D(("using USER='%s' stored in '%s' environment variable.", env_user_name, names[i]));
+
+				args.UserName = env_user_name;
+				break;
+			}
+		}
+	}
+
+	/* If no password was given, try the environment variable. */
+	if(args.Password == NULL)
+	{
+		if(GetVar("smbfs_password",env_password,sizeof(env_password),0) > 0)
+		{
+			D(("using PASSWORD=... stored in 'smbfs_password' environment variable."));
+
+			args.Password = env_password;
+		}
+	}
+
+	/* If no protocol was given, try the environment variable. */
+	if(args.Protocol == NULL)
+	{
+		if(GetVar("smbfs_protocol",env_protocol,sizeof(env_protocol),0) > 0)
+		{
+			D(("using PROTOCOL='%s' stored in 'smbfs_protocol' environment variable.", env_protocol));
+
+			args.Protocol = env_protocol;
+		}
+	}
+
 	/* Use the default if no user name is given. */
 	if(args.UserName == NULL)
+	{
 		args.UserName = "GUEST";
+
+		D(("no user name given, using '%s' instead.", args.UserName));
+	}
 
 	/* Use the default if no device or volume name is given. */
 	if(args.DeviceName == NULL && args.VolumeName == NULL)
+	{
 		args.DeviceName = "SMBFS";
+
+		D(("no device/volume name given, using 'devicename=%s' instead.", args.DeviceName));
+	}
 
 	/* Restrict the command set which smbfs uses? */
 	if(args.Protocol == NULL)
+	{
 		args.Protocol = "CORE";
+
+		D(("using 'protocol=%s'.", args.Protocol));
+	}
 
 	if(Stricmp(args.Protocol,"NT1") != SAME && Stricmp(args.Protocol,"CORE") != SAME)
 	{
@@ -1034,7 +1136,11 @@ main(void)
 
 	/* Disable Unicode support for path names, etc.? */
 	if(args.Unicode == NULL)
+	{
 		args.Unicode = "ON";
+
+		D(("using 'unicode=%s'.", args.Unicode));
+	}
 
 	if(Stricmp(args.Unicode,"OFF") != SAME && Stricmp(args.Unicode,"ON") != SAME)
 	{
@@ -1076,74 +1182,9 @@ main(void)
 	CaseSensitive = (BOOL)(args.CaseSensitive != 0);
 	OmitHidden = (BOOL)(args.OmitHidden != 0);
 
-	/* You don't need to provide a specific workgroup name. smbfs will
-	 * work perfectly find with modern (and somewhat older) SMB implementations
-	 * if the workgroup name does not match the server's workgroup name.
-	 * But a workgroup name is still mandatory because it's required as part
-	 * of the protocol which sets up the connection between client and
-	 * server.
-	 *
-	 * It all boils down to this: if you don't choose a workgroup name,
-	 * smbfs will use a default of "WORKGROUP".
-	 */
-	if(args.Workgroup == NULL)
-	{
-		strlcpy(env_workgroup_name,"WORKGROUP",sizeof(env_workgroup_name));
-		args.Workgroup = env_workgroup_name;
-	}
-
-	#if DEBUG
-	{
-		if(args.DebugFile != NULL)
-		{
-			/* Try to append the output to an existing file. */
-			debug_file = Open(args.DebugFile,MODE_OLDFILE);
-			if(debug_file == (BPTR)NULL)
-			{
-				/* File does not exist? Then create a new file. */
-				if(IoErr() == ERROR_OBJECT_NOT_FOUND)
-				{
-					debug_file = Open(args.DebugFile,MODE_NEWFILE);
-					if(debug_file != (BPTR)NULL)
-						ChangeMode(CHANGE_FH,debug_file,SHARED_LOCK);
-				}
-			}
-			else
-			{
-				/* File exists; seek to the end of it. */
-				Seek(debug_file,0,OFFSET_END);
-			}
-
-			close_debug_file = TRUE;
-		}
-		else
-		{
-			if(WBStartup == NULL)
-				debug_file = Output();
-		}
-
-		SETDEBUGFILE(debug_file);
-	}
-	#endif /* DEBUG */
-
-	/* Configure the debugging options. */
-	SETPROGRAMNAME(FilePart(program_name));
-
-	if(args.DebugLevel != NULL)
-	{
-		#if !DEBUG
-		{
-			if(WBStartup == NULL)
-				report_error("This version of smbfs cannot create debug output.");
-		}
-		#endif /* !DEBUG */
-
-		SETDEBUGLEVEL(*args.DebugLevel);
-	}
-	else
-	{
-		SETDEBUGLEVEL(0);
-	}
+	D(("disable exall = %s", DisableExAll ? "yes": "no"));
+	D(("case sensitive = %s", CaseSensitive ? "yes": "no"));
+	D(("omit hidden = %s", OmitHidden ? "yes": "no"));
 
 	/* Enable SMB packet decoding, but only if not started from Workbench. */
 	#if defined(DUMP_SMB)
@@ -1163,7 +1204,65 @@ main(void)
 	}
 	#endif /* DUMP_SMB */
 
-	D(("%s (%s)",VERS,DATE));
+	D(("service = '%s'.", args.Service));
+	D(("work group = '%s'.", args.Workgroup));
+	D(("user name = '%s'.", args.UserName));
+
+	if(args.Password != NULL)
+		D(("password = ..."));
+	else
+		D(("password = empty"));
+
+	D(("change case = %s", args.ChangeCase ? "yes" : "no"));
+	D(("unicode = '%s'", args.Unicode));
+	D(("protocol = '%s'", args.Protocol));
+	D(("netbios transport = '%s'", args.NetBIOSTransport ? "yes" : "no"));
+
+	if(args.ClientName != NULL)
+		D(("client name = '%s'.", args.ClientName));
+	else
+		D(("client name = NULL."));
+
+	if(args.ServerName != NULL)
+		D(("server name = '%s'.", args.ServerName));
+	else
+		D(("server name = NULL."));
+
+	if(args.TimeZoneOffset != NULL)
+		D(("time zone offset = %ld.", (*args.TimeZoneOffset)));
+	else
+		D(("time zone offset = NULL"));
+
+	if(args.DSTOffset != NULL)
+		D(("dst offset = %ld.", (*args.DSTOffset)));
+	else
+		D(("dst offset = NULL"));
+
+	D(("write behind = %s", args.WriteBehind ? "yes" : "no"));
+
+	if(args.DeviceName != NULL)
+		D(("device name = '%s'.", args.DeviceName));
+	else
+		D(("device name = NULL."));
+
+	if(args.VolumeName != NULL)
+		D(("volume name = '%s'.", args.VolumeName));
+	else
+		D(("volume name = NULL."));
+
+	if(args.TranslationFile != NULL)
+		D(("translation file = '%s'.", args.TranslationFile));
+	else
+		D(("translation file = NULL."));
+
+	D(("use cp437 = %s.", args.CP437 ? "yes" : "no"));
+
+	D(("use cp850 = %s.", args.CP850 ? "yes" : "no"));
+
+	D(("max name length = %ld.", MaxNameLen));
+	D(("cache size = %ld.", cache_size));
+	D(("max transmit = %ld.", max_transmit));
+	D(("timeout = %ld.", timeout));
 
 	if(setup(
 		FilePart(program_name),
@@ -1182,9 +1281,7 @@ main(void)
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
 		Stricmp(args.Unicode,"OFF") != SAME,
 		Stricmp(args.Protocol,"CORE") == SAME,
-		args.PreferWriteRaw,
 		args.WriteBehind,
-		args.PreferReadRaw,
 		args.DeviceName,
 		args.VolumeName,
 		args.TranslationFile))
@@ -1221,11 +1318,11 @@ main(void)
 
 	cleanup();
 
-	if(close_debug_file && debug_file != (BPTR)NULL)
+	if(close_debug_file && debug_file != ZERO)
 	{
 		Close(debug_file);
 
-		SETDEBUGFILE((BPTR)NULL);
+		SETDEBUGFILE(ZERO);
 
 		SETDEBUGLEVEL(0);
 	}
@@ -1277,24 +1374,24 @@ posix_strerror(int error)
 	{
 		static const struct { int code; const char * message; } messages[] =
 		{
-			{ error_end_of_file,						"end of file" },
-			{ error_invalid_netbios_session,			"invalid NetBIOS session" },
-			{ error_message_exceeds_buffer_size,		"message exceeds buffer size" },
-			{ error_invalid_buffer_format,				"invalid buffer format" },
-			{ error_data_exceeds_buffer_size,			"data exceeds buffer size" },
-			{ error_invalid_parameter_size,				"invalid parameter size" },
-			{ error_check_smb_error,					"check SMB error class and code" },
-			{ error_server_setup_incomplete,			"server setup incomplete" },
-			{ error_server_connection_invalid,			"server connection invalid" },
-			{ error_smb_message_signature_missing,		"SMB message signature missing" },
-			{ error_smb_message_too_short,				"SMB message too short" },
-			{ error_smb_message_invalid_command,		"SMB message invalid command" },
-			{ error_smb_message_invalid_word_count,		"SMB message invalid word count" },
-			{ error_smb_message_invalid_byte_count,		"SMB message invalid byte count" },
-			{ error_looping_in_find_next,				"looping in find_next" },
-			{ error_invalid_directory_size,				"invalid directory size" },
-			{ error_session_request_failed,				"session request failed" },
-			{ error_unsupported_dialect,				"unsupported dialect" },
+			{ error_end_of_file,					"end of file" },
+			{ error_invalid_netbios_session,		"invalid NetBIOS session" },
+			{ error_message_exceeds_buffer_size,	"message exceeds buffer size" },
+			{ error_invalid_buffer_format,			"invalid buffer format" },
+			{ error_data_exceeds_buffer_size,		"data exceeds buffer size" },
+			{ error_invalid_parameter_size,			"invalid parameter size" },
+			{ error_check_smb_error,				"check SMB error class and code" },
+			{ error_server_setup_incomplete,		"server setup incomplete" },
+			{ error_server_connection_invalid,		"server connection invalid" },
+			{ error_smb_message_signature_missing,	"SMB message signature missing" },
+			{ error_smb_message_too_short,			"SMB message too short" },
+			{ error_smb_message_invalid_command,	"SMB message invalid command" },
+			{ error_smb_message_invalid_word_count,	"SMB message invalid word count" },
+			{ error_smb_message_invalid_byte_count,	"SMB message invalid byte count" },
+			{ error_looping_in_find_next,			"looping in find_next" },
+			{ error_invalid_directory_size,			"invalid directory size" },
+			{ error_session_request_failed,			"session request failed" },
+			{ error_unsupported_dialect,			"unsupported dialect" },
 			{ -1, NULL }
 		};
 
@@ -2087,7 +2184,7 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 		}
 	}
 
-out:
+ out:
 
 	if(sock_fd >= 0)
 		CloseSocket(sock_fd);
@@ -2149,7 +2246,7 @@ SendNetBIOSStatusQuery(
 
 	ENTER();
 
-	if(server_name_size > 0)
+	if(server_name != NULL && server_name_size > 0)
 	{
 		server_name_size--;
 		server_name[0] = '\0';
@@ -2220,6 +2317,11 @@ SendNetBIOSStatusQuery(
 		 * and if there is an answer in it.
 		 */
 		memcpy(&nmb_header, buffer, sizeof(nmb_header));
+
+		D(("status = %ld", (nmb_header.flags & 0xF)));
+		D(("is response = %s", (nmb_header.flags & 0x8000) ? "yes" : "no"));
+		D(("number of answers = %ld", nmb_header.ancount));
+
 		if((nmb_header.flags & 0xF) == OK &&
 		   (nmb_header.flags & 0x8000) != 0 &&
 		   nmb_header.ancount > 0)
@@ -2235,6 +2337,8 @@ SendNetBIOSStatusQuery(
 				{
 					int start;
 
+					SHOWMSG("found a response");
+
 					/* This should be the start of the interesting bits;
 					 * we skip the NB/IP fields and the TTL field.
 					 */
@@ -2247,11 +2351,16 @@ SendNetBIOSStatusQuery(
 						memcpy(&data_length, &buffer[start], 2);
 						start += 2;
 
+						SHOWVALUE(data_length);
+
 						if(data_length > 0 && start + data_length <= n)
 						{
 							int number_of_names;
 
 							number_of_names = buffer[start++];
+
+							SHOWVALUE(number_of_names);
+
 							if(number_of_names > 0)
 							{
 								const char * server_name_record = NULL;
@@ -2279,6 +2388,20 @@ SendNetBIOSStatusQuery(
 									memcpy(&flags, &buffer[start], 2);
 									start += 2;
 
+									#if DEBUG
+									{
+										TEXT name_copy[20];
+
+										if(l > sizeof(name_copy)-1)
+											l = sizeof(name_copy)-1;
+
+										memcpy(name_copy,s,l);
+										name_copy[l] = '\0';
+
+										D(("name='%s', len=%ld, type=%ld, flags=0x%04lx", name_copy, l, type, flags));
+									}
+									#endif /* DEBUG */
+
 									/* Not a group name, and name is active? */
 									if((flags & 0x8400) == 0x0400)
 									{
@@ -2288,13 +2411,16 @@ SendNetBIOSStatusQuery(
 											{
 												server_name_record = s;
 
-												if(l > server_name_size)
-													l = server_name_size;
+												if(server_name != NULL && server_name_size > 0)
+												{
+													if(l > server_name_size)
+														l = server_name_size;
 
-												memcpy(server_name, s, l);
-												server_name[l] = '\0';
+													memcpy(server_name, s, l);
+													server_name[l] = '\0';
 
-												D(("server name is '%s'", server_name));
+													D(("server name is '%s'", server_name));
+												}
 
 												result = OK;
 											}
@@ -2309,7 +2435,7 @@ SendNetBIOSStatusQuery(
 											{
 												workgroup_name_record = s;
 
-												if(workgroup_name != NULL && workgroup_name_size >= 0)
+												if(workgroup_name != NULL && workgroup_name_size > 0)
 												{
 													if(l > workgroup_name_size)
 														l = workgroup_name_size;
@@ -2319,12 +2445,22 @@ SendNetBIOSStatusQuery(
 
 													D(("workgroup name is '%s'", workgroup_name));
 												}
+
+												result = OK;
 											}
 										}
 									}
 								}
 							}
 						}
+						else
+						{
+							SHOWMSG("too much data");
+						}
+					}
+					else
+					{
+						SHOWMSG("nothing useful in there");
 					}
 
 					break;
@@ -2332,8 +2468,12 @@ SendNetBIOSStatusQuery(
 			}
 		}
 	}
+	else
+	{
+		D(("didn't receive anything useful (n=%ld)", n));
+	}
 
-out:
+ out:
 
 	if(sock_fd >= 0)
 		CloseSocket(sock_fd);
@@ -2402,7 +2542,7 @@ send_disk_change_notification(ULONG class)
  * skipping a particular entry if necessary.
  */
 static struct FileNode *
-find_file_node(const TEXT * name,struct FileNode * skip)
+find_file_node(const TEXT * name,const struct FileNode * skip)
 {
 	struct FileNode * result = NULL;
 	struct FileNode * fn;
@@ -2425,7 +2565,7 @@ find_file_node(const TEXT * name,struct FileNode * skip)
  * skipping a particular entry if necessary.
  */
 static struct LockNode *
-find_lock_node(const TEXT * name,struct LockNode * skip)
+find_lock_node(const TEXT * name,const struct LockNode * skip)
 {
 	struct LockNode * result = NULL;
 	struct LockNode * ln;
@@ -2603,24 +2743,24 @@ map_errno_to_ioerr(int error)
 		{ EUSERS,			ERROR_TASK_TABLE_FULL },		/* Too many users */
 		{ EXDEV,			ERROR_NOT_IMPLEMENTED },		/* Cross-device link */
 
-		{ error_invalid_netbios_session,			ERROR_BUFFER_OVERFLOW },
-		{ error_message_exceeds_buffer_size,		ERROR_BUFFER_OVERFLOW },
-		{ error_invalid_buffer_format,				ERROR_BAD_NUMBER },
-		{ error_data_exceeds_buffer_size,			ERROR_BUFFER_OVERFLOW },
-		{ error_invalid_parameter_size,				ERROR_BAD_NUMBER },
-		{ error_server_setup_incomplete,			ERROR_INVALID_COMPONENT_NAME },
-		{ error_server_connection_invalid,			ERROR_INVALID_COMPONENT_NAME },
-		{ error_smb_message_signature_missing,		ERROR_BAD_STREAM_NAME },
-		{ error_smb_message_too_short,				ERROR_BAD_STREAM_NAME },
-		{ error_smb_message_invalid_command,		ERROR_BAD_STREAM_NAME },
-		{ error_smb_message_invalid_word_count,		ERROR_BAD_STREAM_NAME },
-		{ error_smb_message_invalid_byte_count,		ERROR_BAD_STREAM_NAME },
-		{ error_looping_in_find_next,				ERROR_TOO_MANY_LEVELS },
-		{ error_invalid_directory_size,				ERROR_BAD_NUMBER },
-		{ error_session_request_failed,				ERROR_INVALID_COMPONENT_NAME },
-		{ error_unsupported_dialect,				ERROR_BAD_NUMBER },
+		{ error_invalid_netbios_session,		ERROR_BUFFER_OVERFLOW },
+		{ error_message_exceeds_buffer_size,	ERROR_BUFFER_OVERFLOW },
+		{ error_invalid_buffer_format,			ERROR_BAD_NUMBER },
+		{ error_data_exceeds_buffer_size,		ERROR_BUFFER_OVERFLOW },
+		{ error_invalid_parameter_size,			ERROR_BAD_NUMBER },
+		{ error_server_setup_incomplete,		ERROR_INVALID_COMPONENT_NAME },
+		{ error_server_connection_invalid,		ERROR_INVALID_COMPONENT_NAME },
+		{ error_smb_message_signature_missing,	ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_too_short,			ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_invalid_command,	ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_invalid_word_count,	ERROR_BAD_STREAM_NAME },
+		{ error_smb_message_invalid_byte_count,	ERROR_BAD_STREAM_NAME },
+		{ error_looping_in_find_next,			ERROR_TOO_MANY_LEVELS },
+		{ error_invalid_directory_size,			ERROR_BAD_NUMBER },
+		{ error_session_request_failed,			ERROR_INVALID_COMPONENT_NAME },
+		{ error_unsupported_dialect,			ERROR_BAD_NUMBER },
 
-		{ -1,				-1 }
+		{ -1, -1 }
 	};
 
 	#if DEBUG
@@ -2783,6 +2923,8 @@ really_remove_dosentry(struct DosList * entry)
 	for(i = 0 ; i < 100 ; i++)
 	{
 		dl = AttemptLockDosList(LDF_WRITE|kind);
+
+		/* Workaround for dos.library bug... */
 		if(((ULONG)dl) <= 1)
 			dl = NULL;
 
@@ -3034,9 +3176,7 @@ setup(
 	BOOL			opt_raw_smb,
 	BOOL			opt_unicode,
 	BOOL			opt_prefer_core_protocol,
-	BOOL			opt_prefer_write_raw,
 	BOOL			opt_write_behind,
-	BOOL			opt_prefer_read_raw,
 	const TEXT *	device_name,
 	const TEXT *	volume_name,
 	const TEXT *	translation_file)
@@ -3079,6 +3219,7 @@ setup(
 	}
 	#endif /* __amigaos4__ */
 
+	/* We cache the default locale: the GMT offset value may change over time. */
 	if(LocaleBase != NULL)
 		Locale = OpenLocale(NULL);
 
@@ -3160,6 +3301,7 @@ setup(
 		goto out;
 	}
 
+	/* Convert the password into all-uppercase characters? */
 	if(opt_changecase)
 	{
 		for(i = 0 ; i < (int)strlen(opt_password) ; i++)
@@ -3228,9 +3370,7 @@ setup(
 		opt_raw_smb,
 		opt_unicode,
 		opt_prefer_core_protocol,
-		opt_prefer_write_raw,
 		opt_write_behind,
-		opt_prefer_read_raw,
 		&error,
 		&smb_error_class,
 		&smb_error,
@@ -3275,7 +3415,7 @@ setup(
 	{
 		dl = LockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
 
-		/* Find a unique device name. */
+		/* Try to find a unique device name out of 100 possible options. */
 		for(i = 0 ; i < 100 ; i++)
 		{
 			SPrintf(name,"SMBFS%ld",i);
@@ -4609,7 +4749,7 @@ Action_DeleteObject(
 	error = check_access_mode_collision(full_name,EXCLUSIVE_LOCK);
 	if(error != OK)
 	{
-		LOG(("there is still a lock or file attached to %s\n", full_name));
+		LOG(("there is still a lock or file attached to '%s'\n", full_name));
 		goto out;
 	}
 
@@ -5748,6 +5888,7 @@ Action_DiskInfo(
 		SHOWVALUE(num_blocks);
 		SHOWVALUE(num_blocks_free);
 
+		/* Pretend that the block size is 512 bytes, if not provided. */
 		if(block_size <= 0)
 			block_size = 512;
 
@@ -5998,7 +6139,7 @@ Action_ExamineObject(
 		}
 	}
 
-	/* So this is actually the root directory. */
+	/* So this is actually the root directory? */
 	if(is_root_directory)
 	{
 		const TEXT * volume_name;
@@ -8991,7 +9132,7 @@ file_system_handler(
 						/* Is this a Process with a CLI attached, e.g. a shell
 						 * command may have sent this packet?
 						 */
-						else if (sender->pr_Task.tc_Node.ln_Type == NT_PROCESS && sender->pr_CLI != (BPTR)NULL)
+						else if (sender->pr_Task.tc_Node.ln_Type == NT_PROCESS && sender->pr_CLI != ZERO)
 						{
 							const struct CommandLineInterface * cli = BADDR(sender->pr_CLI);
 
@@ -9016,7 +9157,7 @@ file_system_handler(
 								/* Try to figure out the name of the shell
 								 * command, if possible.
 								 */
-								if(cli->cli_Module != (BPTR)NULL)
+								if(cli->cli_Module != ZERO)
 								{
 									TEXT * cmd = BADDR(cli->cli_CommandName);
 									int len;

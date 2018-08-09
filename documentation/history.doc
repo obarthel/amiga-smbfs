@@ -2446,3 +2446,41 @@ smbfs 1.173 (5.8.2018)
 
   Anyway, you no longer need to add a local DNS record which associates
   the IPv4 address of a SMB server with the name of that server.
+
+
+smbfs 1.174 (8.8.2018)
+
+- "SHARE" is now an alias for "SERVICE".
+
+- I no workgroup name is provided, smbfs will now first try to ask the
+  server about its workgroup name before eventually falling back onto
+  the default name "WORKGROUP".
+
+- Removed the "PREFERREADRAW" and "PREFERWRITERAW" switches since they
+  lack a purpose, now that "PROTOCOL=core" has been the default operating
+  mode for smbfs for quite a while...
+
+
+smbfs 1.175 (9.8.2018)
+
+- The command line template would still include the PREFERREADRAW/S
+  and PREFERWRITERAW/S entries. Fixed.
+  
+- The debug options and the debug file are now taken care of as early
+  as possible, so as to allow for the icon tool type/shell parameter
+  processing to be logged.
+
+- Simplified the process of opening/creating the debug output file.
+
+- Which environment variables are used when the WORKGROUP,
+  USERNAME, PASSWORD, DEVICENAME and PROTOCOL arguments are
+  omitted now shows up in the debug output.
+
+- All the parameter which control how smbfs works are now shown in
+  the debug output. The password text is omitted, though, but there
+  is a placeholder which indicates whether a password was used, or
+  whether it was omitted.
+
+- Added more debug output to the SendNetBIOSStatusQuery() function.
+
+- Updated the documentation.
