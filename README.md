@@ -78,13 +78,13 @@ By now you should have prepared the following information:
 
 That's basically everything you need to know to continue -- unless something goes wrong, but more on that later on.
 
-Now you can start the file system. For example, to connect to the file server called *sourcery* and the shared *all* resource it provides, with that computer being a member of the workgroup *Arbeitsgruppe*, using the login name *PCGuest* and not providing any password, you would enter the following:
+Now you can start the file system. For example, to connect to the file server called *sourcery* and the shared *all* resource it provides, using the login name *PCGuest* and not providing any password, you would enter the following:
 
-`smbfs workgroup=Arbeitsgruppe user=PCGuest service=//sourcery/all`
+`smbfs user=PCGuest service=//sourcery/all`
 
 This would cause a new device by the name of `SMBFS:` to be mounted, showing all files and drawers the *sourcery* server makes available for sharing.
 
-You can also run the **smbfs** program in the background, like so: `Run >NIL: smbfs workgroup=Arbeitsgruppe user=PCGuest service=//sourcery/all`.
+You can also run the **smbfs** program in the background, like so: `Run >NIL: smbfs user=PCGuest service=//sourcery/all`.
 
 This is not recommended, though, because it becomes much harder to tell why the **smbfs** program did not work correctly (as it invariably will at some point). Any error messages which could help in figuring out what the problem may have been will be lost.
 
@@ -226,7 +226,7 @@ However, it may be required to change the password to all-uppercase characters b
 
 #### 5.1.6. `DOMAIN=WORKGROUP/K`
 
-This option may be omitted, in which case the **smbfs** program will use `WORKGROUP` as the domain name.
+This option may be omitted, in which case the **smbfs** program will ask the file server about the workgroup which it is a member of. Should the server fail to respond with this information, the **smbfs** program will use `WORKGROUP` as the domain name.
 
 You should not need to specify the name of the work group or domain which the file server to connect to is a member of. However, if you do need to use it, you must make sure that the name is not longer than 16 characters. The name you provide will be translated to all upper case characters.
 
