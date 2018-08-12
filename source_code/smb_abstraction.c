@@ -51,6 +51,8 @@ smba_connect (
 	int							opt_raw_smb,
 	int							opt_unicode,
 	int							opt_prefer_core_protocol,
+	int							opt_case_sensitive,
+	int							opt_session_setup_delay_unicode,
 	int							opt_write_behind,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
@@ -98,6 +100,16 @@ smba_connect (
 	res->server.prefer_core_protocol = opt_prefer_core_protocol;
 
 	D(("prefer core protocol = %s",opt_prefer_core_protocol ? "yes" : "no"));
+
+	/* Path names are case-sensitive. */
+	res->server.case_sensitive = opt_case_sensitive;
+
+	D(("path names are case sensitive = %s",opt_case_sensitive ? "yes" : "no"));
+
+	/* Delay the use of Unicode strings during session setup. */
+	res->server.session_setup_delay_unicode = opt_session_setup_delay_unicode;
+
+	D(("delay use of unicode during session setup = %s",opt_session_setup_delay_unicode ? "yes" : "no"));
 
 	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
 	res->server.write_behind = opt_write_behind;
@@ -1787,6 +1799,8 @@ smba_start(
 	int					opt_raw_smb,
 	int					opt_unicode,
 	int					opt_prefer_core_protocol,
+	int					opt_case_sensitive,
+	int					opt_session_setup_delay_unicode, 
 	int					opt_write_behind,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
@@ -1816,12 +1830,25 @@ smba_start(
 	if(extract_service (service, server, sizeof(server), tcp_service_name, sizeof(tcp_service_name), share, sizeof(share), error_ptr) < 0)
 		goto out;
 
+	/* Use the workgroup name provided? */
+	if (opt_workgroup != NULL)
+	{
+		strlcpy (workgroup, opt_workgroup, sizeof(workgroup));
+		string_toupper (workgroup);
+	}
+	/* Use the default workgroup name instead. */
+	else
+	{
+		strlcpy (workgroup, "WORKGROUP", sizeof(workgroup));
+	}
+
 	memset(&server_ip_address,0,sizeof(server_ip_address));
 	server_ip_address.sin_family = AF_INET;
 
 	server_ip_address.sin_addr.s_addr = inet_addr (server);
 	if (server_ip_address.sin_addr.s_addr == INADDR_NONE) /* name was given, not numeric */
 	{
+		char * dot;
 		int lookup_error;
 
 		LOG(("server name is '%s'\n", server));
@@ -1859,6 +1886,15 @@ smba_start(
 					strlcpy (workgroup, workgroup_name, sizeof(workgroup));
 			}
 		}
+
+		/* Remember the server name, retaining only the
+		 * host name.
+		 */
+		strlcpy (server_name, server, sizeof(server_name));
+
+		dot = strchr(server_name,'.');
+		if(dot != NULL)
+			(*dot) = '\0';
 	}
 	else
 	{
@@ -1960,18 +1996,6 @@ smba_start(
 	strlcpy(username,opt_username,sizeof(username));
 	string_toupper(username);
 
-	/* Use the workgroup name provided? */
-	if (opt_workgroup != NULL)
-	{
-		strlcpy (workgroup, opt_workgroup, sizeof(workgroup));
-		string_toupper (workgroup);
-	}
-	/* Use the default workgroup name instead. */
-	else
-	{
-		strlcpy (workgroup, "WORKGROUP", sizeof(workgroup));
-	}
-
 	if(opt_servername != NULL)
 	{
 		if (!opt_raw_smb && strlen (opt_servername) > 16)
@@ -2011,6 +2035,8 @@ smba_start(
 	par.username = username;
 	par.password = password;
 
+	D(("server name = '%s', client name = '%s', workgroup name = '%s', user name = '%s'", server_name, client_name, workgroup, username));
+
 	if(smba_connect (
 		&par,
 		server_ip_address,
@@ -2023,6 +2049,8 @@ smba_start(
 		opt_raw_smb,
 		opt_unicode,
 		opt_prefer_core_protocol,
+		opt_case_sensitive,
+		opt_session_setup_delay_unicode,
 		opt_write_behind,
 		error_ptr,
 		smb_error_class_ptr,
@@ -2036,11 +2064,11 @@ smba_start(
 
 			smb_translate_error_class_and_code((*smb_error_class_ptr),(*smb_error_ptr),&smb_class_name,&smb_code_text);
 
-			report_error("Could not connect to server '%s' (%ld/%ld, %s/%s).",server_name,(*smb_error_class_ptr),(*smb_error_ptr),smb_class_name,smb_code_text);
+			report_error("Could not connect to server '%s' (%ld/%ld, %s/%s).",server,(*smb_error_class_ptr),(*smb_error_ptr),smb_class_name,smb_code_text);
 		}
 		else
 		{
-			report_error("Could not connect to server '%s' (%ld, %s).",server_name,(*error_ptr),posix_strerror(*error_ptr));
+			report_error("Could not connect to server '%s' (%ld, %s).",server,(*error_ptr),posix_strerror(*error_ptr));
 		}
 
 		goto out;

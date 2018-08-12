@@ -61,7 +61,7 @@ TEXT Version[] = VERSTAG;
 /* This macro lets us long-align structures on the stack */
 #define D_S(type, name) \
 	UBYTE a_##name[sizeof(type) + 3]; \
-	type * name = (type *)((ULONG)(a_##name + 3) & ~3)
+	type * name = (type *)((ULONG)(a_##name + 3) & ~3UL)
 
 /****************************************************************************/
 
@@ -161,7 +161,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static void VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_write_behind, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -574,6 +574,7 @@ main(void)
 		KEY		Protocol;
 		SWITCH	NetBIOSTransport;
 		SWITCH	WriteBehind;
+		KEY		SessionSetup;
 		KEY		Unicode;
 		SWITCH	CP437;
 		SWITCH	CP850;
@@ -609,6 +610,7 @@ main(void)
 		"PROTOCOL/K,"
 		"NETBIOS/S,"
 		"WRITEBEHIND/S,"
+		"SESSIONSETUP/K,"
 		"UNICODE/K,"
 		"CP437/S,"
 		"CP850/S,"
@@ -888,6 +890,8 @@ main(void)
 		if(FindToolType(Icon->do_ToolTypes,"WRITEBEHIND") != NULL)
 			args.WriteBehind = TRUE;
 
+		args.SessionSetup = FindToolType(Icon->do_ToolTypes,"SESSIONSETUP");
+
 		str = FindToolType(Icon->do_ToolTypes,"TRANSLATE");
 		if(str == NULL)
 			str = FindToolType(Icon->do_ToolTypes,"TRANSLATIONFILE");
@@ -1134,6 +1138,19 @@ main(void)
 		goto out;
 	}
 
+	if(args.SessionSetup == NULL)
+	{
+		args.SessionSetup = "DELAY";
+
+		D(("using 'sessionsetup=%s'.", args.SessionSetup));
+	}
+
+	if(Stricmp(args.SessionSetup,"DELAY") != SAME && Stricmp(args.SessionSetup,"NODELAY") != SAME)
+	{
+		report_error("'SESSIONSETUP' parameter must be either 'DELAY' or 'NODELAY'.");
+		goto out;
+	}
+
 	/* Disable Unicode support for path names, etc.? */
 	if(args.Unicode == NULL)
 	{
@@ -1217,6 +1234,7 @@ main(void)
 	D(("unicode = '%s'", args.Unicode));
 	D(("protocol = '%s'", args.Protocol));
 	D(("netbios transport = '%s'", args.NetBIOSTransport ? "yes" : "no"));
+	D(("session setup = '%s'", args.SessionSetup));
 
 	if(args.ClientName != NULL)
 		D(("client name = '%s'.", args.ClientName));
@@ -1281,6 +1299,7 @@ main(void)
 		!args.NetBIOSTransport,	/* Use raw SMB transport instead of NetBIOS transport? */
 		Stricmp(args.Unicode,"OFF") != SAME,
 		Stricmp(args.Protocol,"CORE") == SAME,
+		Stricmp(args.SessionSetup,"DELAY") == SAME,
 		args.WriteBehind,
 		args.DeviceName,
 		args.VolumeName,
@@ -3176,6 +3195,7 @@ setup(
 	BOOL			opt_raw_smb,
 	BOOL			opt_unicode,
 	BOOL			opt_prefer_core_protocol,
+	BOOL			opt_session_setup_delay_unicode,
 	BOOL			opt_write_behind,
 	const TEXT *	device_name,
 	const TEXT *	volume_name,
@@ -3370,6 +3390,8 @@ setup(
 		opt_raw_smb,
 		opt_unicode,
 		opt_prefer_core_protocol,
+		CaseSensitive,
+		opt_session_setup_delay_unicode,
 		opt_write_behind,
 		&error,
 		&smb_error_class,
@@ -4458,7 +4480,7 @@ lock_is_invalid(const struct FileLock * lock,int * error_ptr)
 	 */
 	ln = (struct LockNode *)lock->fl_Key;
 
-	if(ln == NULL || ln->ln_Magic != ID_SMB_DISK)
+	if(ln == NULL || lock != &ln->ln_FileLock || ln->ln_Magic != ID_SMB_DISK)
 	{
 		SHOWMSG("lock doesn't look right");
 		goto out;
@@ -8930,6 +8952,7 @@ file_system_handler(
 		if(NOT cli->cli_Background)
 		{
 			TEXT name[MAX_FILENAME_LEN+1];
+			TEXT * dot;
 			LONG max_cli;
 			LONG which;
 			LONG i;
@@ -8959,15 +8982,11 @@ file_system_handler(
 			 * output below will always show one colon
 			 * character following the name, and not two.
 			 */
-			for(i = strlen(name)-1 ; i >= 0 ; i--)
-			{
-				if(name[i] == ':')
-					name[i] = '\0';
-				else
-					break;
-			}
+			dot = (TEXT *)strchr(name, ':');
+			if(dot != NULL)
+				(*dot) = '\0';
 
-			LocalFPrintf(ZERO, "Connected '%s' to '%s:'; \"Break %ld\" or [Ctrl+C] to stop... ",
+			LocalFPrintf(ZERO, "Mounted '%s' as '%s:'; \"Break %ld\" or [Ctrl+C] to stop and unmount... ",
 				service_name,name,which);
 
 			Flush(Output());

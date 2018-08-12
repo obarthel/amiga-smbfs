@@ -1187,7 +1187,7 @@ smb_setup_header (struct smb_server *server, byte command, int wct, int bcc)
 
 	if (server->protocol > PROTOCOL_CORE)
 	{
-		BSET (buf, smb_flg, SMB_FLG_CASELESS_PATHNAMES);
+		BSET (buf, smb_flg, server->case_sensitive ? 0 : SMB_FLG_CASELESS_PATHNAMES);
 		WSET (buf, smb_flg2, SMB_FLG2_KNOWS_LONG_NAMES|SMB_FLG2_EAS|(server->unicode_enabled ? SMB_FLG2_UNICODE_STRINGS : 0));
 	}
 
@@ -4123,14 +4123,15 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	int result;
 	word dialect_index;
 	byte *p;
-	unsigned char password[24];
-	int password_len;
-	unsigned char nt_password[24];
-	int nt_password_len;
+	unsigned char oem_password[24];
+	int oem_password_len;
+	unsigned char unicode_password[24];
+	int unicode_password_len;
 	char * share_name = NULL;
 	byte *packet;
 	dword max_buffer_size;
 	int packet_size;
+	int enable_unicode = 0;
 
 	result = smb_connect (server, error_ptr);
 	if (result < 0)
@@ -4284,7 +4285,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 	if (server->protocol > PROTOCOL_LANMAN1)
 	{
-		int user_len = strlen (server->mount_data.username)+1;
+		int user_len = strlen (server->mount_data.username);
 		dword server_sesskey;
 
 		/*
@@ -4297,6 +4298,8 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		if (server->protocol >= PROTOCOL_NT1)
 		{
 			server->security_mode = (*p++);
+
+			SHOWMSG("NT LAN Manager or newer");
 
 			/* Skip "max mpx count" (1 word) and "max number vcs" (1 word). */
 			p += 2 * sizeof(word);
@@ -4320,12 +4323,16 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 			server->crypt_key_length = (*p);
 
+			SHOWVALUE(server->crypt_key_length);
+
 			memcpy(server->crypt_key,SMB_BUF(packet),server->crypt_key_length);
 		}
 		/* LAN Manager 2.0 or older */
 		else
 		{
 			word blkmode;
+
+			SHOWMSG("LAN Manager 2.0 or older");
 
 			server->security_mode = BVAL(packet, smb_vwv1);
 			max_buffer_size = WVAL (packet, smb_vwv2);
@@ -4348,8 +4355,9 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			memcpy(server->crypt_key,SMB_BUF(packet),server->crypt_key_length);
 
 			/* We translate this into capabilities. According to the
-			   LAN Manager 1.x/2.0 documentation both bits 0+1 being set
-			   means the same thing as CAP_RAW_MODE being set. */
+			 * LAN Manager 1.x/2.0 documentation both bits 0+1 being set
+			 * means the same thing as CAP_RAW_MODE being set.
+			 */
 			if((blkmode & 3) == 3)
 				server->capabilities = CAP_RAW_MODE;
 		}
@@ -4360,31 +4368,31 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		{
 			SHOWMSG("encrypted passwords required");
 
-			memset(password,0,sizeof(password));
-			strlcpy(password,server->mount_data.password,sizeof(password));
+			memset(oem_password,0,sizeof(oem_password));
+			strlcpy(oem_password,server->mount_data.password,sizeof(oem_password));
 
-			smb_encrypt(password,server->crypt_key,password);
-			password_len = 24;
+			smb_encrypt(oem_password,server->crypt_key,oem_password);
+			oem_password_len = 24;
 
 			/*
 			PRINTHEADER();
 			PRINTF(("password: "));
 			for(i = 0 ; i < 24 ; i++)
-				PRINTF(("%02lx ",password[i]));
+				PRINTF(("%02lx ",oem_password[i]));
 			PRINTF(("\n"));
 			*/
 
-			memset(nt_password,0,sizeof(nt_password));
-			strlcpy(nt_password,server->mount_data.password,sizeof(nt_password));
+			memset(unicode_password,0,sizeof(unicode_password));
+			strlcpy(unicode_password,server->mount_data.password,sizeof(unicode_password));
 
-			smb_nt_encrypt(nt_password,server->crypt_key,nt_password);
-			nt_password_len = 24;
+			smb_nt_encrypt(unicode_password,server->crypt_key,unicode_password);
+			unicode_password_len = 24;
 
 			/*
 			PRINTHEADER();
-			PRINTF(("nt_password: "));
+			PRINTF(("unicode_password: "));
 			for(i = 0 ; i < 24 ; i++)
-				PRINTF(("%02lx ",nt_password[i]));
+				PRINTF(("%02lx ",unicode_password[i]));
 			PRINTF(("\n"));
 			*/
 
@@ -4400,24 +4408,27 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		{
 			SHOWMSG("plain text passwords sufficient");
 
-			password_len = strlen(server->mount_data.password)+1;
-			nt_password_len = 0;
+			/* Note: the password is an array of bytes, not a NUL-terminated string. */
+			oem_password_len = strlen(server->mount_data.password);
+			unicode_password_len = 0;
 		}
 
 		/* If in share level security then don't send a password now */
 		if((server->security_mode & NEGOTIATE_USER_SECURITY) == 0)
 		{
-			SHOWMSG("share level security; zapping passwords");
+			SHOWMSG("share level security; not sending a password or user name");
 
-			strcpy(password,"");
-			password_len = 0;
-
-			strcpy(nt_password,"");
-			nt_password_len = 0;
+			oem_password_len = 0;
+			unicode_password_len = 0;
+			user_len = 0;
+		}
+		else
+		{
+			SHOWMSG("user share level security");
 		}
 
-		SHOWVALUE(password_len);
-		SHOWVALUE(nt_password_len);
+		SHOWVALUE(oem_password_len);
+		SHOWVALUE(unicode_password_len);
 
 		LOG (("workgroup = %s\n", server->mount_data.workgroup_name));
 
@@ -4426,23 +4437,65 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		{
 			const char *native_os = "AmigaOS";
 			const char *native_lanman = VERS;
-			dword capabilities;
+			dword client_capabilities;
+			int num_bytes;
 
 			SHOWMSG("server->protocol >= PROTOCOL_NT1");
 
-			ASSERT( smb_payload_size(server, 13, user_len + password_len + nt_password_len + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1) >= 0 );
-
-			smb_setup_header (server, SMBsesssetupX, 13, user_len + password_len + nt_password_len + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1);
-
-			capabilities = CAP_LARGE_READX|CAP_LARGE_WRITEX|CAP_NT_FIND|CAP_LARGE_FILES;
+			client_capabilities = CAP_LARGE_READX|CAP_LARGE_WRITEX|CAP_NT_FIND|CAP_LARGE_FILES;
 
 			if(server->use_unicode && (server->capabilities & CAP_UNICODE) != 0)
 			{
-				SHOWMSG("Unicode support enabled");
+				/* We may be able to use Unicode strings during the session setup,
+				 * but the server may not understand it (Windows 7 seems to be
+				 * unable to decode them), so we delay setting the SMB message
+				 * flag "this message may contain Unicode strings" until we have
+				 * completed the session setup.
+				 */
+				if(server->session_setup_delay_unicode)
+				{
+					SHOWMSG("Unicode support possible; delaying enabling it...");
 
-				server->unicode_enabled = TRUE;
+					enable_unicode = TRUE;
+				}
+				else
+				{
+					SHOWMSG("Unicode support enabled");
 
-				capabilities |= CAP_UNICODE;
+					server->unicode_enabled = TRUE;
+				}
+
+				client_capabilities |= CAP_UNICODE;
+			}
+			else
+			{
+				SHOWMSG("Unicode support disabled");
+			}
+
+			if(server->unicode_enabled)
+			{
+				/* Use plain text passwords? Remember to transmit the
+				 * password in UTF16LE-encoding. Note that we have to
+				 * use the UTF16LE-encoded form, and not the OEM
+				 * for.
+				 */
+				if((server->security_mode & NEGOTIATE_ENCRYPT_PASSWORDS) == 0)
+				{
+					SHOWMSG("plain text passwords will be sent; must be unicode-encoded.");
+
+					unicode_password_len = 2 * oem_password_len;
+					oem_password_len = 0;
+				}
+
+				ASSERT( smb_payload_size(server, 13, oem_password_len + unicode_password_len + 2 * (user_len+1) + 2 * (strlen (server->mount_data.workgroup_name)+1) + 2 * (strlen (native_os)+1) + 2 * (strlen (native_lanman)+1)) >= 0 );
+
+				smb_setup_header (server, SMBsesssetupX, 13, oem_password_len + unicode_password_len + 2 * (user_len+1) + 2 * (strlen (server->mount_data.workgroup_name)+1) + 2 * (strlen (native_os)+1) + 2 * (strlen (native_lanman)+1));
+			}
+			else
+			{
+				ASSERT( smb_payload_size(server, 13, oem_password_len + unicode_password_len + user_len+1 + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1) >= 0 );
+
+				smb_setup_header (server, SMBsesssetupX, 13, oem_password_len + unicode_password_len + user_len+1 + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1);
 			}
 
 			WSET (packet, smb_vwv0, 0xff);				/* AndXCommand+AndXReserved */
@@ -4451,48 +4504,121 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			WSET (packet, smb_vwv3, 2);					/* MaxMpxCount */
 			WSET (packet, smb_vwv4, 0);					/* VcNumber */
 			DSET (packet, smb_vwv5, server_sesskey);	/* SessionKey */
-			WSET (packet, smb_vwv7, password_len);		/* OEMPasswordLen */
-			WSET (packet, smb_vwv8, nt_password_len);	/* UnicodePasswordLen */
+			WSET (packet, smb_vwv7, oem_password_len);		/* OEMPasswordLen */
+			WSET (packet, smb_vwv8, unicode_password_len);	/* UnicodePasswordLen */
 			DSET (packet, smb_vwv9, 0);					/* Reserved */
-			DSET (packet, smb_vwv11, capabilities);		/* Capabilities */
+			DSET (packet, smb_vwv11, client_capabilities);		/* Capabilities */
 
 			p = SMB_BUF (packet);
 
-			if(nt_password_len != 0)
+			num_bytes = 0;
+
+			/* Add the encrypted passwords now? */
+			if(server->security_mode & NEGOTIATE_ENCRYPT_PASSWORDS)
 			{
 				SHOWMSG("adding encrypted passwords");
 
-				memcpy (p, password, password_len);
-				p += password_len;
+				memcpy (&p[num_bytes], oem_password, oem_password_len);
+				num_bytes += oem_password_len;
 
-				memcpy (p, nt_password, nt_password_len);
-				p += nt_password_len;
+				memcpy (&p[num_bytes], unicode_password, unicode_password_len);
+				num_bytes += unicode_password_len;
 			}
+			/* No, just add the plain text password. */
 			else
 			{
 				SHOWMSG("adding plain text password");
 
-				memcpy (p, server->mount_data.password, password_len);
-				p += password_len;
+				/* Add either the Unicode password or the OEM password,
+				 * but not both.
+				 */
+				if(server->unicode_enabled)
+				{
+					int i,j;
+
+					/* Simplistic conversion to UTF16LE -- we do this here
+					 * because the password must not be NUL-terminated, which
+					 * copy_latin1_to_utf16le() would do.
+					 */
+					for(i = j = 0 ; i < unicode_password_len ; i += 2, j++)
+					{
+						p[num_bytes++] = server->mount_data.password[j];
+						p[num_bytes++] = 0;
+					}
+				}
+				else
+				{
+					memcpy (&p[num_bytes], server->mount_data.password, oem_password_len);
+					num_bytes += oem_password_len;
+				}
 			}
 
-			memcpy (p, server->mount_data.username, user_len);
-			p += user_len;
+			/* Add a padding byte to align the following Unicode
+			 * strings, if necessary.
+			 */
+			if(server->unicode_enabled && (num_bytes % 2) == 0)
+			{
+				SHOWMSG("adding a padding byte");
+				p[num_bytes++] = 0;
+			}
+			else
+			{
+				SHOWMSG("no padding byte necessary");
+			}
 
-			strcpy (p, server->mount_data.workgroup_name);
-			p += strlen (p) + 1;
+			p += num_bytes;
 
-			strcpy (p, native_os);
-			p += strlen (p) + 1;
+			/* Add the user name, the workgroup name, etc. as Unicode strings? */
+			if(server->unicode_enabled)
+			{
+				const char * s;
+				int l;
 
-			strcpy (p, native_lanman);
+				copy_latin1_to_utf16le(p,2 * (user_len + 1),server->mount_data.username,user_len);
+				p += 2 * (user_len + 1);
+
+				s = server->mount_data.workgroup_name;
+				l = strlen(s);
+				copy_latin1_to_utf16le(p,2 * (l + 1),s,l);
+				p += 2 * (l + 1);
+
+				s = native_os;
+				l = strlen(s);
+				copy_latin1_to_utf16le(p,2 * (l + 1),s,l);
+				p += 2 * (l + 1);
+
+				s = native_lanman;
+				l = strlen(s);
+				copy_latin1_to_utf16le(p,2 * (l + 1),s,l);
+			}
+			/* No, just use OEM strings. */
+			else
+			{
+				if(user_len == 0)
+				{
+					(*p++) = '\0';
+				}
+				else
+				{
+					memcpy (p, server->mount_data.username, user_len + 1);
+					p += user_len + 1;
+				}
+
+				strcpy (p, server->mount_data.workgroup_name);
+				p += strlen (p) + 1;
+
+				strcpy (p, native_os);
+				p += strlen (p) + 1;
+
+				strcpy (p, native_lanman);
+			}
 		}
 		/* LAN Manager 2.0 or older */
 		else
 		{
-			ASSERT( smb_payload_size(server, 10, user_len + password_len) >= 0 );
+			ASSERT( smb_payload_size(server, 10, oem_password_len + user_len+1) >= 0 );
 
-			smb_setup_header (server, SMBsesssetupX, 10, user_len + password_len);
+			smb_setup_header (server, SMBsesssetupX, 10, oem_password_len + user_len+1);
 
 			WSET (packet, smb_vwv0, 0xff);	/* No further ANDX command */
 			WSET (packet, smb_vwv1, 0);		/* ANDX offset = 0 */
@@ -4501,14 +4627,17 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			WSET (packet, smb_vwv3, 2);					/* maximum mpx count; should be copied from server */
 			WSET (packet, smb_vwv4, 0); /* server->pid */
 			DSET (packet, smb_vwv5, server_sesskey);
-			WSET (packet, smb_vwv7, password_len);	/* case sensitive password length */
-			WSET (packet, smb_vwv8, 0);	/* offset to encrypted password */
+			WSET (packet, smb_vwv7, oem_password_len);	/* case sensitive password length */
+			WSET (packet, smb_vwv8, 0);	/* no encrypted password */
 
 			p = SMB_BUF (packet);
-			memcpy (p, server->mount_data.password, password_len);
 
-			p += password_len;
-			memcpy (p, server->mount_data.username, user_len);
+			/* Password text is not NUL-terminated. */
+			memcpy (p, server->mount_data.password, oem_password_len);
+			p += oem_password_len;
+
+			/* User name must be NUL-terminated. */
+			memcpy (p, server->mount_data.username, user_len+1);
 		}
 
 		result = smb_request_ok (server, SMBsesssetupX, 3, 0, error_ptr);
@@ -4531,19 +4660,18 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		#endif /* OVERRIDE_SERVER_MAX_BUFFER_SIZE */
 
 		server->capabilities = 0;
-
-		password_len = strlen(server->mount_data.password)+1;
-
-		nt_password_len = 0;
 	}
 
-	if(nt_password_len > 0)
+	if(server->protocol > PROTOCOL_LANMAN1 &&
+	  (server->security_mode & (NEGOTIATE_USER_SECURITY|NEGOTIATE_ENCRYPT_PASSWORDS)) == (NEGOTIATE_USER_SECURITY|NEGOTIATE_ENCRYPT_PASSWORDS))
 	{
 		int server_name_len;
 		int service_len;
 		int share_name_len;
 		int share_name_size;
 		int padding_needed;
+
+		SHOWMSG("protocol is LAN Manager 2.0 or better, user level access is enabled, encrypted passwords are used.");
 
 		server_name_len = strlen(server->mount_data.server_name);
 		service_len = strlen(server->mount_data.service);
@@ -4582,22 +4710,22 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		else
 			share_name_size = share_name_len + 1;
 
-		if(server->unicode_enabled && (password_len % 2) == 0)
+		if(server->unicode_enabled && (oem_password_len % 2) == 0)
 			padding_needed = 1;
 		else
 			padding_needed = 0;
 
-		ASSERT( smb_payload_size(server, 4, password_len + padding_needed + share_name_size + strlen(dev)+1) >= 0 );
+		ASSERT( smb_payload_size(server, 4, oem_password_len + padding_needed + share_name_size + strlen(dev)+1) >= 0 );
 
-		smb_setup_header (server, SMBtconX, 4, password_len + padding_needed + share_name_size + strlen(dev)+1);
+		smb_setup_header (server, SMBtconX, 4, oem_password_len + padding_needed + share_name_size + strlen(dev)+1);
 
 		WSET (packet, smb_vwv0, 0xFF);
-		WSET (packet, smb_vwv3, password_len);
+		WSET (packet, smb_vwv3, oem_password_len);
 
 		p = SMB_BUF (packet);
 
-		memcpy(p,password,password_len);
-		p += password_len;
+		memcpy(p,oem_password,oem_password_len);
+		p += oem_password_len;
 
 		if(padding_needed)
 			(*p++) = 0;
@@ -4610,6 +4738,8 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		p += share_name_size;
 
 		strcpy(p,dev);
+
+		SHOWMSG("Using SMB_TREE_CONNECT_ANDX");
 
 		result = smb_request_ok (server, SMBtconX, 3, 0, error_ptr);
 		if (result < 0)
@@ -4627,6 +4757,10 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	else
 	{
 		word decoded_max_xmit;
+
+		SHOWMSG("Using SMB_TREE_CONNECT");
+
+		ASSERT( NOT server->unicode_enabled );
 
 		ASSERT( smb_payload_size(server, 0, 6 + strlen (server->mount_data.service) + strlen (server->mount_data.password) + strlen (dev)) >= 0 );
 
@@ -4707,6 +4841,13 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	}
 
 	server->max_buffer_size = max_buffer_size;
+
+	/* Now that the session has been set up properly,
+	 * we may safely allow Unicode strings to be used
+	 * in SMB messages.
+	 */
+	if(enable_unicode)
+		server->unicode_enabled = TRUE;
 
 	LOG (("Normal exit\n"));
 

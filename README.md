@@ -249,6 +249,8 @@ You can use the `CLIENT` parameter to tell **smbfs** under which name it should 
 
 This parameter is optional and will be translated to all upper case characters; it cannot be longer than 16 characters.
 
+Please note that the `CLIENT` parameter will be ignored unless the `NETBIOS` switch is used, too.
+
 #### 5.1.8. `SERVER=SERVERNAME/K`
 
 **smbfs** will attempt to connect to the file server by providing the name you specified using the `SHARE` option.
@@ -256,6 +258,8 @@ This parameter is optional and will be translated to all upper case characters; 
 In some cases this may be undesirable as the server's name differs from what you specified as the share name. You can use the `SERVER` parameter to tell **smbfs** under which name it should contact the server.
 
 This parameter is optional and will be translated to all upper case characters; it cannot be longer than 16 characters.
+
+Please note that the `SERVER` parameter will be ignored unless the `NETBIOS` switch is used, too.
 
 ### 5.2. File name conversion
 
@@ -378,6 +382,14 @@ It may help if you change the protocol level which the **smbfs** program uses. T
 The alternative is `PROTOCOL=nt1` which might provide better compatibility and performance with *Microsoft Windows* systems.
 
 When in doubt, stick with `PROTOCOL=core`.
+
+#### 5.4.6. `SESSIONSETUP/K`
+
+If the `UNICODE=ON` option is in effect, the **smbfs** program may not be able to connect to the server because it expects Unicode text to be used only after the server session has been established.
+
+With `UNICODE=ON` the `SESSIONSETUP=DELAY` option will delay enabling Unicode support until after the session has been established. `SESSIONSETUP=NODELAY` will enable Unicode support at the earliest possible time instead.
+
+The default is `SESSIONSETUP=DELAY` which works both with *Samba*, and seems to be required for *Microsoft Windows* systems.
 
 ### 5.5. Time conversion
 

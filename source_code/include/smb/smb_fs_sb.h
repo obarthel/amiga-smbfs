@@ -49,6 +49,12 @@ struct smb_server
 	/* olsen (2018-06-01): UTF-16LE Unicode strings are used for path names. */
 	int unicode_enabled;
 
+	/* olsen (2018-08-12): Path names are case sensitive. */
+	int case_sensitive;
+
+	/* olsen (2018-08-12): Delay the use of Unicode strings during session setup. */
+	int session_setup_delay_unicode;
+
 	struct smba_server * abstraction;
 
 	enum smb_conn_state state;
@@ -59,14 +65,8 @@ struct smb_server
 	/* olsen (2012-12-10): raw SMB over TCP instead of NBT transport? */
 	int raw_smb;
 
-	/* olsen (2016-06-03): Prefer SMB_COM_WRITE_RAW to SMB_COM_WRITE_ANDX? */
-	int prefer_write_raw;
-
 	/* olsen (2016-04-20): Use write-behind with SMB_COM_WRITE_RAW? */
 	int write_behind;
-
-	/* olsen (2016-06-03): Prefer SMB_COM_READ_RAW to SMB_COM_READ_ANDX? */
-	int prefer_read_raw;
 
 	/* olsen (2018-05-09): Timeout for send/receive operations in seconds. */
 	int timeout;

@@ -2484,3 +2484,30 @@ smbfs 1.175 (9.8.2018)
 - Added more debug output to the SendNetBIOSStatusQuery() function.
 
 - Updated the documentation.
+
+
+smbfs 1.176 (12.8.2018)
+
+- The smb_proc_reconnect() function did not handle SMB_COM_SESSION_SETUP_ANDX
+  correctly if Unicode support was enabled both by the server and smbfs.
+
+  The plain text password should have been transmitted in UTF16LE form,
+  as well as the user name, the workgroup name, the native OS and the
+  native LAN manager information.
+
+  Strangely, with these corrections the session setup no longer works
+  with Windows 7, but it works well with Samba.
+
+  So, what do we do? It appears that you can delay throwing the
+  "the client uses Unicode strings" switch until after the session
+  has been properly established. We now have a new option to control
+  how this is done. SESSIONSETUP=DELAY (the default) delays the
+  switch to Unicode and SESSIONSETUP=NODELAY switches to Unicode
+  at the earliest possible time.
+
+- The CASESENSITIVE option now correctly clears the "path names are
+  not case sensitive" flag of the SMB messages which smbfs sends to
+  the server.
+
+- The default workgroup name of "WORKGROUP" could still be used even if
+  the server had been queried to provide its current workgroup name. Fixed.
