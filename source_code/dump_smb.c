@@ -1157,6 +1157,8 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 	if(num_data_bytes < 0)
 		num_data_bytes = 0;
 
+	memset(vwv,0,sizeof(vwv));
+
 	for(i = j = 0 ; i < num_parameter_words ; i++, j += 2)
 		vwv[i] = (((int)parameters[j+1]) << 8) + parameters[j];
 

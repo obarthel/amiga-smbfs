@@ -116,7 +116,8 @@ static int smb_proc_reconnect (struct smb_server *server, int * error_ptr);
 /*****************************************************************************/
 
 /* error code stuff - put together by Merik Karman
-   merik -at- blackadder -dot- dsh -dot- oz -dot- au */
+ * merik -at- blackadder -dot- dsh -dot- oz -dot- au
+ */
 typedef struct
 {
 	const char *	name;
@@ -272,7 +273,7 @@ static void convert_time_t_to_long_date(time_t t, QUAD * long_date);
  * of the string. This works because the ISO-Latin-1 character sits
  * within the ASCII/BMP Latin-1 Unicode range.
  *
- * This function creates a null-terminated UTF16-LE Unicode string and
+ * This function creates a NUL-terminated UTF16-LE Unicode string and
  * returns how many bytes were written to the buffer, including the
  * null-termination.
  *
@@ -325,7 +326,7 @@ copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
  * Note that the length is given as the number of 16 bit Unicode
  * characters, not the number of bytes required to store the string.
  *
- * This function creates a null-terminated ISO-Latin-1 string and
+ * This function creates a NUL-terminated ISO-Latin-1 string and
  * returns how many bytes were written to the buffer, including the
  * null-termination.
  *
@@ -702,7 +703,8 @@ smb_bcc (const byte * packet)
 }
 
 /* smb_valid_packet: We check if packet fulfills the basic
-   requirements of a smb packet */
+ * requirements of a smb packet
+ */
 static int
 smb_valid_packet (const byte * packet)
 {
@@ -719,7 +721,8 @@ smb_valid_packet (const byte * packet)
 }
 
 /* smb_verify: We check if we got the answer we expected, and if we
-   got enough data. If bcc == -1, we don't care. */
+ * got enough data. If bcc == -1, we don't care.
+ */
 static int
 smb_verify (const byte * packet, int command, int wct, int bcc)
 {
@@ -810,8 +813,8 @@ smb_errno (int errcls, int error)
 			{ ERRlock,			EDEADLK },
 			{ ERRfilexists,		EEXIST },
 			{ ERRinvalidparam,	EINVAL },
-			{ 145,				ENOTEMPTY},/* Directory is not empty; this is what Samba reports (2016-04-23) */
-			{ 183,				EEXIST },/* This next error seems to occur on an mv when the destination exists ("object name collision") */
+			{ 145,				ENOTEMPTY},	/* Directory is not empty; this is what Samba reports (2016-04-23) */
+			{ 183,				EEXIST },	/* This next error seems to occur on an mv when the destination exists ("object name collision") */
 			{ -1,				-1 }
 		};
 
@@ -1224,7 +1227,7 @@ smb_payload_size(const struct smb_server *server, int wct, int bcc)
 int
 smb_proc_open (struct smb_server *server, const char *pathname, int len, int writable, int truncate_file, struct smb_dirent *entry,int * error_ptr)
 {
-	int result;
+	int result = 0;
 	char *p;
 	char *buf = server->transmit_buffer;
 	int retry_read_only;
@@ -1370,7 +1373,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 			if (result < 0)
 			{
 				int access_error;
-				
+
 				SHOWMSG("that didn't work; retrying");
 
 				/* Try again in read-only mode? */
@@ -1462,7 +1465,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 			if(server->unicode_enabled)
 			{
-				(*p++) = 4; /* A null-terminated string follows. */
+				(*p++) = 4; /* A NUL-terminated string follows. */
 				copy_latin1_to_utf16le(p,2 * (len+1),pathname,len);
 			}
 			else
@@ -1720,7 +1723,7 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const Q
 
 	LOG (("number of bytes to send = %ld\n", count));
 
-	/* Calculate maximum number of bytes that could be transferred with
+	/* Calculate the maximum number of bytes that could be transferred with
 	 * a single SMB_COM_WRITE_RAW packet...
 	 *
 	 * 'max_buffer_size' is the maximum size of a complete SMB message
@@ -2117,7 +2120,7 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 
 	if(server->unicode_enabled)
 	{
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 		copy_latin1_to_utf16le(p,2 * (len+1),path,len);
 	}
 	else
@@ -2165,10 +2168,10 @@ smb_proc_mv (struct smb_server *server, const char *old_path, const int old_path
 
 	if(server->unicode_enabled)
 	{
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 		p += copy_latin1_to_utf16le(p,2 * (old_path_len+1),old_path,old_path_len);
 
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 
 		(*p++) = 0; /* Padding byte, allowing for the string to be word-aligned. */
 		(void) copy_latin1_to_utf16le(p,2 * (new_path_len+1),new_path,new_path_len);
@@ -2209,7 +2212,7 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 
 	if(server->unicode_enabled)
 	{
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 		(void) copy_latin1_to_utf16le(p,path_size,path,len);
 	}
 	else
@@ -2249,7 +2252,7 @@ smb_proc_rmdir (struct smb_server *server, const char *path, const int len, int 
 
 	if(server->unicode_enabled)
 	{
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 		(void) copy_latin1_to_utf16le(p,path_size,path,len);
 	}
 	else
@@ -2293,7 +2296,7 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 
 	if(server->unicode_enabled)
 	{
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 		(void) copy_latin1_to_utf16le(p,path_size,path,len);
 	}
 	else
@@ -2410,13 +2413,14 @@ smb_decode_dirent (const char *p, struct smb_dirent *entry)
 }
 
 /* This routine is used to read in directory entries from the network.
-   Note that it is for short directory name seeks, i.e.: protocol < PROTOCOL_LANMAN2 */
+ * Note that it is for short directory name seeks, i.e.: protocol < PROTOCOL_LANMAN2
+ */
 static int
 smb_proc_readdir_short (struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
 {
 	char *p;
 	char *buf;
-	int result;
+	int result = 0;
 	int i;
 	int first, total_count;
 	struct smb_dirent *current_entry;
@@ -2471,7 +2475,7 @@ smb_proc_readdir_short (struct smb_server *server, const char *path, int fpos, i
 
 			if(server->unicode_enabled)
 			{
-				(*p++) = 4; /* A null-terminated string follows. */
+				(*p++) = 4; /* A NUL-terminated string follows. */
 				p += copy_latin1_to_utf16le(p,2 * (mask_len+1),mask,mask_len);
 			}
 			else
@@ -2499,7 +2503,7 @@ smb_proc_readdir_short (struct smb_server *server, const char *path, int fpos, i
 
 			if(server->unicode_enabled)
 			{
-				(*p++) = 4; /* A null-terminated string follows. */
+				(*p++) = 4; /* A NUL-terminated string follows. */
 				p += copy_latin1_to_utf16le(p,2 * (1),"",0);
 			}
 			else
@@ -3341,7 +3345,7 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 
 	if(server->unicode_enabled)
 	{
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 		copy_latin1_to_utf16le(p,2 * (len+1),path,len);
 	}
 	else
@@ -3832,7 +3836,7 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 
 	if(server->unicode_enabled)
 	{
-		(*p++) = 4; /* A null-terminated string follows. */
+		(*p++) = 4; /* A NUL-terminated string follows. */
 		p += copy_latin1_to_utf16le(p,2 * (len+1),path,len);
 	}
 	else
@@ -4448,7 +4452,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			{
 				/* We may be able to use Unicode strings during the session setup,
 				 * but the server may not understand it (Windows 7 seems to be
-				 * unable to decode them), so we delay setting the SMB message
+				 * unable to decode the strings), so we delay setting the SMB message
 				 * flag "this message may contain Unicode strings" until we have
 				 * completed the session setup.
 				 */
@@ -4477,7 +4481,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 				/* Use plain text passwords? Remember to transmit the
 				 * password in UTF16LE-encoding. Note that we have to
 				 * use the UTF16LE-encoded form, and not the OEM
-				 * for.
+				 * form.
 				 */
 				if((server->security_mode & NEGOTIATE_ENCRYPT_PASSWORDS) == 0)
 				{
@@ -4498,16 +4502,16 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 				smb_setup_header (server, SMBsesssetupX, 13, oem_password_len + unicode_password_len + user_len+1 + strlen (server->mount_data.workgroup_name)+1 + strlen (native_os)+1 + strlen (native_lanman)+1);
 			}
 
-			WSET (packet, smb_vwv0, 0xff);				/* AndXCommand+AndXReserved */
-			WSET (packet, smb_vwv1, 0);					/* AndXOffset */
-			WSET (packet, smb_vwv2, given_max_xmit);	/* MaxBufferSize */
-			WSET (packet, smb_vwv3, 2);					/* MaxMpxCount */
-			WSET (packet, smb_vwv4, 0);					/* VcNumber */
-			DSET (packet, smb_vwv5, server_sesskey);	/* SessionKey */
+			WSET (packet, smb_vwv0, 0xff);					/* AndXCommand+AndXReserved */
+			WSET (packet, smb_vwv1, 0);						/* AndXOffset */
+			WSET (packet, smb_vwv2, given_max_xmit);		/* MaxBufferSize */
+			WSET (packet, smb_vwv3, 2);						/* MaxMpxCount */
+			WSET (packet, smb_vwv4, 0);						/* VcNumber */
+			DSET (packet, smb_vwv5, server_sesskey);		/* SessionKey */
 			WSET (packet, smb_vwv7, oem_password_len);		/* OEMPasswordLen */
 			WSET (packet, smb_vwv8, unicode_password_len);	/* UnicodePasswordLen */
-			DSET (packet, smb_vwv9, 0);					/* Reserved */
-			DSET (packet, smb_vwv11, client_capabilities);		/* Capabilities */
+			DSET (packet, smb_vwv9, 0);						/* Reserved */
+			DSET (packet, smb_vwv11, client_capabilities);	/* Capabilities */
 
 			p = SMB_BUF (packet);
 
@@ -4660,6 +4664,8 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		#endif /* OVERRIDE_SERVER_MAX_BUFFER_SIZE */
 
 		server->capabilities = 0;
+
+		oem_password_len = 0;
 	}
 
 	if(server->protocol > PROTOCOL_LANMAN1 &&
@@ -4865,7 +4871,8 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 }
 
 /* smb_proc_reconnect: server->transmit_buffer is allocated with
-   server->max_buffer_size bytes if and only if we return >= 0 */
+ * server->max_buffer_size bytes if and only if we return >= 0
+ */
 int
 smb_proc_connect (struct smb_server *server, int * error_ptr)
 {

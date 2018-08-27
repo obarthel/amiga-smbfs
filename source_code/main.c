@@ -394,7 +394,7 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 			if(stk == NULL)
 				goto out;
 
-			new_stack = AllocMem(new_stack_size,MEMF_PUBLIC|MEMF_ANY);
+			new_stack = AllocMem(new_stack_size,MEMF_ANY);
 			if(new_stack == NULL)
 				goto out;
 
@@ -1789,6 +1789,62 @@ allocate_memory(LONG size)
 
 /****************************************************************************/
 
+/* Allocate memory for a new lock node and initialize it. */
+static struct LockNode *
+allocate_lock_node(
+	LONG					access_mode,
+	const TEXT *			full_name,
+	const struct MsgPort *	user)
+{
+	struct LockNode * ln;
+
+	ln = allocate_memory(sizeof(*ln));
+	if(ln != NULL)
+	{
+		memset(ln,0,sizeof(*ln));
+
+		ln->ln_FileLock.fl_Key		= (LONG)ln;
+		ln->ln_Magic				= ID_SMB_DISK;
+		ln->ln_FileLock.fl_Access	= access_mode;
+		ln->ln_FileLock.fl_Task		= FileSystemPort;
+		ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
+		ln->ln_FullName				= (TEXT *)full_name;
+		ln->ln_LastUser				= user;
+	}
+
+	return(ln);
+}
+
+/****************************************************************************/
+
+/* Allocate memory for a new file node and initialize it. */
+static struct FileNode *
+allocate_file_node(
+	LONG						mode,
+	const TEXT *				full_name,
+	const struct FileHandle *	fh,
+	const smba_file_t *			file)
+{
+	struct FileNode * fn;
+
+	fn = allocate_memory(sizeof(*fn));
+	if(fn != NULL)
+	{
+		memset(fn, 0, sizeof(*fn));
+
+		fn->fn_Handle	= (struct FileHandle *)fh;
+		fn->fn_Magic	= ID_SMB_DISK;
+		fn->fn_Volume	= VolumeNode;
+		fn->fn_FullName	= (TEXT *)full_name;
+		fn->fn_File		= (smba_file_t *)file;
+		fn->fn_Mode		= mode;
+	}
+
+	return(fn);
+}
+
+/****************************************************************************/
+
 /* Obtain the number of seconds to add to the current time
  * to translate local time into UTC.
  */
@@ -2561,7 +2617,7 @@ send_disk_change_notification(ULONG class)
  * skipping a particular entry if necessary.
  */
 static struct FileNode *
-find_file_node(const TEXT * name,const struct FileNode * skip)
+find_file_node_by_name(const TEXT * name,const struct FileNode * skip)
 {
 	struct FileNode * result = NULL;
 	struct FileNode * fn;
@@ -2584,7 +2640,7 @@ find_file_node(const TEXT * name,const struct FileNode * skip)
  * skipping a particular entry if necessary.
  */
 static struct LockNode *
-find_lock_node(const TEXT * name,const struct LockNode * skip)
+find_lock_node_by_name(const TEXT * name,const struct LockNode * skip)
 {
 	struct LockNode * result = NULL;
 	struct LockNode * ln;
@@ -2621,7 +2677,7 @@ check_access_mode_collision(const TEXT * name,LONG mode)
 
 	D(("name = '%s'", escape_name(name)));
 
-	fn = find_file_node(name,NULL);
+	fn = find_file_node_by_name(name,NULL);
 	if(fn != NULL)
 	{
 		if(mode != SHARED_LOCK || fn->fn_Mode != SHARED_LOCK)
@@ -2631,7 +2687,7 @@ check_access_mode_collision(const TEXT * name,LONG mode)
 		}
 	}
 
-	ln = find_lock_node(name,NULL);
+	ln = find_lock_node_by_name(name,NULL);
 	if(ln != NULL)
 	{
 		if(mode != SHARED_LOCK || ln->ln_FileLock.fl_Access != SHARED_LOCK)
@@ -2655,13 +2711,29 @@ check_access_mode_collision(const TEXT * name,LONG mode)
 static int
 name_already_in_use(const TEXT * name)
 {
-	int error;
+	int error = ERROR_OBJECT_IN_USE;
 
-	if(find_file_node(name,NULL) != NULL || find_lock_node(name,NULL) != NULL)
-		error = ERROR_OBJECT_IN_USE;
-	else
-		error = OK;
+	ENTER();
 
+	SHOWSTRING(name);
+
+	if(find_file_node_by_name(name,NULL))
+	{
+		SHOWMSG("found a file by that name");
+		goto out;
+	}
+
+	if(find_lock_node_by_name(name,NULL) != NULL)
+	{
+		SHOWMSG("found a lock by that name");
+		goto out;
+	}
+
+	error = OK;
+
+ out:
+
+	RETURN(error);
 	return(error);
 }
 
@@ -2826,11 +2898,11 @@ map_errno_to_ioerr(int error)
 
 			smb_translate_error_class_and_code(error_class,error_code,&smb_class_name,&smb_code_text);
 
-			LOG(("Translated SMB %ld/%ld (%s/%s) -> POSIX %ld (%s) -> AmigaDOS error %ld (%s)\n", error_class, error_code, smb_class_name, smb_code_text, error, posix_strerror(error), result, amigados_error_text));
+			D(("Translated SMB %ld/%ld (%s/%s) -> POSIX %ld (%s) -> AmigaDOS error %ld (%s)", error_class, error_code, smb_class_name, smb_code_text, error, posix_strerror(error), result, amigados_error_text));
 		}
 		else
 		{
-			LOG(("Translated POSIX %ld (%s) -> AmigaDOS error %ld (%s)\n", error, posix_strerror(error), result, amigados_error_text));
+			D(("Translated POSIX %ld (%s) -> AmigaDOS error %ld (%s)", error, posix_strerror(error), result, amigados_error_text));
 		}
 	}
 	#endif /* DEBUG */
@@ -3596,6 +3668,9 @@ escape_name(const TEXT * name)
 	int len;
 	TEXT c;
 
+	if(name == NULL)
+		name = "***NULL POINTER***";
+
 	len = 0;
 
 	while((c = (*name++)) != '\0')
@@ -3710,7 +3785,7 @@ escape_name(const TEXT * name)
 
 /****************************************************************************/
 
-/* Convert a BCPL string into a standard NUL terminated 'C' string. */
+/* Convert a BCPL string into a standard NUL-terminated 'C' string. */
 static void
 convert_from_bcpl_to_c_string(STRPTR cstring,int cstring_size,const void * bstring)
 {
@@ -3734,7 +3809,7 @@ convert_from_bcpl_to_c_string(STRPTR cstring,int cstring_size,const void * bstri
 	}
 }
 
-/* Convert a NUL terminated 'C' string into a BCPL string. */
+/* Convert a NUL-terminated 'C' string into a BCPL string. */
 static void
 convert_from_c_to_bcpl_string(void * bstring,int bstring_size,const TEXT * cstring,int len)
 {
@@ -3753,6 +3828,31 @@ convert_from_c_to_bcpl_string(void * bstring,int bstring_size,const TEXT * cstri
 		(*to++) = len;
 		memcpy(to,cstring,len);
 	}
+}
+
+/****************************************************************************/
+
+/* Allocate memory for storing a copy of a string with given
+ * length. Sufficient memory will be allocated for proper
+ * NUL-termination.
+ */
+static TEXT *
+allocate_and_copy_string(const TEXT * original_str, int len)
+{
+	TEXT * copied_str;
+
+	ASSERT( original_str != NULL && len >= 0 );
+
+	copied_str = allocate_memory(len + 1);
+	if(copied_str != NULL)
+	{
+		if(len > 0)
+			memcpy(copied_str, original_str, len);
+
+		copied_str[len] = '\0';
+	}
+
+	return(copied_str);
 }
 
 /****************************************************************************/
@@ -3898,9 +3998,9 @@ build_full_path_name(
 	ENTER();
 
 	if(parent_name == NULL)
-		D(("parent_name = NULL"));
+		D(("parent name = NULL"));
 	else
-		D(("parent_name = '%s'",escape_name(parent_name)));
+		D(("parent name = '%s'",escape_name(parent_name)));
 
 	if(name == NULL)
 		D(("name = NULL"));
@@ -3922,41 +4022,22 @@ build_full_path_name(
 
 	parent_name_len = strlen(parent_name);
 
-	/* Is the path name to be added an absolute path? If so,
-	 * it will replace the parent path name.
-	 */
-	if(name_len > 0 && (*name) == ':')
+	size = parent_name_len + 1;
+
+	if(name_len > 0)
+		size += name_len + 1;
+
+	buffer = allocate_memory(size);
+	if(buffer == NULL)
 	{
-		size = 1 + name_len + 1;
-
-		buffer = allocate_memory(size);
-		if(buffer == NULL)
-		{
-			error = ERROR_NO_FREE_STORE;
-			goto out;
-		}
-
-		to = buffer;
-
-		(*to++) = SMB_PATH_SEPARATOR;
+		error = ERROR_NO_FREE_STORE;
+		goto out;
 	}
-	/* Add the path name to the parent path name. */
-	else
-	{
-		size = parent_name_len + 1 + name_len + 1;
 
-		buffer = allocate_memory(size);
-		if(buffer == NULL)
-		{
-			error = ERROR_NO_FREE_STORE;
-			goto out;
-		}
+	to = buffer;
 
-		to = buffer;
-
-		memcpy(to,parent_name,parent_name_len);
-		to += parent_name_len;
-	}
+	memcpy(to,parent_name,parent_name_len);
+	to += parent_name_len;
 
 	ASSERT( buffer <= to );
 
@@ -3969,17 +4050,21 @@ build_full_path_name(
 		int segment_len;
 		int offset;
 
+		ASSERT( strncmp(buffer,SMB_ROOT_DIR_NAME,1) == SAME );
+
 		for(offset = 0 ; offset < name_len ; NOTHING)
 		{
 			offset = get_next_path_segment(name,name_len,offset,segment,sizeof(segment),&segment_len);
 
-			D(("segment = '%s', len=%ld, offset=%ld\n", segment, segment_len, offset));
+			D(("segment = '%s', len=%ld, offset=%ld", segment, segment_len, offset));
 
 			if(segment_len > 0)
 			{
 				/* Segment Buffer overflow? */
 				if(segment_len > (int)sizeof(segment))
 				{
+					D(("segment length %ld overflows buffer", segment_len));
+
 					error = ERROR_BUFFER_OVERFLOW;
 					goto out;
 				}
@@ -3998,6 +4083,8 @@ build_full_path_name(
 					/* Are we already at the root directory level? */
 					if(len == 1)
 					{
+						D(("already at root level"));
+
 						/* Can't go any further. */
 						error = ERROR_OBJECT_NOT_FOUND;
 						goto out;
@@ -4052,7 +4139,7 @@ build_full_path_name(
 				{
 					buffer[len] = '\0';
 
-					D(("full path name = '%s', length = %ld", buffer, len));
+					D(("full path name = '%s', length = %ld", escape_name(buffer), len));
 				}
 				#endif /* DEBUG */
 			}
@@ -4063,7 +4150,7 @@ build_full_path_name(
 
 	buffer[len] = '\0';
 
-	D(("buffer = '%s'",escape_name(buffer)));
+	D(("full path name = '%s'",escape_name(buffer)));
 	SHOWVALUE(size);
 	SHOWVALUE(len);
 
@@ -4123,15 +4210,7 @@ split_path_name(
 		(*base_part_ptr) = NULL;
 
 	/* Make a copy of the path string. */
-	temp = allocate_memory(path_len+1);
-	if(temp == NULL)
-	{
-		error = ERROR_NO_FREE_STORE;
-		goto out;
-	}
-
-	memcpy(temp,path,path_len);
-	temp[path_len] = '\0';
+	temp = allocate_and_copy_string(path, path_len);
 
 	/* Find the last '\' character which separates
 	 * the directory part from the base part.
@@ -4176,7 +4255,7 @@ split_path_name(
 	}
 
 	/* Don't forget to free this when it is no longer needed. */
-	(*temp_ptr)	= temp;
+	(*temp_ptr) = temp;
 	temp = NULL;
 
 	if(dir_part_ptr != NULL)
@@ -4287,7 +4366,7 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 		}
 	}
 
-	parent_name = allocate_memory(name_len+1);
+	parent_name = allocate_and_copy_string(name, name_len);
 	if(parent_name == NULL)
 	{
 		SHOWMSG("not enough memory");
@@ -4295,9 +4374,6 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
-
-	memcpy(parent_name,name,name_len);
-	parent_name[name_len] = '\0';
 
 	D(("parent directory = '%s'",escape_name(parent_name)));
 
@@ -4547,6 +4623,46 @@ file_is_invalid(const struct FileNode * fn,int * error_ptr)
 
 /****************************************************************************/
 
+/* Remove a device, volume or assignment name from the path name. If
+ * If necessary, the path following the ':' character will be copied
+ * to the beginning of the string, removing it, and the name length
+ * will be adjusted accordingly.
+ */
+static void
+remove_device_name_from_path(TEXT * name, int * name_len_ptr)
+{
+	int name_len;
+	int i;
+
+	ASSERT( name != NULL && name_len_ptr != NULL );
+
+	name_len = (*name_len_ptr);
+
+	for(i = 0 ; i < name_len ; i++)
+	{
+		/* Stop at a path delimiter. A path delimiter
+		 * cannot be part of a device name.
+		 */
+		if(name[i] == '/')
+			break;
+
+		/* Remove the device/volume/assignment name
+		 * including the ':' character.
+		 */
+		if(name[i] == ':' && i > 0)
+		{
+			name_len -= i+1;
+
+			memmove(name,&name[i+1],name_len+1);
+
+			(*name_len_ptr) = name_len;
+			break;
+		}
+	}
+}
+
+/****************************************************************************/
+
 static BPTR
 Action_Parent(
 	const struct MsgPort *	user,
@@ -4569,64 +4685,57 @@ Action_Parent(
 	 * directory (which must fail with the error code
 	 * ERROR_OBJECT_NOT_FOUND set).
 	 */
-	if(parent == NULL)
+	if(parent != NULL)
 	{
-		error = OK;
-		goto out;
+		if(lock_is_invalid(parent,&error))
+			goto out;
+
+		parent_ln = (struct LockNode *)parent->fl_Key;
+
+		D(("parent lock on '%s'", escape_name(parent_ln->ln_FullName)));
+
+		parent_ln->ln_LastUser = user;
+
+		error = get_parent_dir_name(parent_ln->ln_FullName,strlen(parent_ln->ln_FullName),&full_name);
+		if(error != OK)
+		{
+			/* Check if we ended up having to return the parent of
+			 * the root directory. This is indicated by the
+			 * error code ERROR_OBJECT_NOT_FOUND. The parent directory
+			 * of the root directory is the ZERO lock.
+			 */
+			if(error != ERROR_OBJECT_NOT_FOUND)
+				goto out;
+
+			/* We return the ZERO lock. */
+		}
+		else
+		{
+			ln = allocate_lock_node(SHARED_LOCK,full_name,user);
+			if(ln == NULL)
+			{
+				error = ERROR_NO_FREE_STORE;
+				goto out;
+			}
+
+			D(("full_name = '%s'",escape_name(full_name)));
+
+			if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+			{
+				error = map_errno_to_ioerr(error);
+				goto out;
+			}
+
+			AddTail((struct List *)&LockList,(struct Node *)ln);
+			result = MKBADDR(&ln->ln_FileLock);
+			SHOWVALUE(&ln->ln_FileLock);
+
+			full_name = NULL;
+			ln = NULL;
+		}
 	}
 
-	if(lock_is_invalid(parent,&error))
-		goto out;
-
-	parent_ln = (struct LockNode *)parent->fl_Key;
-
-	parent_ln->ln_LastUser = user;
-
-	error = get_parent_dir_name(parent_ln->ln_FullName,strlen(parent_ln->ln_FullName),&full_name);
-	if(error != OK)
-	{
-		/* Check if we ended up having to return the parent of
-		 * the root directory. This is indicated by the
-		 * error code ERROR_OBJECT_NOT_FOUND. The parent directory
-		 * of the root directory is the ZERO lock.
-		 */
-		if(error == ERROR_OBJECT_NOT_FOUND)
-			error = OK;
-
-		goto out;
-	}
-
-	ln = allocate_memory(sizeof(*ln));
-	if(ln == NULL)
-	{
-		error = ERROR_NO_FREE_STORE;
-		goto out;
-	}
-
-	memset(ln,0,sizeof(*ln));
-
-	ln->ln_FileLock.fl_Key		= (LONG)ln;
-	ln->ln_Magic				= ID_SMB_DISK;
-	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
-	ln->ln_FileLock.fl_Task		= FileSystemPort;
-	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
-	ln->ln_FullName				= full_name;
-	ln->ln_LastUser				= user;
-
-	D(("full_name = '%s'",escape_name(full_name)));
-
-	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
-	{
-		error = map_errno_to_ioerr(error);
-		goto out;
-	}
-
-	AddTail((struct List *)&LockList,(struct Node *)ln);
-	result = MKBADDR(&ln->ln_FileLock);
-	SHOWVALUE(&ln->ln_FileLock);
-
-	full_name = NULL;
-	ln = NULL;
+	error = OK;
 
  out:
 
@@ -4669,6 +4778,15 @@ Action_DeleteObject(
 		goto out;
 	}
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	/* Name string, as given in the DOS packet, is in
+	 * BCPL format and needs to be converted into
+	 * 'C' format.
+	 */
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
+
 	SHOWVALUE(parent);
 
 	if(parent != NULL)
@@ -4680,6 +4798,8 @@ Action_DeleteObject(
 
 		ln = (struct LockNode *)parent->fl_Key;
 
+		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
+
 		parent_name = ln->ln_FullName;
 
 		ln->ln_LastUser = user;
@@ -4689,38 +4809,10 @@ Action_DeleteObject(
 		parent_name = NULL;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
-
-	/* Name string, as given in the DOS packet, is in
-	 * BCPL format and needs to be converted into
-	 * 'C' format.
-	 */
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	/* The SMB_COM_DELETE command supports deleting sets
 	 * of matching files/drawers through wildcards. Only
@@ -4759,7 +4851,7 @@ Action_DeleteObject(
 	/* Trying to delete the root directory, are you kidding? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot delete the root directory\n"));
+		D(("cannot delete the root directory"));
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -4771,7 +4863,7 @@ Action_DeleteObject(
 	error = check_access_mode_collision(full_name,EXCLUSIVE_LOCK);
 	if(error != OK)
 	{
-		LOG(("there is still a lock or file attached to '%s'\n", full_name));
+		D(("there is still a lock or file attached to '%s'", full_name));
 		goto out;
 	}
 
@@ -4909,6 +5001,11 @@ Action_CreateDir(
 		goto out;
 	}
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
+
 	SHOWVALUE(parent);
 
 	if(parent != NULL)
@@ -4920,6 +5017,8 @@ Action_CreateDir(
 
 		parent_ln = (struct LockNode *)parent->fl_Key;
 
+		D(("parent lock on '%s'", escape_name(parent_ln->ln_FullName)));
+
 		parent_ln->ln_LastUser = user;
 
 		parent_name = parent_ln->ln_FullName;
@@ -4929,34 +5028,10 @@ Action_CreateDir(
 		parent_name = NULL;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
-
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	/* Do not allow for a directory to be created whose
 	 * name contains MS-DOS wildcard characters. This will
@@ -4990,7 +5065,7 @@ Action_CreateDir(
 	/* Trying to overwrite the root directory, are you kidding? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot overwrite the root directory\n"));
+		D(("cannot overwrite the root directory"));
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -5004,25 +5079,15 @@ Action_CreateDir(
 	}
 
 	D(("path name = '%s'",escape_name(full_name)));
-	D(("directory name = '%s'\n", dir_name));
-	D(("base name = '%s'\n", base_name));
+	D(("directory name = '%s'", dir_name));
+	D(("base name = '%s'", base_name));
 
-	ln = allocate_memory(sizeof(*ln));
+	ln = allocate_lock_node(EXCLUSIVE_LOCK,full_name,user);
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
-
-	memset(ln,0,sizeof(*ln));
-
-	ln->ln_FileLock.fl_Key		= (LONG)ln;
-	ln->ln_Magic				= ID_SMB_DISK;
-	ln->ln_FileLock.fl_Access	= EXCLUSIVE_LOCK;
-	ln->ln_FileLock.fl_Task		= FileSystemPort;
-	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
-	ln->ln_FullName				= full_name;
-	ln->ln_LastUser				= user;
 
 	if(smba_open(ServerData,dir_name,open_read_only,open_dont_truncate,&dir,&error) < 0)
 	{
@@ -5088,9 +5153,13 @@ Action_LocateObject(
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
 	int error;
-	int i;
 
 	ENTER();
+
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
 
 	SHOWVALUE(parent);
 
@@ -5103,6 +5172,8 @@ Action_LocateObject(
 
 		parent_ln = (struct LockNode *)parent->fl_Key;
 
+		D(("parent lock on '%s'", escape_name(parent_ln->ln_FullName)));
+
 		parent_ln->ln_LastUser = user;
 
 		parent_name = parent_ln->ln_FullName;
@@ -5112,34 +5183,10 @@ Action_LocateObject(
 		parent_name = NULL;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
-
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
@@ -5158,30 +5205,18 @@ Action_LocateObject(
 	if(error != OK)
 		goto out;
 
-	ln = allocate_memory(sizeof(*ln));
+	ln = allocate_lock_node((mode != EXCLUSIVE_LOCK) ? SHARED_LOCK : EXCLUSIVE_LOCK,full_name,user);
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	memset(ln,0,sizeof(*ln));
-
-	ln->ln_FileLock.fl_Key		= (LONG)ln;
-	ln->ln_Magic				= ID_SMB_DISK;
-	ln->ln_FileLock.fl_Access	= (mode != EXCLUSIVE_LOCK) ? SHARED_LOCK : EXCLUSIVE_LOCK;
-	ln->ln_FileLock.fl_Task		= FileSystemPort;
-	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
-	ln->ln_FullName				= full_name;
-	ln->ln_LastUser				= user;
-
-	error = check_access_mode_collision(full_name,ln->ln_FileLock.fl_Access);
+	error = check_access_mode_collision(ln->ln_FullName,ln->ln_FileLock.fl_Access);
 	if(error != OK)
 		goto out;
 
-	D(("full_name = '%s'",escape_name(full_name)));
-
-	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,ln->ln_FullName,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -5190,6 +5225,10 @@ Action_LocateObject(
 	AddTail((struct List *)&LockList,(struct Node *)ln);
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
+
+	SHOWPOINTER(ln->ln_FullName);
+
+	D(("full path name = '%s'",escape_name(ln->ln_FullName)));
 
 	full_name = NULL;
 	ln = NULL;
@@ -5217,12 +5256,22 @@ Action_CopyDir(
 	STRPTR full_name = NULL;
 	struct LockNode * ln = NULL;
 	const TEXT * source_name;
-	int source_name_len;
 	int error;
 
 	ENTER();
 
 	SHOWVALUE(lock);
+
+	/* Fail fast if the lock is invalid. */
+	if(lock != NULL && lock_is_invalid(lock,&error))
+		goto out;
+
+	if(lock != NULL)
+	{
+		const struct LockNode * key = (struct LockNode *)lock->fl_Key;
+
+		D(("lock on '%s'", escape_name(key->ln_FullName)));
+	}
 
 	/* If a specific lock is to be duplicated, then that
 	 * better be a shared lock.
@@ -5230,26 +5279,15 @@ Action_CopyDir(
 	if(lock != NULL && lock->fl_Access != SHARED_LOCK)
 	{
 		SHOWMSG("cannot duplicate exclusive lock");
+
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
-
-	ln = allocate_memory(sizeof(*ln));
-	if(ln == NULL)
-	{
-		error = ERROR_NO_FREE_STORE;
-		goto out;
-	}
-
-	memset(ln,0,sizeof(*ln));
 
 	/* Duplicate a specific lock? */
 	if(lock != NULL)
 	{
 		struct LockNode * source;
-
-		if(lock_is_invalid(lock,&error))
-			goto out;
 
 		source = (struct LockNode *)lock->fl_Key;
 
@@ -5265,25 +5303,19 @@ Action_CopyDir(
 		source_name = SMB_ROOT_DIR_NAME;
 	}
 
-	source_name_len = strlen(source_name);
-
-	full_name = allocate_memory(source_name_len+1);
+	full_name = allocate_and_copy_string(source_name, strlen(source_name));
 	if(full_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	/* Length includes the terminating NUL byte. */
-	memcpy(full_name,source_name,source_name_len+1);
-
-	ln->ln_FileLock.fl_Key		= (LONG)ln;
-	ln->ln_Magic				= ID_SMB_DISK;
-	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
-	ln->ln_FileLock.fl_Task		= FileSystemPort;
-	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
-	ln->ln_FullName				= full_name;
-	ln->ln_LastUser				= user;
+	ln = allocate_lock_node(SHARED_LOCK,full_name,user);
+	if(ln == NULL)
+	{
+		error = ERROR_NO_FREE_STORE;
+		goto out;
+	}
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
@@ -5319,50 +5351,50 @@ Action_FreeLock(
 	LONG *				error_ptr)
 {
 	LONG result = DOSTRUE;
-	const struct LockNode * key;
-	struct LockNode * found;
-	struct LockNode * ln;
 
 	ENTER();
 
 	SHOWVALUE(lock);
 
-	/* Passing ZERO is harmless. */
-	if(lock == NULL)
-		goto out;
-
-	/* Make sure that no lock is released twice, and that we
-	 * know which locks are ours.
+	/* Passing ZERO is harmless. But we have to have
+	 * a valid lock if we are to proceed with releasing
+	 * it.
 	 */
-	if(lock_is_invalid(lock,NULL))
-		goto out;
-
-	found = NULL;
-
-	key = (struct LockNode *)lock->fl_Key;
-
-	for(ln = (struct LockNode *)LockList.mlh_Head ;
-		ln->ln_MinNode.mln_Succ != NULL ;
-		ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
+	if(lock != NULL && NOT lock_is_invalid(lock,NULL))
 	{
-		if(ln == key)
+		const struct LockNode * key;
+		struct LockNode * found;
+		struct LockNode * ln;
+
+		found = NULL;
+
+		key = (struct LockNode *)lock->fl_Key;
+
+		D(("lock on '%s'", escape_name(key->ln_FullName)));
+
+		for(ln = (struct LockNode *)LockList.mlh_Head ;
+			ln->ln_MinNode.mln_Succ != NULL ;
+			ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 		{
-			found = ln;
-			break;
+			if(ln == key)
+			{
+				found = ln;
+				break;
+			}
+		}
+
+		if(found != NULL)
+		{
+			Remove((struct Node *)found);
+
+			smba_close(ServerData,found->ln_File);
+
+			found->ln_Magic = 0;
+
+			free_memory(found->ln_FullName);
+			free_memory(found);
 		}
 	}
-
-	if(found == NULL)
-		goto out;
-
-	Remove((struct Node *)found);
-
-	smba_close(ServerData,found->ln_File);
-
-	found->ln_Magic = 0;
-
-	free_memory(found->ln_FullName);
-	free_memory(found);
 
  out:
 
@@ -5400,6 +5432,8 @@ Action_SameLock(
 
 		ln = (struct LockNode *)lock1->fl_Key;
 
+		D(("lock1 on '%s'", escape_name(ln->ln_FullName)));
+
 		ln->ln_LastUser = user;
 
 		name1 = ln->ln_FullName;
@@ -5418,6 +5452,8 @@ Action_SameLock(
 
 		ln = (struct LockNode *)lock2->fl_Key;
 
+		D(("lock2 on '%s'", escape_name(ln->ln_FullName)));
+
 		ln->ln_LastUser = user;
 
 		name2 = ln->ln_FullName;
@@ -5430,7 +5466,7 @@ Action_SameLock(
 	D(("name1 = '%s'",escape_name(name1)));
 	D(("name2 = '%s'",escape_name(name2)));
 
-	if(Stricmp(name1,name2) == SAME)
+	if(compare_names(name1,name2) == SAME)
 		result = DOSTRUE;
 
  out:
@@ -5459,7 +5495,6 @@ Action_SetProtect(
 	smba_stat_t st;
 	int name_len;
 	int error;
-	int i;
 
 	ENTER();
 
@@ -5468,6 +5503,11 @@ Action_SetProtect(
 		error = ERROR_DISK_WRITE_PROTECTED;
 		goto out;
 	}
+
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
 
 	SHOWVALUE(parent);
 
@@ -5480,6 +5520,8 @@ Action_SetProtect(
 
 		ln = (struct LockNode *)parent->fl_Key;
 
+		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
+
 		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
@@ -5489,34 +5531,10 @@ Action_SetProtect(
 		parent_name = NULL;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
-
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
@@ -5534,7 +5552,7 @@ Action_SetProtect(
 	 */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot change protection bits of the root directory\n"));
+		D(("cannot change protection bits of the root directory"));
 
 		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
@@ -5668,12 +5686,17 @@ Action_RenameObject(
 	D(("source name = '%b'",MKBADDR(source_bcpl_name)));
 	D(("destination name = '%b'",MKBADDR(destination_bcpl_name)));
 
+	convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
+	name_len = strlen(name);
+
 	if(source_lock != NULL)
 	{
 		if(lock_is_invalid(source_lock,&error))
 			goto out;
 
 		ln = (struct LockNode *)source_lock->fl_Key;
+
+		D(("source lock on '%s'", escape_name(ln->ln_FullName)));
 
 		ln->ln_LastUser = user;
 
@@ -5684,32 +5707,10 @@ Action_RenameObject(
 		parent_name = NULL;
 	}
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	/* The SMB_COM_RENAME command supports renaming through
 	 * wildcards. Only the last part of the path (the name
@@ -5744,14 +5745,19 @@ Action_RenameObject(
 	if(error != OK)
 		goto out;
 
+	D(("full source path = '%s'",escape_name(full_source_name)));
+
 	/* Trying to rename the root directory, are you kidding? */
 	if(strcmp(full_source_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot rename the root directory\n"));
+		D(("cannot rename the root directory"));
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
+
+	convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
+	name_len = strlen(name);
 
 	if(destination_lock != NULL)
 	{
@@ -5759,6 +5765,8 @@ Action_RenameObject(
 			goto out;
 
 		ln = (struct LockNode *)destination_lock->fl_Key;
+
+		D(("destination lock on '%s'", escape_name(ln->ln_FullName)));
 
 		ln->ln_LastUser = user;
 
@@ -5769,32 +5777,10 @@ Action_RenameObject(
 		parent_name = NULL;
 	}
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	last_name = FilePart(name);
 	last_name_len = strlen(last_name);
@@ -5825,10 +5811,12 @@ Action_RenameObject(
 	if(error != OK)
 		goto out;
 
+	D(("full destination path = '%s'",escape_name(full_destination_name)));
+
 	/* Trying to replace the root directory, are you kidding? */
 	if(strcmp(full_destination_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot replace the root directory\n"));
+		D(("cannot replace the root directory"));
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -5840,14 +5828,19 @@ Action_RenameObject(
 	 */
 	error = name_already_in_use(full_source_name);
 	if(error != OK)
+	{
+		D(("source '%s' is still in use",escape_name(full_source_name)));
+
 		goto out;
+	}
 
 	error = name_already_in_use(full_destination_name);
 	if(error != OK)
-		goto out;
+	{
+		D(("destination '%s' is still in use",escape_name(full_destination_name)));
 
-	D(("source name = '%s'",escape_name(full_source_name)));
-	D(("destination name = '%s'",escape_name(full_destination_name)));
+		goto out;
+	}
 
 	if(smba_rename(ServerData,full_source_name,full_destination_name,&error) < 0)
 	{
@@ -5990,6 +5983,10 @@ Action_Info(
 
 		ln = (struct LockNode *)lock->fl_Key;
 
+		SHOWPOINTER(ln->ln_FullName);
+
+		D(("lock on '%s'", escape_name(ln->ln_FullName)));
+
 		ln->ln_LastUser = user;
 	}
 
@@ -6037,6 +6034,8 @@ Action_ExamineObject(
 			goto out;
 
 		ln = (struct LockNode *)lock->fl_Key;
+
+		D(("lock on '%s'", escape_name(ln->ln_FullName)));
 
 		ln->ln_LastUser = user;
 
@@ -6468,6 +6467,8 @@ Action_ExamineNext(
 	}
 
 	ln = (struct LockNode *)lock->fl_Key;
+
+	D(("lock on '%s'", escape_name(ln->ln_FullName)));
 
 	ln->ln_LastUser = user;
 
@@ -6916,6 +6917,8 @@ Action_ExamineAll(
 
 	ln = (struct LockNode *)lock->fl_Key;
 
+	D(("lock on '%s'", escape_name(ln->ln_FullName)));
+
 	ln->ln_LastUser = last_user;
 
 	/* The buffer has to be large enough for at
@@ -7179,6 +7182,8 @@ Action_ExamineAllEnd(
 
 	ln = (struct LockNode *)lock->fl_Key;
 
+	D(("lock on '%s'", escape_name(ln->ln_FullName)));
+
 	ln->ln_LastUser = last_user;
 
 	/* Make Action_ExamineAll() return no more entries. */
@@ -7221,6 +7226,9 @@ Action_Find(
 
 	ENTER();
 
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
+
 	switch(action)
 	{
 		case ACTION_FINDINPUT:
@@ -7252,6 +7260,8 @@ Action_Find(
 
 		ln = (struct LockNode *)parent->fl_Key;
 
+		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
+
 		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
@@ -7261,39 +7271,17 @@ Action_Find(
 		parent_name = NULL;
 	}
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	/* Do not allow MS-DOS wildcard characters to be used
 	 * when creating a new file.
 	 */
 	if(action != ACTION_FINDINPUT)
 	{
-		TEXT * last_name;
+		const TEXT * last_name;
 		int last_name_len;
 
 		last_name = FilePart(name);
@@ -7342,32 +7330,24 @@ Action_Find(
 	/* Trying to open the root directory? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot open the root directory\n"));
+		D(("cannot open the root directory"));
 
 		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
 	}
 
-	fn = allocate_memory(sizeof(*fn));
+	fn = allocate_file_node((action == ACTION_FINDOUTPUT) ? EXCLUSIVE_LOCK : SHARED_LOCK,full_name,fh,NULL);
 	if(fn == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	memset(fn,0,sizeof(*fn));
-
-	fn->fn_Handle	= fh;
-	fn->fn_Magic	= ID_SMB_DISK;
-	fn->fn_Volume	= VolumeNode;
-	fn->fn_FullName	= full_name;
-	fn->fn_Mode		= (action == ACTION_FINDOUTPUT) ? EXCLUSIVE_LOCK : SHARED_LOCK;
-
 	error = check_access_mode_collision(full_name,fn->fn_Mode);
 	if(error != OK)
 		goto out;
 
-	D(("full_name = '%s'",escape_name(full_name)));
+	D(("full path name = '%s'",escape_name(fn->fn_FullName)));
 
 	/* Open an existing file for write access, create it if
 	 * it doesn't exist yet?
@@ -7524,6 +7504,8 @@ Action_Read(
 	if(file_is_invalid(fn,&error))
 		goto out;
 
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
+
 	SHOWVALUE(length);
 
 	if(length > 0)
@@ -7571,6 +7553,8 @@ Action_Write(
 	if(file_is_invalid(fn,&error))
 		goto out;
 
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
+
 	SHOWVALUE(length);
 
 	if(length > 0)
@@ -7609,6 +7593,8 @@ Action_End(
 
 	if(file_is_invalid(which_fn,&error))
 		goto out;
+
+	D(("file opened on '%s'", escape_name(which_fn->fn_FullName)));
 
 	found = NULL;
 
@@ -7669,6 +7655,8 @@ Action_Seek(
 
 	if(file_is_invalid(fn,&error))
 		goto out;
+
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
 
 	previous_position_quad = fn->fn_OffsetQuad;
 
@@ -7772,6 +7760,8 @@ Action_SetFileSize(
 
 	if(file_is_invalid(fn,&error))
 		goto out;
+
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
 
 	previous_position_quad = fn->fn_OffsetQuad;
 
@@ -7878,7 +7868,6 @@ Action_SetDate(
 	LONG seconds;
 	int name_len;
 	int error;
-	int i;
 
 	ENTER();
 
@@ -7890,6 +7879,11 @@ Action_SetDate(
 
 	SHOWVALUE(parent);
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
+
 	if(parent != NULL)
 	{
 		struct LockNode * ln;
@@ -7898,6 +7892,8 @@ Action_SetDate(
 			goto out;
 
 		ln = (struct LockNode *)parent->fl_Key;
+
+		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
 
 		ln->ln_LastUser = user;
 
@@ -7908,34 +7904,10 @@ Action_SetDate(
 		parent_name = NULL;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
-
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
@@ -7951,7 +7923,7 @@ Action_SetDate(
 	/* Trying to change the date of the root directory? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot change the date of the root directory\n"));
+		D(("cannot change the date of the root directory"));
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -8052,6 +8024,8 @@ Action_ExamineFH(
 
 	if(file_is_invalid(fn,&error))
 		goto out;
+
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
 
 	if(smba_getattr(fn->fn_File,&st,&error) < 0)
 	{
@@ -8185,6 +8159,7 @@ Action_ExamineFH(
 
 static BPTR
 Action_ParentFH(
+	struct MsgPort *	user,
 	struct FileNode *	fn,
 	LONG *				error_ptr)
 {
@@ -8198,25 +8173,18 @@ Action_ParentFH(
 	if(file_is_invalid(fn,&error))
 		goto out;
 
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
+
 	error = get_parent_dir_name(fn->fn_FullName,strlen(fn->fn_FullName),&parent_dir_name);
 	if(error != OK)
 		goto out;
 
-	ln = allocate_memory(sizeof(*ln));
+	ln = allocate_lock_node(SHARED_LOCK,parent_dir_name,user);
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
-
-	memset(ln,0,sizeof(*ln));
-
-	ln->ln_FileLock.fl_Key		= (LONG)ln;
-	ln->ln_Magic				= ID_SMB_DISK;
-	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
-	ln->ln_FileLock.fl_Task		= FileSystemPort;
-	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
-	ln->ln_FullName				= parent_dir_name;
 
 	D(("parent_dir_name = '%s'",escape_name(parent_dir_name)));
 
@@ -8255,7 +8223,6 @@ Action_CopyDirFH(
 	BPTR result = ZERO;
 	struct LockNode * ln = NULL;
 	STRPTR full_name = NULL;
-	int full_name_len;
 	int error;
 
 	ENTER();
@@ -8263,40 +8230,27 @@ Action_CopyDirFH(
 	if(file_is_invalid(fn,&error))
 		goto out;
 
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
+
 	if(fn->fn_Mode != SHARED_LOCK)
 	{
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
 	}
 
-	full_name_len = strlen(fn->fn_FullName);
-
-	full_name = allocate_memory(full_name_len+1);
+	full_name = allocate_and_copy_string(fn->fn_FullName, strlen(fn->fn_FullName));
 	if(full_name == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
 
-	/* Length includes the terminating NUL byte. */
-	memcpy(full_name,fn->fn_FullName,full_name_len+1);
-
-	ln = allocate_memory(sizeof(*ln));
+	ln = allocate_lock_node(SHARED_LOCK,full_name,user);
 	if(ln == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
 		goto out;
 	}
-
-	memset(ln,0,sizeof(*ln));
-
-	ln->ln_FileLock.fl_Key		= (LONG)ln;
-	ln->ln_Magic				= ID_SMB_DISK;
-	ln->ln_FileLock.fl_Access	= SHARED_LOCK;
-	ln->ln_FileLock.fl_Task		= FileSystemPort;
-	ln->ln_FileLock.fl_Volume	= MKBADDR(VolumeNode);
-	ln->ln_FullName				= full_name;
-	ln->ln_LastUser				= user;
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
@@ -8346,6 +8300,8 @@ Action_FHFromLock(
 
 	ln = (struct LockNode *)fl->fl_Key;
 
+	D(("lock on '%s'", escape_name(ln->ln_FullName)));
+
 	/* Is this a directory and not a file? */
 	if((ln->ln_File->dirent.attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0)
 	{
@@ -8355,7 +8311,7 @@ Action_FHFromLock(
 		goto out;
 	}
 
-	fn = allocate_memory(sizeof(*fn));
+	fn = allocate_file_node(fl->fl_Access,ln->ln_FullName,fh,ln->ln_File);
 	if(fn == NULL)
 	{
 		error = ERROR_NO_FREE_STORE;
@@ -8363,18 +8319,11 @@ Action_FHFromLock(
 	}
 
 	/* The file handle absorbs the lock. */
-	memset(fn,0,sizeof(*fn));
-
-	fn->fn_Handle	= fh;
-	fn->fn_Magic	= ID_SMB_DISK;
-	fn->fn_Volume	= VolumeNode;
-	fn->fn_FullName	= ln->ln_FullName;
-	fn->fn_File		= ln->ln_File;
-	fn->fn_Mode		= fl->fl_Access;
-
-	/* The lock is no longer needed. */
-	Remove((struct Node *)ln);
+	ln->ln_FullName = NULL;
+	ln->ln_File = NULL;
 	ln->ln_Magic = 0;
+
+	Remove((struct Node *)ln);
 	free_memory(ln);
 
 	fh->fh_Arg1 = (LONG)fn;
@@ -8471,6 +8420,40 @@ Action_RenameDisk(
 /****************************************************************************/
 
 static LONG
+Action_CurrentVolume(
+	struct FileNode *	fn,
+	LONG *				error_ptr)
+{
+	LONG result = ZERO;
+	int error;
+
+	ENTER();
+
+	if(file_is_invalid(fn,&error))
+		goto out;
+
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
+
+	if(NOT DeviceNodeAdded)
+	{
+		error = ERROR_ACTION_NOT_KNOWN;
+		goto out;
+	}
+
+	result	= MKBADDR(DeviceNode);
+	error	= 0;
+
+ out:
+
+	(*error_ptr) = error;
+
+	RETURN(result);
+	return(result);
+}
+
+/****************************************************************************/
+
+static LONG
 Action_ChangeMode(
 	const struct MsgPort *	user,
 	LONG					type,
@@ -8529,6 +8512,8 @@ Action_ChangeMode(
 
 		ln = (struct LockNode *)fl->fl_Key;
 
+		D(("lock on '%s'", escape_name(ln->ln_FullName)));
+
 		name = ln->ln_FullName;
 		old_mode = fl->fl_Access;
 
@@ -8543,61 +8528,46 @@ Action_ChangeMode(
 		if(file_is_invalid(fn,&error))
 			goto out;
 
+		D(("file opened on '%s'", escape_name(fn->fn_FullName)));
+
 		name = fn->fn_FullName;
 		old_mode = fn->fn_Mode;
 	}
 
 	/* Do we need to change anything at all? */
-	if(new_mode == old_mode)
+	if(new_mode != old_mode)
 	{
-		result = DOSTRUE;
-		goto out;
-	}
+		/* Change from shared to exclusive access? */
+		if(new_mode != SHARED_LOCK)
+		{
+			/* Is there another shared access lock
+			 * which refers to the same object?
+			 */
+			if(find_lock_node_by_name(name,ln) != NULL)
+			{
+				error = ERROR_OBJECT_IN_USE;
+				goto out;
+			}
 
-	/* This is the easiest case; change an
-	 * exclusive access mode to a shared
-	 * access mode. Since the original mode
-	 * can be used by one object only,
-	 * we get away by updating the mode
-	 * value.
-	 */
-	if(new_mode == SHARED_LOCK)
-	{
+			/* Is there another shared access file
+			 * which refers to the same object?
+			 */
+			if(find_file_node_by_name(name,fn) != NULL)
+			{
+				error = ERROR_OBJECT_IN_USE;
+				goto out;
+			}
+		}
+
+		/* There is either just one single reference
+		 * to this object or the object in question
+		 * is configured for exclusive access.
+		 */
 		if(type == CHANGE_LOCK)
 			fl->fl_Access = new_mode;
 		else
 			fn->fn_Mode = new_mode;
-
-		result = DOSTRUE;
-		goto out;
 	}
-
-	/* Is there another shared access lock
-	 * which refers to the same object?
-	 */
-	if(find_lock_node(name,ln) != NULL)
-	{
-		error = ERROR_OBJECT_IN_USE;
-		goto out;
-	}
-
-	/* Is there another shared access file
-	 * which refers to the same object?
-	 */
-	if(find_file_node(name,fn) != NULL)
-	{
-		error = ERROR_OBJECT_IN_USE;
-		goto out;
-	}
-
-	/* There is just one single reference
-	 * to this object; change the mode
-	 * and quit.
-	 */
-	if(type == CHANGE_LOCK)
-		fl->fl_Access = new_mode;
-	else
-		fn->fn_Mode = new_mode;
 
 	result = DOSTRUE;
 
@@ -8713,7 +8683,6 @@ Action_SetComment(
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
 	int error;
-	int i;
 
 	ENTER();
 
@@ -8724,6 +8693,9 @@ Action_SetComment(
 	}
 
 	D(("name = '%b', comment = '%s'",MKBADDR(bcpl_name),MKBADDR(bcpl_comment)));
+
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
 
 	SHOWVALUE(parent);
 
@@ -8736,6 +8708,8 @@ Action_SetComment(
 
 		ln = (struct LockNode *)parent->fl_Key;
 
+		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
+
 		ln->ln_LastUser = user;
 
 		parent_name = ln->ln_FullName;
@@ -8745,32 +8719,10 @@ Action_SetComment(
 		parent_name = NULL;
 	}
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-
-	name_len = strlen(name);
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-			break;
-		}
-	}
+	remove_device_name_from_path(name, &name_len);
 
 	if (NOT ServerData->server.unicode_enabled)
 	{
@@ -8786,7 +8738,7 @@ Action_SetComment(
 	/* Trying to change the comment of the root directory? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		LOG(("cannot change the comment of the root directory\n"));
+		D(("cannot change the comment of the root directory"));
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -8835,6 +8787,8 @@ Action_LockRecord(
 
 	if(file_is_invalid(fn,&error))
 		goto out;
+
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
 
 	/* Sanity checks... */
 	if (mode < REC_EXCLUSIVE || mode > REC_SHARED_IMMED)
@@ -8898,6 +8852,8 @@ Action_FreeRecord(
 
 	if(file_is_invalid(fn,&error))
 		goto out;
+
+	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
 
 	/* Sanity checks... */
 	if(offset < 0 || length <= 0 || offset + length < offset)
@@ -9236,6 +9192,7 @@ file_system_handler(
 					case ACTION_DIE:
 
 						SHOWMSG("ACTION_DIE");
+
 						if(IsListEmpty((struct List *)&FileList) && IsListEmpty((struct List *)&LockList))
 						{
 							SHOWMSG("no locks or files pending; quitting");
@@ -9254,9 +9211,9 @@ file_system_handler(
 						break;
 
 					case ACTION_CURRENT_VOLUME:
-						/* (Ignore) -> VolumeNode */
+						/* FileHandle->fh_Arg1 -> DeviceList, Unit */
 
-						res1 = MKBADDR(VolumeNode);
+						res1 = Action_CurrentVolume((struct FileNode *)dp->dp_Arg1,&res2);
 						break;
 
 					case ACTION_LOCATE_OBJECT:
@@ -9456,7 +9413,7 @@ file_system_handler(
 					case ACTION_PARENT_FH:
 						/* FileHandle->fh_Arg1 -> Bool */
 
-						res1 = Action_ParentFH((struct FileNode *)dp->dp_Arg1,&res2);
+						res1 = Action_ParentFH(dp->dp_Port,(struct FileNode *)dp->dp_Arg1,&res2);
 						break;
 
 					case ACTION_EXAMINE_ALL:
@@ -9520,12 +9477,9 @@ file_system_handler(
 						break;
 				}
 
-				SHOWVALUE(res1);
-				SHOWVALUE(res2);
+				D(("Returning packet with res1=%ld (0x%08lx) and res2=%ld (0x%08lx)\n",res1,res1,res2,res2));
 
 				ReplyPkt(dp,res1,res2);
-
-				D(("\n"));
 			}
 
 			/* Let's get paranoid: check if we should quit. */

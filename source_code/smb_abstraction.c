@@ -432,7 +432,7 @@ smba_open (smba_server_t * s, const char *name, int writable, int truncate_file,
 		LOG(("open failed\n"));
 		goto out;
 	}
-	
+
 	AddTail ((struct List *)&s->open_files, (struct Node *)f);
 	s->num_open_files++;
 
@@ -585,7 +585,7 @@ smba_close (smba_server_t * s, smba_file_t * f)
 		}
 
 		found->server->num_open_files--;
-		
+
 		LOG(("file closed, number of open files = %ld\n",found->server->num_open_files));
 
 		free (found);
@@ -618,7 +618,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 		int max_readx_size;
 		int count;
 
-		/* Calculate maximum number of bytes that could be transferred with
+		/* Calculate the maximum number of bytes that could be transferred with
 		 * a single SMBreadX packet...
 		 *
 		 * The message header accounts for
@@ -722,7 +722,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 		off_t position = offset->Low;
 		int count;
 
-		/* Calculate maximum number of bytes that could be transferred with
+		/* Calculate the maximum number of bytes that could be transferred with
 		 * a single SMBread packet...
 		 *
 		 * 'max_buffer_size' is the maximum size of a complete SMB message
@@ -816,7 +816,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		int max_writex_size;
 		int n;
 
-		/* Calculate maximum number of bytes that could be transferred with
+		/* Calculate the maximum number of bytes that could be transferred with
 		 * a single SMB_COM_WRITE_ANDX packet...
 		 *
 		 * 'max_buffer_size' is the maximum size of a complete SMB message
@@ -931,7 +931,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		int max_size_smb_com_write, count;
 		off_t position = offset->Low;
 
-		/* Calculate maximum number of bytes that could be transferred with
+		/* Calculate the maximum number of bytes that could be transferred with
 		 * a single SMBwrite packet...
 		 *
 		 * 'max_buffer_size' is the maximum size of a complete SMB message
@@ -1678,7 +1678,7 @@ extract_service (
 	char * root_start;
 	char * complete_service;
 	char * service_copy;
-	char * service_name = NULL;
+	char * service_name;
 	int result = -1;
 
 	service_copy = malloc(strlen(service)+1);
@@ -1800,7 +1800,7 @@ smba_start(
 	int					opt_unicode,
 	int					opt_prefer_core_protocol,
 	int					opt_case_sensitive,
-	int					opt_session_setup_delay_unicode, 
+	int					opt_session_setup_delay_unicode,
 	int					opt_write_behind,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
@@ -1940,7 +1940,7 @@ smba_start(
 
 				goto out;
 			}
-			
+
 			name = h->h_name;
 
 			LOG(("server host name found (%s)\n",name));

@@ -2267,7 +2267,7 @@ smbfs 1.162 (7.7.2018)
 
 - The FHFromLock code did not verify if the FileLock in question actually
   did refer to a file. Fixed.
-  
+
 - The RenameDisk code did not check if the new volume was sound and
   suitable for a volume. Fixed.
 
@@ -2465,7 +2465,7 @@ smbfs 1.175 (9.8.2018)
 
 - The command line template would still include the PREFERREADRAW/S
   and PREFERWRITERAW/S entries. Fixed.
-  
+
 - The debug options and the debug file are now taken care of as early
   as possible, so as to allow for the icon tool type/shell parameter
   processing to be logged.
@@ -2511,3 +2511,28 @@ smbfs 1.176 (12.8.2018)
 
 - The default workgroup name of "WORKGROUP" could still be used even if
   the server had been queried to provide its current workgroup name. Fixed.
+
+
+smbfs 1.177 (27.8.2018)
+
+- Implemented ACTION_CURRENT_VOLUME correctly.
+
+- Updated the documentation again.
+
+- Replacement stack should not be allocated as public memory. Fixed.
+
+- Clarified how Action_Parent(), Action_FreeLock() and
+  Action_ChangeMode() are supposed to work.
+
+- Action_CopyDir() now tests for an invalid lock much earlier,
+  which avoids testing the access mode first and then acting
+  upon it.
+
+- Action_SameLock() now uses case-sensitive path name comparison
+  if smbfs is required to. Previously, it would always use
+  case-insensitive comparison.
+
+- Unified and simplified commonly-used code.
+
+- Added more debug output in order to find that pesky AsyncWB
+  batch rename problem :-/

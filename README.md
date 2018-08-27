@@ -212,19 +212,13 @@ Keep in mind that passwords like these really should not be exposed by storing t
 
 The authentication process only works if the machine you are connecting to knows about the user name and password you want to use. As of this writing, **smbfs** can only be used for authenticating against a password server that is the same machine as the one on which you wish to access a share.
 
-#### 5.1.4. `NETBIOS/S`
-
-Older server software such as *Microsoft Windows XP* may not respond to the requests of the **smbfs** program to connect to the shared network file system.
-
-If the connection attempt fails immediately you may want to try the `NETBIOS` switch which tells the **smbfs** program to use an older protocol when trying to talk to the server.
-
-#### 5.1.5. `CHANGECASE/S`
+#### 5.1.4. `CHANGECASE/S`
 
 By default the password you provide with the `PASSWORD` option will not be changed before it is used for accessing the server's shared network file system.
 
 However, it may be required to change the password to all-uppercase characters before it can be used. If this is necessary, you should either provide the password in this form or resort to the `CHANGECASE` option, which will cause it to be translated to all upper case characters.
 
-#### 5.1.6. `DOMAIN=WORKGROUP/K`
+#### 5.1.5. `DOMAIN=WORKGROUP/K`
 
 This option may be omitted, in which case the **smbfs** program will ask the file server about the work group which it is a member of. Should the server fail to respond with this information, the **smbfs** program will use `WORKGROUP` as the domain name.
 
@@ -238,6 +232,12 @@ Copy ENV:smbfs_workgroup ENVARC:
 </pre>
 
 You may also use the `smbfs_domain` environment variable in place of the `smbfs_workgroup` variable. The two are aliases for one another, but **smbfs** will read only one of the two.
+
+#### 5.1.6. `NETBIOS/S`
+
+Older server software such as *Microsoft Windows XP* may not respond to the requests of the **smbfs** program to connect to the shared network file system.
+
+If the connection attempt fails immediately you may want to try the `NETBIOS` switch which tells the **smbfs** program to use an older protocol when trying to talk to the server.
 
 #### 5.1.7. `CLIENT=CLIENTNAME/K`
 
@@ -275,17 +275,17 @@ Also note that file and drawer names which cannot be represented on the Amiga du
 
 The built-in default translation method is restricted to the part of Unicode which is covered by the *ISO-8859-1* character set. It is enabled by default, as if `UNICODE=on` had been used. You can disable it with `UNICODE=off`, which completely disables the translation.
 
-Note: some Samba versions will return corrupted file and drawer names unless Unicode support is enabled. Names which use only US-ASCII characters will not be corrupted.
+Note: some *Samba* versions will return corrupted file and drawer names unless Unicode support is enabled. Names which use only US-ASCII characters appear to be generally safe to use and are unlikely to suffer from corruption.
 
 #### 5.2.2. `CP437/S`
 
-The switch `CP437` enables a code page-based translation which works well enough with old Samba servers. "CP437" stands for *code page 437*, which is what the original IBM-PC would use. 
+The switch `CP437` enables a code page-based translation which works well enough with old *Samba* versions. "CP437" stands for *code page 437*, which is what the original IBM-PC would use.
 
 The `CP437` switch disables Unicode support.
 
 #### 5.2.3. `CP850/S`
 
-The switch `CP850` enables a code page-based translation which works well enough with old Samba servers. "CP850" stands for *code page 850*, which is a variant of what the original IBM-PC would use. This variant is intended to be used in western Europe and is more compatible with the *ISO-8859-1* character set than the "CP437" variant.
+The switch `CP850` enables a code page-based translation which works well enough with old *Samba* versions. "CP850" stands for *code page 850*, which is a variant of what the original IBM-PC would use. This variant is intended to be used in western Europe and is more compatible with the *ISO-8859-1* character set than the "CP437" variant.
 
 The `CP850` switch disables Unicode support.
 
@@ -297,7 +297,7 @@ The first 256 bytes of each such file must consist of the mapping of Amiga chara
 
 In most cases the `L:FileSystem_Trans/INTL.crossdos` translation table file should be sufficient.
 
-To specify which file contains the translation tables to use you would use the `TRANSLATIONFILE` parameter, e.g. `TRANSLATIONFILE=L:FileSystem_Trans/INTL.crossdos`.
+To specify which file contains the translation tables to use you would use the `TRANSLATIONFILE` parameter, e.g. `TRANSLATIONFILE=L:FileSystem_Trans/INTL.crossdos`. However, you might want to try the `CP850` switch instead which should produce the same effect.
 
 The `TRANSLATE` option disables Unicode support.
 
@@ -339,7 +339,7 @@ Some file servers treat files and drawers as different if their names differ onl
 
 For file servers which would see `File1` and `file1` as different names you should activate the `CASESENSITIVE` switch to treat those files as being different.
 
-There is a catch though: the AmigaDOS file naming scheme does not follow this model and you may run into problems when you are trying to use it.
+There is a catch though: the AmigaDOS file naming scheme does not follow this model and you may run into problems when you are trying to use it. For example, in case sensitive mode attempting to access a file called `FILENAME` as `filename` or `Filename` will fail; you can access it only under the original name `FILENAME`.
 
 By default, the **smbfs** program does not treat file and drawer names differently which only differ with respect to the case of letters.
 
@@ -353,7 +353,7 @@ The second method ("ExAll"), introduced with Kickstart 2.0, can deliver more ent
 
 The **smbfs** program supports both methods, but there is a catch: Some Amiga software struggles to handle the number of entries delivered by the "ExAll" method, and names longer than 30 characters are a problem. Such software may malfunction and even crash.
 
-To avoid problems with such software, the **smbfs** program can be made to pretend that it did not support the "ExAll" method. Use the `DISABLEEXALL` switch to disable the "ExAll" method.
+To avoid problems with such software, the **smbfs** program can be made to pretend that it does not support the "ExAll" method. Use the `DISABLEEXALL` switch to disable the "ExAll" method.
 
 Please note that if the `DISABLEEXALL` switch is used, the **smbfs** program will make files and drawers appear to be "hidden" if their names are longer than 107 characters.
 
@@ -397,19 +397,23 @@ The file server which the **smbfs** program connects to may not share the exact 
 
 You can, and should tell the **smbfs** program how far the local Amiga time deviates from UTC. By default the **smbfs** program will try to use the time zone information configured in the "Locale" preferences. This may not be sufficient, or even the wrong choice.
 
-#### 5.5.1. `DST=DSTOFFSET/N/K`
-
-This option can be used to adjust the file date stamps to take local daylight savings time into account.
-
-The number to specify here is by how many minutes local time has been moved ahead, which is typically 60. Note that **smbfs** does not know when daylight savings time begins and ends. It is up to you to select the correct adjustment value when appropriate.
-
-#### 5.5.2. `TZ=TIMEZONEOFFSET/N/K`
+#### 5.5.1. `TZ=TIMEZONEOFFSET/N/K`
 
 By default the file system will use the current Locale settings to translate between the local time and the time used by the file server.
 
-For some configurations, however, this is impractical since the server's time zone is not configured properly. For these rare cases you may want to hard code a certain time zone offset using the `TIMEZONEOFFSET` options.
+For some configurations, however, this is impractical since the server's time zone is not configured properly. For these rare cases you may want to hard code a certain time zone offset using the `TIMEZONEOFFSET` option.
 
 You need to provide the number of minutes to subtract from the local time in order to translate it into the corresponding UTC value. For example, in central Europe using CET, you would use `TZ=60` since CET is one hour ahead of UTC.
+
+If you use the `TIMEZONEOFFSET` option, then the **smbfs** program will ignore the time zone information configured in the "Locale" preferences.
+
+#### 5.5.2. `DST=DSTOFFSET/N/K`
+
+This option can be used to adjust the file date stamps to take local daylight savings time into account.
+
+The number to specify here is by how many minutes local time has been moved ahead, which is typically 60.
+
+Note that **smbfs** does not know when daylight savings time begins and ends. It is up to you to select the correct adjustment value when appropriate.
 
 ### 5.6. Miscellaneous
 
@@ -462,8 +466,7 @@ If the file already exists, debug output will be appended to it.
 
 By default the **smbfs** program operates in silent mode. It does not report what it is doing, it just tries to respond to file system requests. To obtain debugging output you may want to use the `DEBUG` option and specify a debug level greater than 0, e.g. `DEBUG=2`. The larger the number you specify the more debugging output will be created.
 
-Note that unless you state which file the debug output should be written to,
-all debugging output will be sent to the shell.
+Note that unless you state which file the debug output should be written to, all debugging output will be sent to the shell window.
 
 If you launched the **smbfs** program from *Workbench*, debug output will be produced using the operating system's debug output functionality which requires that you have a capturing program like *Sashimi* running in the background.
 
@@ -495,7 +498,7 @@ The **smbfs** file system is based upon prior work by Pål-Kristian Engstad, Vol
 
 Version 1.80 incorporates changes from the *MorphOS* smbfs version 50.3, which was kindly provided by Frank Mariak. The individual changes came from Harry Sintonen, David Gerber and Frank Mariak.
 
-The password encryption code was lifted from the Samba package. It was written by Andrew Tridgell and the Samba Team.
+The password encryption code was lifted from the *Samba* package. It was written by Andrew Tridgell and the Samba Team.
 
 
 ## 8. Author
