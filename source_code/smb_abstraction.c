@@ -84,39 +84,39 @@ smba_connect (
 	if(opt_raw_smb)
 		res->server.raw_smb = TRUE;
 
-	D(("use raw SMB = %s",opt_raw_smb ? "yes" : "no"));
+	LOG(("use raw SMB = %s\n",opt_raw_smb ? "yes" : "no"));
 
 	/* Timeout for send/receive operations in seconds. */
 	res->server.timeout = timeout;
 
-	D(("send/receive/connect timeout = %ld seconds%s",timeout,timeout > 0 ? "" : " (= default timeout)"));
+	LOG(("send/receive/connect timeout = %ld seconds%s\n",timeout,timeout > 0 ? "" : " (= default timeout)"));
 
 	/* Enable Unicode support if the server supports it, too. */
 	res->server.use_unicode = opt_unicode;
 
-	D(("use Unicode = %s",opt_unicode ? "yes" : "no"));
+	LOG(("use Unicode = %s\n",opt_unicode ? "yes" : "no"));
 
 	/* Prefer SMB core protocol commands to NT1 commands, if possible. */
 	res->server.prefer_core_protocol = opt_prefer_core_protocol;
 
-	D(("prefer core protocol = %s",opt_prefer_core_protocol ? "yes" : "no"));
+	LOG(("prefer core protocol = %s\n",opt_prefer_core_protocol ? "yes" : "no"));
 
 	/* Path names are case-sensitive. */
 	res->server.case_sensitive = opt_case_sensitive;
 
-	D(("path names are case sensitive = %s",opt_case_sensitive ? "yes" : "no"));
+	LOG(("path names are case sensitive = %s\n",opt_case_sensitive ? "yes" : "no"));
 
 	/* Delay the use of Unicode strings during session setup. */
 	res->server.session_setup_delay_unicode = opt_session_setup_delay_unicode;
 
-	D(("delay use of unicode during session setup = %s",opt_session_setup_delay_unicode ? "yes" : "no"));
+	LOG(("delay use of unicode during session setup = %s\n",opt_session_setup_delay_unicode ? "yes" : "no"));
 
 	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
 	res->server.write_behind = opt_write_behind;
 
-	D(("use asynchronous SMB_COM_WRITE_RAW operations = %s",opt_write_behind ? "yes" : "no"));
+	LOG(("use asynchronous SMB_COM_WRITE_RAW operations = %s\n",opt_write_behind ? "yes" : "no"));
 
-	D(("cache size = %ld entries", cache_size));
+	LOG(("cache size = %ld entries\n", cache_size));
 
 	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
 	{
@@ -126,7 +126,7 @@ smba_connect (
 
 	strlcpy(data.workgroup_name,workgroup_name,sizeof(data.workgroup_name));
 
-	D(("workgroup name = '%s'",workgroup_name));
+	LOG(("workgroup name = '%s'\n",workgroup_name));
 
 	res->server.abstraction = res;
 
@@ -140,9 +140,9 @@ smba_connect (
 	if ((s = strchr (hostname, '.')) != NULL)
 		(*s) = '\0';
 
-	D(("local host name = '%s'",hostname));
+	LOG(("local host name = '%s'\n",hostname));
 
-	D(("server ip address = %s",Inet_NtoA(server_ip_addr.sin_addr.s_addr)));
+	LOG(("server ip address = %s\n",Inet_NtoA(server_ip_addr.sin_addr.s_addr)));
 
 	data.addr = server_ip_addr;
 
@@ -209,24 +209,24 @@ smba_connect (
 
 	strlcpy (data.service, p->service, sizeof(data.service));
 
-	D(("service = '%s'",data.service));
+	LOG(("service = '%s'\n",data.service));
 
 	string_toupper (data.service);
 
 	strlcpy (data.username, p->username, sizeof(data.username));
 	strlcpy (data.password, p->password, sizeof(data.password));
 
-	D(("user name = '%s'",data.username));
+	LOG(("user name = '%s'\n",data.username));
 
 	data.given_max_xmit = max_transmit;
 
-	D(("max transmit = %ld bytes",max_transmit));
+	LOG(("max transmit = %ld bytes\n",max_transmit));
 
 	strlcpy (data.server_name, p->server_name, sizeof(data.server_name));
 	strlcpy (data.client_name, p->client_name, sizeof(data.client_name));
 
-	D(("server name = '%s'",data.server_name));
-	D(("client name = '%s'",data.client_name));
+	LOG(("server name = '%s'\n",data.server_name));
+	LOG(("client name = '%s'\n",data.client_name));
 
 	if (data.server_name[0] == '\0')
 	{
@@ -609,7 +609,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 	if (result < 0)
 		goto out;
 
-	D(("read %ld bytes from offset %ld",len,offset));
+	LOG(("read %ld bytes from offset %ld\n",len,offset));
 
 	/* SMB_COM_READ_ANDX supported? */
 	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_core_protocol)
@@ -668,7 +668,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 
 			if(result < count)
 			{
-				D(("read returned fewer characters than expected (%ld < %ld)",result,count));
+				LOG(("read returned fewer characters than expected (%ld < %ld)\n",result,count));
 				break;
 			}
 		}
@@ -699,7 +699,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 			result = smb_proc_read_raw (&f->server->server, &f->dirent, &position_quad, n, data, error_ptr);
 			if(result <= 0)
 			{
-				D(("!!! wanted to read %ld bytes, got %ld",n,result));
+				LOG(("!!! wanted to read %ld bytes, got %ld\n",n,result));
 				break;
 			}
 
@@ -710,7 +710,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 
 			if(result < n)
 			{
-				D(("read returned fewer characters than expected (%ld < %ld)",result,n));
+				LOG(("read returned fewer characters than expected (%ld < %ld)\n",result,n));
 				break;
 			}
 		}
@@ -778,7 +778,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 
 			if(result < count)
 			{
-				D(("read returned fewer characters than expected (%ld < %ld)",result,count));
+				LOG(("read returned fewer characters than expected (%ld < %ld)\n",result,count));
 				break;
 			}
 		}
@@ -1107,11 +1107,11 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 
 	dirent = &f->dirent;
 
-	data->is_dir						= (dirent->attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
-	data->is_read_only					= (dirent->attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
-	data->is_hidden						= (dirent->attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
-	data->is_system						= (dirent->attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
-	data->is_changed_since_last_archive	= (dirent->attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
+	data->is_dir							= (dirent->attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
+	data->is_read_only						= (dirent->attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
+	data->is_hidden							= (dirent->attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
+	data->is_system							= (dirent->attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
+	data->was_changed_since_last_archive	= (dirent->attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
 
 	data->size_low	= dirent->size_low;
 	data->size_high	= dirent->size_high;
@@ -1167,7 +1167,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 		else
 			attrs &= ~SMB_FILE_ATTRIBUTE_READONLY;
 
-		if (st->is_changed_since_last_archive)
+		if (st->was_changed_since_last_archive)
 			attrs |= SMB_FILE_ATTRIBUTE_ARCHIVE;
 		else
 			attrs &= ~SMB_FILE_ATTRIBUTE_ARCHIVE;
@@ -1306,7 +1306,7 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 		data.is_read_only					= (dirent->attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
 		data.is_hidden						= (dirent->attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
 		data.is_system						= (dirent->attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
-		data.is_changed_since_last_archive	= (dirent->attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
+		data.was_changed_since_last_archive	= (dirent->attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
 		data.size_low						= dirent->size_low;
 		data.size_high						= dirent->size_high;
 		data.atime							= dirent->atime;
@@ -1334,7 +1334,7 @@ invalidate_dircache (struct smba_server * server)
 	ENTER();
 
 	if(dircache->cache_for != NULL)
-		D(("dircache->cache_for->dirent.complete_path = '%s'", escape_name(dircache->cache_for->dirent.complete_path)));
+		LOG(("dircache->cache_for->dirent.complete_path = '%s'\n", escape_name(dircache->cache_for->dirent.complete_path)));
 	else
 		SHOWMSG("-- directory cache is empty --");
 
@@ -1910,7 +1910,7 @@ smba_start(
 		 */
 		if(SendNetBIOSStatusQuery(server_ip_address,server_name,sizeof(server_name),workgroup_name,sizeof(workgroup_name)) == 0 && server_name[0] != '\0')
 		{
-			D(("server %s provided its own name '%s', with workgroup '%s'",Inet_NtoA(server_ip_address.sin_addr.s_addr),server_name,workgroup_name));
+			LOG(("server %s provided its own name '%s', with workgroup '%s'\n",Inet_NtoA(server_ip_address.sin_addr.s_addr),server_name,workgroup_name));
 
 			/* No workgroup given? Use what the server told us... */
 			if(opt_workgroup == NULL && workgroup_name[0] != '\0')
@@ -2035,7 +2035,7 @@ smba_start(
 	par.username = username;
 	par.password = password;
 
-	D(("server name = '%s', client name = '%s', workgroup name = '%s', user name = '%s'", server_name, client_name, workgroup, username));
+	LOG(("server name = '%s', client name = '%s', workgroup name = '%s', user name = '%s'\n", server_name, client_name, workgroup, username));
 
 	if(smba_connect (
 		&par,

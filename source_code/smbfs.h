@@ -41,7 +41,9 @@
 
 #define SAME (0)
 #define OK (0)
+#define CANNOT !
 #define NOT !
+#define NO !
 #define NOTHING ((void)0)
 
 /****************************************************************************/
@@ -146,7 +148,7 @@ extern ULONG get_current_time(void);
 extern void seconds_to_tm(time_t seconds,struct tm * tm);
 extern void VARARGS68K report_error(const TEXT * fmt,...);
 extern void string_toupper(STRPTR s);
-extern void VARARGS68K SPrintf(STRPTR buffer, const TEXT * formatString,...);
+extern void VARARGS68K LocalSNPrintf(STRPTR buffer, int limit, const TEXT * formatString,...);
 extern TEXT * escape_name(const TEXT * name);
 extern const char * convert_quad_to_string(const QUAD * const number);
 

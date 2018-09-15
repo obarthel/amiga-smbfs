@@ -2536,3 +2536,40 @@ smbfs 1.177 (27.8.2018)
 
 - Added more debug output in order to find that pesky AsyncWB
   batch rename problem :-/
+
+
+smbfs 1.178 (29.8.2018)
+
+- Unified and simplified even more commonly-used code.
+
+- Debug output now includes how many packets are currently waiting
+  to be processed and how much time it took to process each
+  single packet.
+
+- Modified the string formatting code to respect buffer size limitations.
+
+
+smbfs 1.179 (2.9.2018)
+
+- Cleaned up the debug code, removing unnecessary line feed characters
+  and fixing the broken protection flag output.
+
+
+smbfs 1.180 (15.9.2018)
+
+- The ACTION_INHIBIT packet is now rejected as "not known" since this
+  file system cannot actually support it properly.
+
+- If you provided the file system with a volume name, then you can
+  disable/enable the file system (as if the medium had been removed from
+  a CD-ROM or floppy disk drive) with the [Ctrl]+D (= disable)
+  and [Ctrl]+E (= enable) keys.
+
+
+smbfs 1.181 (15.9.2018)
+
+- ACTION_FREE_LOCK now correctly returns an error if the file lock in
+  question cannot be freed. For example, this may happen if the
+  file system is currently disabled.
+
+- Updated the documentation.

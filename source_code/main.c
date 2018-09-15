@@ -159,7 +159,7 @@ static ULONG get_stack_size(void);
 static void stack_usage_init(struct StackSwapStruct * stk);
 static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
-static void VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args);
+static int LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args);
 static void cleanup(void);
 static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
@@ -252,6 +252,8 @@ static TEXT					map_amiga_to_smb_name[256];
 static TEXT					map_smb_to_amiga_name[256];
 
 static LONG					MaxNameLen;
+
+static BOOL					file_system_disabled;
 
 /****************************************************************************/
 
@@ -832,12 +834,16 @@ main(void)
 
 		if(str != NULL)
 		{
+			int size;
+
 			/* Set up the name of the program, as it will be
 			 * displayed in error requesters.
 			 */
-			NewProgramName = AllocVec(strlen(WBStartup->sm_ArgList[0].wa_Name) + strlen(" ''") + strlen(str)+1,MEMF_ANY|MEMF_PUBLIC);
+			size = strlen(WBStartup->sm_ArgList[0].wa_Name) + strlen(" ''") + strlen(str)+1;
+
+			NewProgramName = AllocVec(size,MEMF_ANY|MEMF_PUBLIC);
 			if(NewProgramName != NULL)
-				SPrintf(NewProgramName,"%s '%s'",WBStartup->sm_ArgList[0].wa_Name,str);
+				LocalSNPrintf(NewProgramName,size,"%s '%s'",WBStartup->sm_ArgList[0].wa_Name,str);
 		}
 
 		str = FindToolType(Icon->do_ToolTypes,"MAXNAMELEN");
@@ -1016,13 +1022,16 @@ main(void)
 		if(args.Service != NULL)
 		{
 			const TEXT * name = FilePart(program_name);
+			int size;
 
 			/* Set up the name of the program, as it will be
 			 * displayed in the proces status list.
 			 */
-			NewProgramName = AllocVec(strlen(name) + strlen(" ''") + strlen(args.Service)+1,MEMF_ANY|MEMF_PUBLIC);
+			size = strlen(name) + strlen(" ''") + strlen(args.Service)+1;
+
+			NewProgramName = AllocVec(size,MEMF_ANY|MEMF_PUBLIC);
 			if(NewProgramName != NULL)
-				SPrintf(NewProgramName,"%s '%s'",name,args.Service);
+				LocalSNPrintf(NewProgramName,size,"%s '%s'",name,args.Service);
 		}
 
 		if(args.MaxNameLen != NULL)
@@ -1639,7 +1648,7 @@ add_error_message(const TEXT * fmt,APTR args)
 		{
 			STRPTR msg = (STRPTR)(mn + 1);
 
-			VSPrintf(msg,fmt,args);
+			LocalVSNPrintf(msg,size,fmt,args);
 
 			AddTail((struct List *)&ErrorList,(struct Node *)mn);
 		}
@@ -1948,6 +1957,7 @@ tm_to_seconds(const struct tm * const tm)
 struct FormatContext
 {
 	TEXT *	fc_Buffer;
+	int		fc_Limit;
 	int		fc_Size;
 };
 
@@ -1959,7 +1969,7 @@ CountChar(REG(a3,struct FormatContext * fc))
 	fc->fc_Size++;
 }
 
-/* Count the number of characters SPrintf() would put into a string. */
+/* Count the number of characters LocalSNPrintf() would put into a string. */
 static LONG
 CVSPrintf(const TEXT * format_string,APTR args)
 {
@@ -1977,37 +1987,51 @@ CVSPrintf(const TEXT * format_string,APTR args)
 static void ASM
 StuffChar(REG(d0,TEXT c),REG(a3,struct FormatContext * fc))
 {
-	(*fc->fc_Buffer++) = c;
+	if(fc->fc_Limit > 0)
+	{
+		(*fc->fc_Buffer++) = c;
+
+		fc->fc_Size++;
+
+		fc->fc_Limit--;
+	}
 }
 
-static void
-VSPrintf(STRPTR buffer, const TEXT * formatString, APTR args)
+static int
+LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args)
 {
 	struct FormatContext fc;
 
-	fc.fc_Buffer = buffer;
+	fc.fc_Buffer	= buffer;
+	fc.fc_Limit		= limit-1;
+	fc.fc_Size		= 0;
 
 	RawDoFmt(formatString,args,(void (*)())StuffChar,&fc);
+
+	if(limit > 0)
+		(*fc.fc_Buffer) = '\0';
+
+	return(fc.fc_Size);
 }
 
 /****************************************************************************/
 
 /* Format a string for output. */
 void VARARGS68K
-SPrintf(STRPTR buffer, const TEXT * formatString,...)
+LocalSNPrintf(STRPTR buffer, int limit, const TEXT * formatString,...)
 {
 	va_list varArgs;
 
 	#if defined(__amigaos4__)
 	{
 		va_startlinear(varArgs,formatString);
-		VSPrintf(buffer,formatString,va_getlinearva(varArgs,APTR));
+		LocalVSNPrintf(buffer,limit,formatString,va_getlinearva(varArgs,APTR));
 		va_end(varArgs);
 	}
 	#else
 	{
 		va_start(varArgs,formatString);
-		VSPrintf(buffer,formatString,varArgs);
+		LocalVSNPrintf(buffer,limit,formatString,varArgs);
 		va_end(varArgs);
 	}
 	#endif /* __amigaos4__ */
@@ -2983,17 +3007,55 @@ validate_amigados_file_name(const TEXT * name,int len)
 
 /****************************************************************************/
 
+/* Pick up all the DOS packets waiting to be processed and
+ * return them with an error, claiming that the packet cannot
+ * be processed.
+ */
+static void
+reject_all_pending_packets(struct MsgPort * port)
+{
+	struct DosPacket * dp;
+	struct Message * mn;
+	LONG result;
+
+	while((mn = GetMsg(port)) != NULL)
+	{
+		SHOWMSG("returning pending packet");
+
+		dp = (struct DosPacket *)mn->mn_Node.ln_Name;
+
+		switch(dp->dp_Action)
+		{
+			case ACTION_READ_LINK:
+			case ACTION_SEEK:
+			case ACTION_SET_FILE_SIZE:
+			case ACTION_READ:
+			case ACTION_WRITE:
+
+				result = -1;
+				break;
+
+			default:
+
+				result = DOSFALSE;
+				break;
+		}
+
+		ReplyPkt(dp,result,ERROR_ACTION_NOT_KNOWN);
+	}
+}
+
+/****************************************************************************/
+
 /* Remove a DosList entry using the proper protocols. Note that
  * this function can fail!
  */
 static BOOL
 really_remove_dosentry(struct DosList * entry)
 {
-	struct DosPacket * dp;
-	struct Message * mn;
 	struct MsgPort * port;
 	struct DosList * dl;
-	BOOL result = FALSE;
+	BOOL success = FALSE;
 	int kind,i;
 
 	ENTER();
@@ -3016,7 +3078,7 @@ really_remove_dosentry(struct DosList * entry)
 		dl = AttemptLockDosList(LDF_WRITE|kind);
 
 		/* Workaround for dos.library bug... */
-		if(((ULONG)dl) <= 1)
+		if(((ULONG)dl) == 1)
 			dl = NULL;
 
 		if(dl != NULL)
@@ -3027,28 +3089,21 @@ really_remove_dosentry(struct DosList * entry)
 
 			UnLockDosList(LDF_WRITE|kind);
 
-			result = TRUE;
+			success = TRUE;
 
 			break;
 		}
 
-		while((mn = GetMsg(port)) != NULL)
-		{
-			SHOWMSG("returning pending packet");
-
-			dp = (struct DosPacket *)mn->mn_Node.ln_Name;
-
-			ReplyPkt(dp,(dp->dp_Action == ACTION_READ_LINK) ? -1 : DOSFALSE,ERROR_ACTION_NOT_KNOWN);
-		}
+		reject_all_pending_packets(port);
 
 		Delay(TICKS_PER_SECOND / 10);
 	}
 
-	if(NOT result)
+	if(NO success)
 		SHOWMSG("that didn't work");
 
-	RETURN(result);
-	return(result);
+	RETURN(success);
+	return(success);
 }
 
 /****************************************************************************/
@@ -3142,18 +3197,10 @@ cleanup(void)
 
 	if(FileSystemPort != NULL)
 	{
-		struct DosPacket * dp;
-		struct Message * mn;
-
 		SHOWMSG("returning all pending packets");
 
 		/* Return all queued packets; there should be none, though. */
-		while((mn = GetMsg(FileSystemPort)) != NULL)
-		{
-			dp = (struct DosPacket *)mn->mn_Node.ln_Name;
-
-			ReplyPkt(dp,(dp->dp_Action == ACTION_READ_LINK) ? -1 : DOSFALSE,ERROR_ACTION_NOT_KNOWN);
-		}
+		reject_all_pending_packets(FileSystemPort);
 
 		SHOWMSG("done");
 
@@ -3512,7 +3559,7 @@ setup(
 		/* Try to find a unique device name out of 100 possible options. */
 		for(i = 0 ; i < 100 ; i++)
 		{
-			SPrintf(name,"SMBFS%ld",i);
+			LocalSNPrintf(name,sizeof(name),"SMBFS%ld",i);
 
 			device_exists = (BOOL)(FindDosEntry(dl,name,LDF_DEVICES) != NULL);
 			if(NOT device_exists)
@@ -3596,7 +3643,7 @@ setup(
 		DeviceNodeAdded = TRUE;
 	}
 
-	/* Note: we always need the volume node to make some file
+	/* Note: We always need the volume node to make some file
 	 *       system operations safe (e.g. Lock()), but we may
 	 *       not always need to make it visible.
 	 */
@@ -3718,7 +3765,7 @@ escape_name(const TEXT * name)
 
 				default:
 
-					SPrintf(hex_code,"\\x%02lx",c);
+					LocalSNPrintf(hex_code,sizeof(hex_code),"\\x%02lx",c);
 					str = hex_code;
 
 					l = 4;
@@ -3742,7 +3789,7 @@ escape_name(const TEXT * name)
 				break;
 			}
 
-			SPrintf(hex_code,"\\x%02lx",c);
+			LocalSNPrintf(hex_code,sizeof(hex_code),"\\x%02lx",c);
 
 			memcpy(&buffer[len],hex_code,4);
 			len += 4;
@@ -4310,7 +4357,8 @@ get_base_name(const TEXT * path_name,int path_name_len)
 
 /* Find the parent directory of a file or directory. This strips off the
  * last part of the name, e.g. translating "\foo" into "\" and "\foo\bar"
- * into "\foo". There is no parent for the root directory ("\").
+ * into "\foo". There is no parent for the root directory ("\"), which
+ * is signalled by setting the error code returned to ERROR_OBJECT_NOT_FOUND.
  */
 static int
 get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
@@ -4397,14 +4445,14 @@ get_parent_dir_name(const TEXT * name,int name_len,STRPTR * parent_name_ptr)
  * be modified in place and may become longer than it already is.
  */
 static int
-translate_amiga_name_to_smb_name(STRPTR name, int name_len, int name_size)
+translate_amiga_name_to_smb_name(TEXT * name, int name_len, int name_size)
 {
 	int error = ERROR_INVALID_COMPONENT_NAME;
 
 	ASSERT( name != NULL && name_len < name_size );
 
 	/* Translate the Amiga file name using a translation table? */
-	if (TranslateNames)
+	if(TranslateNames)
 	{
 		const TEXT * map = map_amiga_to_smb_name;
 		TEXT c;
@@ -4439,14 +4487,14 @@ translate_amiga_name_to_smb_name(STRPTR name, int name_len, int name_size)
  * in place and may become longer than it already is.
  */
 static int
-translate_smb_name_to_amiga_name(STRPTR name, int name_len, int name_size)
+translate_smb_name_to_amiga_name(TEXT * name, int name_len, int name_size)
 {
 	int error = ERROR_INVALID_COMPONENT_NAME;
 
 	ASSERT( name != NULL && name_len < name_size );
 
 	/* Translate the name to Amiga format using a mapping table. */
-	if (TranslateNames)
+	if(TranslateNames)
 	{
 		const TEXT * map = map_smb_to_amiga_name;
 		TEXT c;
@@ -4533,6 +4581,8 @@ lock_is_invalid(const struct FileLock * lock,int * error_ptr)
 	const struct LockNode * ln;
 	BOOL is_invalid = TRUE;
 
+	SHOWPOINTER(lock);
+
 	/* The ZERO lock is considered invalid. */
 	if(lock == NULL)
 	{
@@ -4586,6 +4636,8 @@ file_is_invalid(const struct FileNode * fn,int * error_ptr)
 	int error = ERROR_INVALID_LOCK;
 	BOOL is_invalid = TRUE;
 
+	SHOWPOINTER(fn);
+
 	if(fn == NULL)
 	{
 		SHOWMSG("no file node found");
@@ -4623,10 +4675,24 @@ file_is_invalid(const struct FileNode * fn,int * error_ptr)
 
 /****************************************************************************/
 
-/* Remove a device, volume or assignment name from the path name. If
+/* Remove a device, volume or assignment name from the path name.
  * If necessary, the path following the ':' character will be copied
  * to the beginning of the string, removing it, and the name length
  * will be adjusted accordingly.
+ *
+ * This function is needed because the dos.library packet interface
+ * will usually provide a FileLock along with the complete path name
+ * of the file or drawer which must be interpreted relative to the
+ * FileLock.
+ *
+ * In the simple case this would be, for example, a FileLock on the
+ * "Workbench:Tools" directory and a path of name "Calculator". But
+ * it is also possible for the path to contain a volume name or
+ * assignment, e.g. a FileLock on "SYS:C" and a path name of "C:Dir".
+ * In the latter case the FileLock already refers to the correct
+ * parent directory and the device, volume or assignment must be
+ * removed from the path, which in this case would replace "C:Dir"
+ * with "Dir".
  */
 static void
 remove_device_name_from_path(TEXT * name, int * name_len_ptr)
@@ -4663,6 +4729,100 @@ remove_device_name_from_path(TEXT * name, int * name_len_ptr)
 
 /****************************************************************************/
 
+/* Check if the name of a file or drawer contains MS-DOS
+ * wildcard characters ("?" and "*") which may not be
+ * suitable for some file system operations, e.g. rename
+ * or delete.
+ */
+static BOOL
+name_contains_wildcard_characters(const TEXT * name)
+{
+	const TEXT * file_name;
+	BOOL result = FALSE;
+	int len;
+	TEXT c;
+	int i;
+
+	ENTER();
+
+	SHOWSTRING(name);
+
+	file_name = FilePart(name);
+	len = strlen(file_name);
+
+	for(i = 0 ; i < len ; i++)
+	{
+		c = file_name[i];
+
+		if(c == '?' || c == '*')
+		{
+			D(("found a wildcard in '%s'",name));
+
+			result = TRUE;
+			break;
+		}
+	}
+
+	RETURN(result);
+	return(result);
+}
+
+/****************************************************************************/
+
+/* Try to obtain the path name stored in a FileLock which
+ * a file or directory name is associated with. The parent
+ * FileLock can be NULL, which is interpreted as being a
+ * 'ZERO lock' that stands in for the root directory of the
+ * volume.
+ */
+static BOOL
+get_parent_name(
+	const struct FileLock *	parent,
+	const struct MsgPort *	user,
+	STRPTR *				parent_name_ptr,
+	int *					error_ptr)
+{
+	BOOL success = FALSE;
+	STRPTR name;
+
+	ASSERT( error_ptr != NULL );
+
+	SHOWVALUE(parent);
+
+	if(parent != NULL)
+	{
+		struct LockNode * ln;
+
+		if(lock_is_invalid(parent, error_ptr))
+			goto out;
+
+		ln = (struct LockNode *)parent->fl_Key;
+
+		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
+
+		ln->ln_LastUser = user;
+
+		name = ln->ln_FullName;
+	}
+	else
+	{
+		D(("parent lock on ':' (ZERO lock)"));
+
+		name = NULL;
+	}
+
+	if(parent_name_ptr != NULL)
+		(*parent_name_ptr) = name;
+
+	success = TRUE;
+
+ out:
+
+	return(success);
+}
+
+/****************************************************************************/
+
 static BPTR
 Action_Parent(
 	const struct MsgPort *	user,
@@ -4679,7 +4839,17 @@ Action_Parent(
 
 	SHOWVALUE(parent);
 
-	/* The ZERO lock's parent is the ZERO lock. Note that
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
+	/* There are two kinds of locks which need to be dealt
+	 * with. The first kind is the ZERO lock (= NULL), and
+	 * the other is a pointer to a FileLock.
+	 *
+	 * The ZERO lock's parent is the ZERO lock. Note that
 	 * this is not the same thing as trying to obtain a
 	 * lock on the "/" directory, relative to the root
 	 * directory (which must fail with the error code
@@ -4707,7 +4877,7 @@ Action_Parent(
 			if(error != ERROR_OBJECT_NOT_FOUND)
 				goto out;
 
-			/* We return the ZERO lock. */
+			D(("returning ZERO lock"));
 		}
 		else
 		{
@@ -4733,6 +4903,12 @@ Action_Parent(
 			full_name = NULL;
 			ln = NULL;
 		}
+	}
+	else
+	{
+		D(("parent lock on ':' (ZERO lock)"));
+
+		SHOWMSG("returning ZERO lock");
 	}
 
 	error = OK;
@@ -4760,17 +4936,22 @@ Action_DeleteObject(
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
 	smba_file_t * file = NULL;
-	const TEXT * parent_name;
+	STRPTR parent_name;
 	STRPTR full_parent_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
 	smba_stat_t st;
-	TEXT * last_name;
-	int last_name_len;
 	int error;
-	int i;
 
 	ENTER();
+
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(WriteProtected)
 	{
@@ -4778,7 +4959,8 @@ Action_DeleteObject(
 		goto out;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
+	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
+		goto out;
 
 	/* Name string, as given in the DOS packet, is in
 	 * BCPL format and needs to be converted into
@@ -4786,28 +4968,6 @@ Action_DeleteObject(
 	 */
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 	name_len = strlen(name);
-
-	SHOWVALUE(parent);
-
-	if(parent != NULL)
-	{
-		struct LockNode * ln;
-
-		if(lock_is_invalid(parent,&error))
-			goto out;
-
-		ln = (struct LockNode *)parent->fl_Key;
-
-		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
-
-		parent_name = ln->ln_FullName;
-
-		ln->ln_LastUser = user;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
@@ -4819,25 +4979,19 @@ Action_DeleteObject(
 	 * the last part of the path (the name of the file
 	 * or directory) may contain the wildcard.
 	 */
-	last_name = FilePart(name);
-	last_name_len = strlen(last_name);
-
-	for(i = 0 ; i < last_name_len ; i++)
+	if(name_contains_wildcard_characters(name))
 	{
-		if(strchr("*?",last_name[i]) != NULL)
-		{
-			D(("found a wildcard in '%s'",name));
+		D(("name '%s' is not safe to use with delete operation", name));
 
-			/* Do not try to delete sets of matching files
-			 * and drawers. We only came to delete a single
-			 * directory entry.
-			 */
-			error = ERROR_OBJECT_NOT_FOUND;
-			goto out;
-		}
+		/* Do not try to delete sets of matching files
+		 * and drawers. We only came to delete a single
+		 * directory entry.
+		 */
+		error = ERROR_OBJECT_NOT_FOUND;
+		goto out;
 	}
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
@@ -4983,17 +5137,22 @@ Action_CreateDir(
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
 	struct LockNode * ln = NULL;
-	const TEXT * parent_name;
+	STRPTR parent_name;
 	smba_file_t * dir = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
 	STRPTR dir_name,base_name,temp = NULL;
-	TEXT * last_name;
-	int last_name_len;
 	int error;
-	int i;
 
 	ENTER();
+
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(WriteProtected)
 	{
@@ -5001,32 +5160,11 @@ Action_CreateDir(
 		goto out;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
+	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
+		goto out;
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 	name_len = strlen(name);
-
-	SHOWVALUE(parent);
-
-	if(parent != NULL)
-	{
-		struct LockNode * parent_ln;
-
-		if(lock_is_invalid(parent,&error))
-			goto out;
-
-		parent_ln = (struct LockNode *)parent->fl_Key;
-
-		D(("parent lock on '%s'", escape_name(parent_ln->ln_FullName)));
-
-		parent_ln->ln_LastUser = user;
-
-		parent_name = parent_ln->ln_FullName;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
@@ -5037,21 +5175,15 @@ Action_CreateDir(
 	 * name contains MS-DOS wildcard characters. This will
 	 * only end in tears later...
 	 */
-	last_name = FilePart(name);
-	last_name_len = strlen(last_name);
-
-	for(i = 0 ; i < last_name_len ; i++)
+	if(name_contains_wildcard_characters(name))
 	{
-		if(strchr("*?",last_name[i]) != NULL)
-		{
-			D(("found a wildcard in '%s'",name));
+		D(("will not create a directory '%s' which contains wildcard characters", name));
 
-			error = ERROR_INVALID_COMPONENT_NAME;
-			goto out;
-		}
+		error = ERROR_INVALID_COMPONENT_NAME;
+		goto out;
 	}
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
@@ -5149,7 +5281,7 @@ Action_LocateObject(
 	BPTR result = ZERO;
 	STRPTR full_name = NULL;
 	struct LockNode * ln = NULL;
-	const TEXT * parent_name;
+	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
 	int error;
@@ -5158,37 +5290,24 @@ Action_LocateObject(
 
 	D(("name = '%b'",MKBADDR(bcpl_name)));
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
+	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
+		goto out;
+
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 	name_len = strlen(name);
-
-	SHOWVALUE(parent);
-
-	if(parent != NULL)
-	{
-		struct LockNode * parent_ln;
-
-		if(lock_is_invalid(parent,&error))
-			goto out;
-
-		parent_ln = (struct LockNode *)parent->fl_Key;
-
-		D(("parent lock on '%s'", escape_name(parent_ln->ln_FullName)));
-
-		parent_ln->ln_LastUser = user;
-
-		parent_name = parent_ln->ln_FullName;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
 	remove_device_name_from_path(name, &name_len);
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
@@ -5262,6 +5381,12 @@ Action_CopyDir(
 
 	SHOWVALUE(lock);
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	/* Fail fast if the lock is invalid. */
 	if(lock != NULL && lock_is_invalid(lock,&error))
 		goto out;
@@ -5271,6 +5396,10 @@ Action_CopyDir(
 		const struct LockNode * key = (struct LockNode *)lock->fl_Key;
 
 		D(("lock on '%s'", escape_name(key->ln_FullName)));
+	}
+	else
+	{
+		D(("lock on ':' (ZERO lock)"));
 	}
 
 	/* If a specific lock is to be duplicated, then that
@@ -5350,7 +5479,8 @@ Action_FreeLock(
 	struct FileLock *	lock,
 	LONG *				error_ptr)
 {
-	LONG result = DOSTRUE;
+	LONG result = DOSFALSE;
+	int error = OK;
 
 	ENTER();
 
@@ -5360,11 +5490,20 @@ Action_FreeLock(
 	 * a valid lock if we are to proceed with releasing
 	 * it.
 	 */
-	if(lock != NULL && NOT lock_is_invalid(lock,NULL))
+	if(lock != NULL)
 	{
 		const struct LockNode * key;
 		struct LockNode * found;
 		struct LockNode * ln;
+
+		if(file_system_disabled)
+		{
+			error = ERROR_NO_DISK;
+			goto out;
+		}
+
+		if(lock_is_invalid(lock,&error))
+			goto out;
 
 		found = NULL;
 
@@ -5383,22 +5522,33 @@ Action_FreeLock(
 			}
 		}
 
-		if(found != NULL)
+		/* This should never happen. */
+		if(found == NULL)
 		{
-			Remove((struct Node *)found);
-
-			smba_close(ServerData,found->ln_File);
-
-			found->ln_Magic = 0;
-
-			free_memory(found->ln_FullName);
-			free_memory(found);
+			error = ERROR_INVALID_LOCK;
+			goto out;
 		}
+
+		Remove((struct Node *)found);
+
+		smba_close(ServerData,found->ln_File);
+
+		found->ln_Magic = 0;
+
+		free_memory(found->ln_FullName);
+		free_memory(found);
 	}
+	else
+	{
+		D(("lock on ':' (ZERO lock)"));
+	}
+
+	result = DOSTRUE;
+	error = OK;
 
  out:
 
-	(*error_ptr) = OK;
+	(*error_ptr) = error;
 
 	RETURN(result);
 	return(result);
@@ -5422,6 +5572,12 @@ Action_SameLock(
 
 	SHOWVALUE(lock1);
 	SHOWVALUE(lock2);
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(lock1 != NULL)
 	{
@@ -5490,7 +5646,7 @@ Action_SetProtect(
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
 	smba_file_t * file = NULL;
-	const TEXT * parent_name;
+	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
 	int name_len;
@@ -5498,45 +5654,32 @@ Action_SetProtect(
 
 	ENTER();
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(WriteProtected)
 	{
 		error = ERROR_DISK_WRITE_PROTECTED;
 		goto out;
 	}
 
-	D(("name = '%b'",MKBADDR(bcpl_name)));
+	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
+		goto out;
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 	name_len = strlen(name);
-
-	SHOWVALUE(parent);
-
-	if(parent != NULL)
-	{
-		struct LockNode * ln;
-
-		if(lock_is_invalid(parent,&error))
-			goto out;
-
-		ln = (struct LockNode *)parent->fl_Key;
-
-		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
-
-		ln->ln_LastUser = user;
-
-		parent_name = ln->ln_FullName;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
 	remove_device_name_from_path(name, &name_len);
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
@@ -5593,15 +5736,17 @@ Action_SetProtect(
 
 		strlcpy(owner_bits, "hsparwed", sizeof(owner_bits));
 
+		/* hspa */
 		for(i = 0 ; i < 4 ; i++)
 		{
-			if((mask & (1 << (7 - i))) != 0)
+			if((mask & (1 << (7 - i))) == 0)
 				owner_bits[i] = '-';
 		}
 
+		/* rwed */
 		for(i = 4 ; i < 8 ; i++)
 		{
-			if((mask & (1 << (7 - i))) == 0)
+			if((mask & (1 << (7 - i))) != 0)
 				owner_bits[i] = '-';
 		}
 
@@ -5624,7 +5769,7 @@ Action_SetProtect(
 	/* Careful: the 'archive' attribute has exactly the opposite
 	 *          meaning in the Amiga and the SMB worlds.
 	 */
-	st.is_changed_since_last_archive = ((mask & FIBF_ARCHIVE) == 0);
+	st.was_changed_since_last_archive = ((mask & FIBF_ARCHIVE) == 0);
 
 	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
@@ -5658,7 +5803,6 @@ Action_RenameObject(
 	const void *			destination_bcpl_name,
 	LONG *					error_ptr)
 {
-	struct LockNode * ln;
 	LONG result = DOSFALSE;
 	STRPTR full_source_name = NULL;
 	STRPTR full_destination_name = NULL;
@@ -5666,13 +5810,22 @@ Action_RenameObject(
 	STRPTR parent_destination_name = NULL;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
-	const TEXT * parent_name;
-	TEXT * last_name;
-	int last_name_len;
+	STRPTR parent_name;
 	int error;
-	int i;
 
 	ENTER();
+
+	D(("source name = '%b'",MKBADDR(source_bcpl_name)));
+	D(("destination name = '%b'",MKBADDR(destination_bcpl_name)));
+
+	SHOWVALUE(source_lock);
+	SHOWVALUE(destination_lock);
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(WriteProtected)
 	{
@@ -5680,32 +5833,8 @@ Action_RenameObject(
 		goto out;
 	}
 
-	SHOWVALUE(source_lock);
-	SHOWVALUE(destination_lock);
-
-	D(("source name = '%b'",MKBADDR(source_bcpl_name)));
-	D(("destination name = '%b'",MKBADDR(destination_bcpl_name)));
-
 	convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
 	name_len = strlen(name);
-
-	if(source_lock != NULL)
-	{
-		if(lock_is_invalid(source_lock,&error))
-			goto out;
-
-		ln = (struct LockNode *)source_lock->fl_Key;
-
-		D(("source lock on '%s'", escape_name(ln->ln_FullName)));
-
-		ln->ln_LastUser = user;
-
-		parent_name = ln->ln_FullName;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
@@ -5716,30 +5845,27 @@ Action_RenameObject(
 	 * wildcards. Only the last part of the path (the name
 	 * of the file or directory) may contain the wildcard.
 	 */
-	last_name = FilePart(name);
-	last_name_len = strlen(last_name);
-
-	for(i = 0 ; i < last_name_len ; i++)
+	if(name_contains_wildcard_characters(name))
 	{
-		if(strchr("*?",last_name[i]) != NULL)
-		{
-			D(("found a wildcard in the source path '%s'",name));
+		D(("found a wildcard in the source path '%s'; this is unsafe to use with the rename operation",name));
 
-			/* Do not rename/move sets of matching files and
-			 * directories. We only came to rename/move a
-			 * single directory entry.
-			 */
-			error = ERROR_OBJECT_NOT_FOUND;
-			goto out;
-		}
+		/* Do not rename/move sets of matching files and
+		 * directories. We only came to rename/move a
+		 * single directory entry.
+		 */
+		error = ERROR_OBJECT_NOT_FOUND;
+		goto out;
 	}
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
+
+	if(CANNOT get_parent_name(source_lock, user, &parent_name, &error))
+		goto out;
 
 	error = build_full_path_name(parent_name,name,&full_source_name);
 	if(error != OK)
@@ -5759,53 +5885,32 @@ Action_RenameObject(
 	convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
 	name_len = strlen(name);
 
-	if(destination_lock != NULL)
-	{
-		if(lock_is_invalid(destination_lock,&error))
-			goto out;
-
-		ln = (struct LockNode *)destination_lock->fl_Key;
-
-		D(("destination lock on '%s'", escape_name(ln->ln_FullName)));
-
-		ln->ln_LastUser = user;
-
-		parent_name = ln->ln_FullName;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
-
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
 	remove_device_name_from_path(name, &name_len);
 
-	last_name = FilePart(name);
-	last_name_len = strlen(last_name);
-
-	for(i = 0 ; i < last_name_len ; i++)
+	if(name_contains_wildcard_characters(name))
 	{
-		if(strchr("*?",last_name[i]) != NULL)
-		{
-			D(("found a wildcard in the destination path '%s'",name));
+		D(("found a wildcard in the destination path '%s'; this is unsafe to use with the rename operation",name));
 
-			/* Do not allow the destination name to contain
-			 * MS-DOS wildcard characters. This will only end
-			 * in tears later...
-			 */
-			error = ERROR_INVALID_COMPONENT_NAME;
-			goto out;
-		}
+		/* Do not allow the destination name to contain
+		 * MS-DOS wildcard characters. This will only end
+		 * in tears later...
+		 */
+		error = ERROR_INVALID_COMPONENT_NAME;
+		goto out;
 	}
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
 	}
+
+	if(CANNOT get_parent_name(destination_lock, user, &parent_name, &error))
+		goto out;
 
 	error = build_full_path_name(parent_name,name,&full_destination_name);
 	if(error != OK)
@@ -5882,66 +5987,73 @@ Action_DiskInfo(
 	LONG *				error_ptr)
 {
 	LONG result = DOSTRUE;
-	LONG block_size;
-	LONG num_blocks;
-	LONG num_blocks_free;
-	int error;
+	int error = OK;
 
 	ENTER();
 
 	memset(id,0,sizeof(*id));
 
-	if(WriteProtected)
-		id->id_DiskState = ID_WRITE_PROTECTED;
-	else
-		id->id_DiskState = ID_VALIDATED;
+	/* These defaults (no disk present) will have to do until
+	 * we know better...
+	 */
+	id->id_NumBlocks		= 1;
+	id->id_NumBlocksUsed	= 1;
+	id->id_BytesPerBlock	= 512;
+	id->id_DiskType			= ID_NO_DISK_PRESENT;
+	id->id_DiskState		= ID_WRITE_PROTECTED;
 
-	if(smba_statfs(ServerData,&block_size,&num_blocks,&num_blocks_free,&error) >= 0)
+	if(NOT file_system_disabled)
 	{
-		SHOWMSG("got the disk data");
-		SHOWVALUE(block_size);
-		SHOWVALUE(num_blocks);
-		SHOWVALUE(num_blocks_free);
+		LONG num_blocks_free;
+		LONG num_blocks;
+		LONG block_size;
 
-		/* Pretend that the block size is 512 bytes, if not provided. */
-		if(block_size <= 0)
-			block_size = 512;
-
-		if (block_size < 512)
+		if(smba_statfs(ServerData,&block_size,&num_blocks,&num_blocks_free,&error) >= 0)
 		{
-			num_blocks		/= (512 / block_size);
-			num_blocks_free	/= (512 / block_size);
+			if(NOT WriteProtected)
+				id->id_DiskState = ID_VALIDATED;
+
+			SHOWMSG("got the disk data");
+			SHOWVALUE(block_size);
+			SHOWVALUE(num_blocks);
+			SHOWVALUE(num_blocks_free);
+
+			/* Pretend that the block size is 512 bytes, if not provided. */
+			if(block_size <= 0)
+				block_size = 512;
+
+			if (block_size < 512)
+			{
+				num_blocks		/= (512 / block_size);
+				num_blocks_free	/= (512 / block_size);
+			}
+			else if (block_size > 512)
+			{
+				num_blocks		*= (block_size / 512);
+				num_blocks_free	*= (block_size / 512);
+			}
+
+			id->id_NumBlocks		= num_blocks;
+			id->id_NumBlocksUsed	= num_blocks - num_blocks_free;
+			id->id_BytesPerBlock	= 512;
+			id->id_DiskType			= ID_DOS_DISK;
+			id->id_VolumeNode		= MKBADDR(VolumeNode);
+			id->id_InUse			= NOT (IsListEmpty((struct List *)&FileList) && IsListEmpty((struct List *)&LockList));
+
+			if(id->id_NumBlocks == 0)
+				id->id_NumBlocks = 1;
+
+			if(id->id_NumBlocksUsed == 0)
+				id->id_NumBlocksUsed = 1;
 		}
-		else if (block_size > 512)
+		else
 		{
-			num_blocks		*= (block_size / 512);
-			num_blocks_free	*= (block_size / 512);
+			SHOWMSG("could not get any disk data");
+
+			error = map_errno_to_ioerr(error);
+
+			result = DOSFALSE;
 		}
-
-		id->id_NumBlocks		= num_blocks;
-		id->id_NumBlocksUsed	= num_blocks - num_blocks_free;
-		id->id_BytesPerBlock	= 512;
-		id->id_DiskType			= ID_DOS_DISK;
-		id->id_VolumeNode		= MKBADDR(VolumeNode);
-		id->id_InUse			= NOT (IsListEmpty((struct List *)&FileList) && IsListEmpty((struct List *)&LockList));
-
-		if(id->id_NumBlocks == 0)
-			id->id_NumBlocks = 1;
-
-		if(id->id_NumBlocksUsed == 0)
-			id->id_NumBlocksUsed = 1;
-	}
-	else
-	{
-		SHOWMSG("could not get any disk data");
-
-		id->id_NumBlocks		= 1;
-		id->id_NumBlocksUsed	= 1;
-		id->id_BytesPerBlock	= 512;
-		id->id_DiskType			= ID_NO_DISK_PRESENT;
-
-		error = map_errno_to_ioerr(error);
-		result = DOSFALSE;
 	}
 
 	SHOWVALUE(id->id_NumBlocks);
@@ -5971,24 +6083,17 @@ Action_Info(
 
 	SHOWVALUE(lock);
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	/* We need to check if the lock matches the volume node. However,
 	 * a ZERO lock is valid, too.
 	 */
-	if(lock != NULL)
-	{
-		struct LockNode * ln;
-
-		if(lock_is_invalid(lock, &error))
-			goto out;
-
-		ln = (struct LockNode *)lock->fl_Key;
-
-		SHOWPOINTER(ln->ln_FullName);
-
-		D(("lock on '%s'", escape_name(ln->ln_FullName)));
-
-		ln->ln_LastUser = user;
-	}
+	if(CANNOT get_parent_name(lock, user, NULL, &error))
+		goto out;
 
 	result = Action_DiskInfo(id,error_ptr);
 
@@ -6020,6 +6125,12 @@ Action_ExamineObject(
 	memset(fib,0,sizeof(*fib));
 
 	fib->fib_DiskKey = -1;
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	/* If the ZERO lock is involved, it stands in for the
 	 * root directory. Otherwise it might be a lock on a
@@ -6147,9 +6258,9 @@ Action_ExamineObject(
 			/* Careful: the 'archive' attribute has exactly the opposite
 			 *          meaning in the Amiga and the SMB worlds.
 			 */
-			D(("is changed since last_archive = %s",st.is_changed_since_last_archive ? "yes" : "no"));
+			D(("was changed since last_archive = %s",st.was_changed_since_last_archive ? "yes" : "no"));
 
-			if(NOT st.is_changed_since_last_archive)
+			if(NOT st.was_changed_since_last_archive)
 				fib->fib_Protection |= FIBF_ARCHIVE;
 
 			D(("is directory = %s",st.is_dir ? "yes" : "no"));
@@ -6158,6 +6269,10 @@ Action_ExamineObject(
 			if(st.is_dir)
 				fib->fib_DiskKey = 0;
 		}
+	}
+	else
+	{
+		D(("lock on ':' (ZERO lock)"));
 	}
 
 	/* So this is actually the root directory? */
@@ -6393,7 +6508,7 @@ dir_scan_callback_func_exnext(
 	 *          meaning in the Amiga (= was archived) and the SMB
 	 *          worlds (= needs to be archived), respectively.
 	 */
-	if(NOT st->is_changed_since_last_archive)
+	if(NOT st->was_changed_since_last_archive)
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
@@ -6459,6 +6574,14 @@ Action_ExamineNext(
 	ENTER();
 
 	SHOWVALUE(lock);
+
+	if(file_system_disabled)
+	{
+		fib->fib_DiskKey = -1;
+
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(lock_is_invalid(lock,&error))
 	{
@@ -6606,13 +6729,13 @@ dir_scan_callback_func_exall(
 	/* Skip file and drawer names that we wouldn't be
 	 * able to handle in the first place.
 	 */
-	if (NOT name_is_acceptable(name))
+	if(NOT name_is_acceptable(name))
 	{
 		D(("   name is not acceptable"));
 		goto out;
 	}
 
-	if (st->is_hidden && OmitHidden)
+	if(st->is_hidden && OmitHidden)
 	{
 		D(("   ignoring hidden directory entry"));
 		goto out;
@@ -6620,7 +6743,7 @@ dir_scan_callback_func_exall(
 
 	name_len = strlen(name);
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		if(name_len >= (int)sizeof(translated_name))
 		{
@@ -6756,9 +6879,9 @@ dir_scan_callback_func_exall(
 		/* Careful: the 'archive' attribute has exactly the opposite
 		 *          meaning in the Amiga and the SMB worlds.
 		 */
-		D(("   is changed since last_archive = %s",st->is_changed_since_last_archive ? "yes" : "no"));
+		D(("   was changed since last_archive = %s",st->was_changed_since_last_archive ? "yes" : "no"));
 
-		if(NOT st->is_changed_since_last_archive)
+		if(NOT st->was_changed_since_last_archive)
 			ed->ed_Prot |= FIBF_ARCHIVE;
 
 		D(("   protection=0x%08lx", ed->ed_Prot));
@@ -6830,14 +6953,21 @@ dir_scan_callback_func_exall(
 	{
 		SHOWMSG("   checking if match function accepts the entry");
 
-		/* NOTE: the order of the parameters passed to the match hook
-		 *       function can be somewhat confusing. For standard
-		 *       hook functions, the order of the parameters and the
-		 *       registers they go into is hook=A0, object=A2,
-		 *       message=A1. However, the documentation for the 'ExAll()'
-		 *       function always lists them in ascending order, that is
+		/* Note: The order of the parameters passed to the match hook
+		 *       function can be somewhat confusing.
+		 *
+		 *       For standard hook functions, the order of the parameters
+		 *       and the registers they go into is hook=A0, object=A2,
+		 *       message=A1.
+		 *
+		 *       However, the documentation for the 'ExAll()' function
+		 *       always lists them in ascending order, that is
 		 *       hook=A0, message=A1, object=A2, which can lead to
 		 *       quite some confusion and strange errors.
+		 *
+		 *       The parameter order which is correct for the CallHookPkt()
+		 *       function is given below: 1. match function (hook),
+		 *       2. pointer to type, 3. pointer to ExAllData.
 		 */
 		if(NOT CallHookPkt(ec->ec_Control->eac_MatchFunc,&type,ed))
 		{
@@ -6910,6 +7040,12 @@ Action_ExamineAll(
 	SHOWVALUE(eac->eac_LastKey);
 
 	eac->eac_Entries = 0;
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	/* Check if the lock is suitable. */
 	if(lock_is_invalid(lock, &error))
@@ -7085,7 +7221,7 @@ Action_ExamineAll(
 	smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&error);
 
 	/* Did the smba_readdir() run into trouble? */
-	if(error != OK)
+	if (error != OK)
 	{
 		D(("error whilst scanning (errno=%ld)", error));
 
@@ -7176,6 +7312,12 @@ Action_ExamineAllEnd(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	/* Check if the lock is suitable. */
 	if(lock_is_invalid(lock,&error))
 		goto out;
@@ -7214,20 +7356,16 @@ Action_Find(
 	STRPTR parent_path = NULL;
 	STRPTR full_name = NULL;
 	struct FileNode * fn = NULL;
-	const TEXT * parent_name;
+	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
-	BOOL name_contains_wildcard_characters = FALSE;
+	BOOL wildcard_characters_found_in_name = FALSE;
 	int name_len;
 	BOOL create_new_file = FALSE;
 	STRPTR temp = NULL;
 	smba_stat_t st;
 	int error;
-	int i;
 
 	ENTER();
-
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
 
 	switch(action)
 	{
@@ -7249,27 +7387,17 @@ Action_Find(
 			break;
 	}
 
-	SHOWVALUE(parent);
-
-	if(parent != NULL)
+	if(file_system_disabled)
 	{
-		struct LockNode * ln;
-
-		if(lock_is_invalid(parent,&error))
-			goto out;
-
-		ln = (struct LockNode *)parent->fl_Key;
-
-		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
-
-		ln->ln_LastUser = user;
-
-		parent_name = ln->ln_FullName;
+		error = ERROR_NO_DISK;
+		goto out;
 	}
-	else
-	{
-		parent_name = NULL;
-	}
+
+	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
+		goto out;
+
+	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+	name_len = strlen(name);
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
@@ -7281,36 +7409,26 @@ Action_Find(
 	 */
 	if(action != ACTION_FINDINPUT)
 	{
-		const TEXT * last_name;
-		int last_name_len;
-
-		last_name = FilePart(name);
-		last_name_len = strlen(last_name);
-
-		for(i = 0 ; i < last_name_len ; i++)
+		if(name_contains_wildcard_characters(name))
 		{
-			if(strchr("*?",last_name[i]) != NULL)
+			if(action == ACTION_FINDOUTPUT)
 			{
-				D(("found a wildcard in '%s'",name));
+				D(("will not create a file with wildcard characters in its name"));
 
-				if(action == ACTION_FINDOUTPUT)
-				{
-					error = ERROR_INVALID_COMPONENT_NAME;
-					goto out;
-				}
-
-				/* We don't know yet if MODE_READWRITE will
-				 * succeed in opening the file whose name
-				 * contains wildcard characters. This will
-				 * be checked later, if needed.
-				 */
-				name_contains_wildcard_characters = TRUE;
-				break;
+				error = ERROR_INVALID_COMPONENT_NAME;
+				goto out;
 			}
+
+			/* We don't know yet if MODE_READWRITE will
+			 * succeed in opening the file whose name
+			 * contains wildcard characters. This will
+			 * be checked later, if needed.
+			 */
+			wildcard_characters_found_in_name = TRUE;
 		}
 	}
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
@@ -7391,7 +7509,7 @@ Action_Find(
 		 * MS-DOS wildcard characters. This will only
 		 * end in tears later...
 		 */
-		if(name_contains_wildcard_characters)
+		if(wildcard_characters_found_in_name)
 		{
 			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
@@ -7501,6 +7619,12 @@ Action_Read(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(file_is_invalid(fn,&error))
 		goto out;
 
@@ -7543,6 +7667,12 @@ Action_Write(
 	int error = OK;
 
 	ENTER();
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(WriteProtected)
 	{
@@ -7590,6 +7720,12 @@ Action_End(
 	struct FileNode * fn;
 	struct FileNode * found;
 	int error = OK;
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(file_is_invalid(which_fn,&error))
 		goto out;
@@ -7652,6 +7788,12 @@ Action_Seek(
 	int error;
 
 	ENTER();
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(file_is_invalid(fn,&error))
 		goto out;
@@ -7751,6 +7893,12 @@ Action_SetFileSize(
 	int error;
 
 	ENTER();
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(WriteProtected)
 	{
@@ -7862,7 +8010,7 @@ Action_SetDate(
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
 	smba_file_t * file = NULL;
-	const TEXT * parent_name;
+	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	smba_stat_t st;
 	LONG seconds;
@@ -7871,45 +8019,32 @@ Action_SetDate(
 
 	ENTER();
 
+	D(("name = '%b'",MKBADDR(bcpl_name)));
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(WriteProtected)
 	{
 		error = ERROR_DISK_WRITE_PROTECTED;
 		goto out;
 	}
 
-	SHOWVALUE(parent);
-
-	D(("name = '%b'",MKBADDR(bcpl_name)));
+	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
+		goto out;
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 	name_len = strlen(name);
-
-	if(parent != NULL)
-	{
-		struct LockNode * ln;
-
-		if(lock_is_invalid(parent,&error))
-			goto out;
-
-		ln = (struct LockNode *)parent->fl_Key;
-
-		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
-
-		ln->ln_LastUser = user;
-
-		parent_name = ln->ln_FullName;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
 	remove_device_name_from_path(name, &name_len);
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
@@ -8022,6 +8157,12 @@ Action_ExamineFH(
 
 	fib->fib_DiskKey = -1;
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(file_is_invalid(fn,&error))
 		goto out;
 
@@ -8103,9 +8244,9 @@ Action_ExamineFH(
 	/* Careful: the 'archive' attribute has exactly the opposite
 	 *          meaning in the Amiga and the SMB worlds.
 	 */
-	D(("is changed since last_archive = %s",st.is_changed_since_last_archive ? "yes" : "no"));
+	D(("was changed since last_archive = %s",st.was_changed_since_last_archive ? "yes" : "no"));
 
-	if(NOT st.is_changed_since_last_archive)
+	if(NOT st.was_changed_since_last_archive)
 		fib->fib_Protection |= FIBF_ARCHIVE;
 
 	/* If modification time is 0 use creation time instead (cyfm 2009-03-18). */
@@ -8170,6 +8311,12 @@ Action_ParentFH(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(file_is_invalid(fn,&error))
 		goto out;
 
@@ -8227,6 +8374,12 @@ Action_CopyDirFH(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(file_is_invalid(fn,&error))
 		goto out;
 
@@ -8254,7 +8407,7 @@ Action_CopyDirFH(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if (smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
+	if(smba_open(ServerData,full_name,open_read_only,open_dont_truncate,&ln->ln_File,&error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -8294,6 +8447,12 @@ Action_FHFromLock(
 	ENTER();
 
 	SHOWVALUE(fl);
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(lock_is_invalid(fl,&error))
 		goto out;
@@ -8354,6 +8513,12 @@ Action_RenameDisk(
 	int len;
 
 	ENTER();
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(WriteProtected)
 	{
@@ -8440,8 +8605,12 @@ Action_CurrentVolume(
 		goto out;
 	}
 
+	/* This is in support of the "Please insert volume XXXin any drive"
+	 * requester. Not that it should be needed, but you never know...
+	 */
+
 	result	= MKBADDR(DeviceNode);
-	error	= 0;
+	error	= 0; /* This is actually the unit number. */
 
  out:
 
@@ -8471,15 +8640,28 @@ Action_ChangeMode(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	/* Bug compatibility: the ChangeMode() autodocs used to suggest that the
 	 * 'new_mode' parameter should contain the new access mode without actually
 	 * explaining what that mode should be. Consequently, no two file systems
-	 * out of three are implementing this packet the same way. Some allow
-	 * SHARED_LOCK/EXCLUSIVE_LOCK for both file handles and file locks, some
-	 * try to allow MODE_OLDFILE/MODE_READWRITE/MODE_NEWFILE for file handles
-	 * but really assume that it should be SHARED_LOCK/EXCLUSIVE_LOCK with
-	 * hilarious/tragic consequences. The only file system which sort of got
+	 * out of three are implementing this packet the same way.
+	 *
+	 * Some file systems allow SHARED_LOCK/EXCLUSIVE_LOCK for both file handles
+	 * and file locks, some try to allow MODE_OLDFILE/MODE_READWRITE/MODE_NEWFILE
+	 * for file handles but really assume that it should be SHARED_LOCK/EXCLUSIVE_LOCK
+	 * with hilarious/tragic consequences. The only file system which sort of got
 	 * this right was ram-handler.
+	 *
+	 * We accept MODE_OLDFILE, MODE_READWRITE and MODE_NEWFILE for files, as well
+	 * as SHARED_LOCK and EXCLUSIVE_LOCK. This works because these five modes
+	 * are represented by different numbers.
+	 *
+	 * For locks we only accept SHARED_LOCK and EXCLUSIVE_LOCK.
 	 */
 	if(type == CHANGE_FH)
 	{
@@ -8592,6 +8774,12 @@ Action_WriteProtect(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(flag == DOSFALSE)
 	{
 		if(WriteProtected)
@@ -8679,12 +8867,20 @@ Action_SetComment(
 	LONG result = DOSFALSE;
 	STRPTR full_name = NULL;
 	smba_file_t * file = NULL;
-	const TEXT * parent_name;
+	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
 	int name_len;
 	int error;
 
 	ENTER();
+
+	D(("name = '%b', comment = '%s'",MKBADDR(bcpl_name),MKBADDR(bcpl_comment)));
+
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
 
 	if(WriteProtected)
 	{
@@ -8692,39 +8888,18 @@ Action_SetComment(
 		goto out;
 	}
 
-	D(("name = '%b', comment = '%s'",MKBADDR(bcpl_name),MKBADDR(bcpl_comment)));
+	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
+		goto out;
 
 	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 	name_len = strlen(name);
-
-	SHOWVALUE(parent);
-
-	if(parent != NULL)
-	{
-		struct LockNode * ln;
-
-		if(lock_is_invalid(parent,&error))
-			goto out;
-
-		ln = (struct LockNode *)parent->fl_Key;
-
-		D(("parent lock on '%s'", escape_name(ln->ln_FullName)));
-
-		ln->ln_LastUser = user;
-
-		parent_name = ln->ln_FullName;
-	}
-	else
-	{
-		parent_name = NULL;
-	}
 
 	/* Remove a device, volume or assignment name
 	 * from the path name.
 	 */
 	remove_device_name_from_path(name, &name_len);
 
-	if (NOT ServerData->server.unicode_enabled)
+	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
@@ -8746,7 +8921,7 @@ Action_SetComment(
 
 	D(("full_name = '%s'",escape_name(full_name)));
 
-	if (smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
+	if(smba_open(ServerData,full_name,open_writable,open_dont_truncate,&file,&error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -8785,42 +8960,48 @@ Action_LockRecord(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(file_is_invalid(fn,&error))
 		goto out;
 
 	D(("file opened on '%s'", escape_name(fn->fn_FullName)));
 
 	/* Sanity checks... */
-	if (mode < REC_EXCLUSIVE || mode > REC_SHARED_IMMED)
+	if(mode < REC_EXCLUSIVE || mode > REC_SHARED_IMMED)
 	{
 		error = ERROR_ACTION_NOT_KNOWN;
 		goto out;
 	}
 
 	/* Invalid offset, size or integer overflow? */
-	if (offset < 0 || length <= 0 || offset + length < offset)
+	if(offset < 0 || length <= 0 || offset + length < offset)
 	{
 		error = ERROR_LOCK_COLLISION;
 		goto out;
 	}
 
-	if ((mode == REC_SHARED) || (mode == REC_SHARED_IMMED))
+	if((mode == REC_SHARED) || (mode == REC_SHARED_IMMED))
 		umode = 1;
 	else
 		umode = 0;
 
-	if ((mode == REC_SHARED_IMMED) || (mode == REC_EXCLUSIVE_IMMED))
+	if((mode == REC_SHARED_IMMED) || (mode == REC_EXCLUSIVE_IMMED))
 		timeout = 0;
 
-	if (timeout > 0)
+	if(timeout > 0)
 	{
-		if (timeout > 214748364)
+		if(timeout > 214748364)
 			timeout = ~0UL;	/* wait forever */
 		else
 			timeout *= 20;	/* milliseconds instead of Ticks */
 	}
 
-	if (smba_lockrec (fn->fn_File, offset, length, umode, 0, (long)timeout, &error) < 0)
+	if(smba_lockrec (fn->fn_File, offset, length, umode, 0, (long)timeout, &error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -8850,6 +9031,12 @@ Action_FreeRecord(
 
 	ENTER();
 
+	if(file_system_disabled)
+	{
+		error = ERROR_NO_DISK;
+		goto out;
+	}
+
 	if(file_is_invalid(fn,&error))
 		goto out;
 
@@ -8862,7 +9049,7 @@ Action_FreeRecord(
 		goto out;
 	}
 
-	if (smba_lockrec (fn->fn_File, offset, length, 2, -1, 0, &error) < 0)
+	if(smba_lockrec (fn->fn_File, offset, length, 2, -1, 0, &error) < 0)
 	{
 		error = map_errno_to_ioerr(error);
 		goto out;
@@ -8892,6 +9079,7 @@ file_system_handler(
 	int old_priority = 0;
 	fd_set read_fds;
 	int server_fd;
+	ULONG signal_mask;
 	ULONG signals;
 	BOOL done;
 
@@ -8974,6 +9162,8 @@ file_system_handler(
 		Permit();
 	}
 
+	signal_mask = SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D | SIGBREAKF_CTRL_E | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit);
+
 	FD_ZERO(&read_fds);
 
 	do
@@ -8988,7 +9178,7 @@ file_system_handler(
 			/* We want to know if this socket has readable data for us. */
 			FD_SET(server_fd, &read_fds);
 
-			signals = SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit);
+			signals = signal_mask;
 
 			/* Wait for the server to send something, a signal to be received
 			 * or the next file system packet to arrive.
@@ -9066,23 +9256,89 @@ file_system_handler(
 		 */
 		else
 		{
-			signals = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit));
+			signals = Wait(signal_mask);
 		}
 
+		/* Stop the file system? */
 		if(signals & SIGBREAKF_CTRL_C)
 		{
 			SHOWMSG("stop signal received; trying to quit...");
 			Quit = TRUE;
 		}
 
+		/* Re-enable the file system? If both disable and enable signals
+		 * are present, we always stick with keeping the file system
+		 * enabled.
+		 */
+		if (signals & SIGBREAKF_CTRL_E)
+		{
+			/* Note that the volume node needs to be around so that
+			 * the Workbench and others can correctly report that
+			 * the file system is not currently operational.
+			 */
+			if(VolumeNodeAdded && file_system_disabled)
+			{
+				SHOWMSG("re-enabling the file system");
+
+				file_system_disabled = FALSE;
+
+				send_disk_change_notification(IECLASS_DISKINSERTED);
+			}
+		}
+		/* Disable the file system? */
+		else if (signals & SIGBREAKF_CTRL_D)
+		{
+			if(VolumeNodeAdded && NOT file_system_disabled)
+			{
+				SHOWMSG("disabling the file system");
+
+				file_system_disabled = TRUE;
+
+				send_disk_change_notification(IECLASS_DISKREMOVED);
+			}
+		}
+
 		if(signals & (1UL << FileSystemPort->mp_SigBit))
 		{
+			struct timeval start_time;
 			struct DosPacket * dp;
 			struct Message * mn;
 			LONG res1,res2;
 
-			while((mn = GetMsg(FileSystemPort)) != NULL)
+			while(TRUE)
 			{
+				/* Count the number of packets currently waiting to be processed. */
+				#if DEBUG
+				{
+					ULONG num_packets_waiting;
+					struct Node * ln;
+
+					Disable();
+
+					num_packets_waiting = 0;
+
+					for(ln = FileSystemPort->mp_MsgList.lh_Head ;
+					    ln->ln_Succ != NULL ;
+					    ln = ln->ln_Succ)
+					{
+						num_packets_waiting++;
+					}
+
+					Enable();
+
+					if (num_packets_waiting > 1)
+						D(("%lu packets are waiting to be processed", num_packets_waiting));
+					else if (num_packets_waiting == 1)
+						D(("1 packet is waiting to be processed"));
+					else
+						D(("no packet is waiting to be processed"));
+				}
+				#endif /* DEBUG */
+
+				mn = GetMsg(FileSystemPort);
+				if(mn == NULL)
+					break;
+
 				dp = (struct DosPacket *)mn->mn_Node.ln_Name;
 
 				#if DEBUG
@@ -9185,6 +9441,13 @@ file_system_handler(
 				}
 				#endif /* DEBUG */
 
+				/* We want to know how long it takes to process this packet. */
+				#if DEBUG
+				{
+					GetSysTime((APTR)&start_time);
+				}
+				#endif /* DEBUG */
+
 				res2 = 0;
 
 				switch(dp->dp_Action)
@@ -9251,19 +9514,22 @@ file_system_handler(
 					case ACTION_MORE_CACHE:
 						/* Buffer delta -> Total number of buffers */
 
-						/* NOTE: documentation for this packet type is inconsistent;
+						/* Note: Documentation for this packet type is inconsistent;
 						 *       in the 'good old' 1.x days 'res1' was documented as
 						 *       the total number of buffers to be returned. In the
 						 *       2.x documentation it is said that 'res1' should
 						 *       return the success code, with 'res2' to hold the
-						 *       total number of buffers. However, the 'AddBuffers'
-						 *       shell command doesn't work that way, and the
-						 *       dos.library implementation of 'AddBuffers()' doesn't
-						 *       work that way either. The 1.3 'AddBuffers' command
-						 *       appears to treat a zero result as failure and a
-						 *       non-zero result as success, which suggests that this
-						 *       is how the packet is supposed to work, contrary to
-						 *       what the official documentation says.
+						 *       total number of buffers.
+						 *
+						 *       However, the 'AddBuffers' shell command doesn't work
+						 *       that way, and the dos.library implementation of
+						 *       'AddBuffers()' doesn't work that way either.
+						 *
+						 *       The 1.3 'AddBuffers' command appears to treat a zero
+						 *       result as failure and a non-zero result as success,
+						 *       which suggests that this is how the packet is supposed
+						 *       to work, contrary to what the official documentation
+						 *       says.
 						 */
 						res1 = Action_MoreCache(dp->dp_Arg1,&res2);
 						break;
@@ -9302,8 +9568,11 @@ file_system_handler(
 						/* InfoData -> Bool */
 
 						Action_DiskInfo((struct InfoData *)BADDR(dp->dp_Arg1),&res2);
+
+						/* This should always work. */
 						res1 = DOSTRUE;
 						res2 = 0;
+
 						break;
 
 					case ACTION_INFO:
@@ -9327,7 +9596,10 @@ file_system_handler(
 					case ACTION_INHIBIT:
 
 						SHOWMSG("ACTION_INHIBIT");
-						res1 = DOSTRUE;
+
+						res1 = DOSFALSE;
+						res2 = ERROR_ACTION_NOT_KNOWN;
+
 						break;
 
 					case ACTION_SET_DATE:
@@ -9477,7 +9749,51 @@ file_system_handler(
 						break;
 				}
 
-				D(("Returning packet with res1=%ld (0x%08lx) and res2=%ld (0x%08lx)\n",res1,res1,res2,res2));
+				#if DEBUG
+				{
+					struct timeval finish_time;
+					TEXT processing_time[30];
+
+					/* Figure out how long it took to process this
+					 * packet. Because the system time may have been
+					 * adjusted between the beginning of the processing
+					 * and getting here, we need to make sure that time
+					 * didn't flow backwards...
+					 */
+					GetSysTime(&finish_time);
+
+					if(-CmpTime(&finish_time,&start_time) >= 0)
+					{
+						int l;
+
+						SubTime(&finish_time,&start_time);
+
+						/* Print the processing time as the number of
+						 * seconds which have passed, without trailing
+						 * zeroes after the decimal point (and removing the
+						 * decimal point altogether if all trailing zeroes
+						 * have been removed.
+						 */
+						LocalSNPrintf(processing_time,sizeof(processing_time),"%lu.%06lu", finish_time.tv_secs, finish_time.tv_micro);
+
+						l = strlen(processing_time);
+						while(l > 0 && processing_time[l-1] == '0')
+							l--;
+
+						if(l > 0 && processing_time[l-1] == '.')
+							l--;
+
+						processing_time[l++] = 's';
+						processing_time[l] = '\0';
+					}
+					else
+					{
+						strlcpy(processing_time,"unknown",sizeof(processing_time));
+					}
+
+					D(("Returning packet with res1=%ld (0x%08lx) and res2=%ld (0x%08lx); processing time=%s\n",res1,res1,res2,res2,processing_time));
+				}
+				#endif /* DEBUG */
 
 				ReplyPkt(dp,res1,res2);
 			}

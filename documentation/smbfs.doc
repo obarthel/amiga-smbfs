@@ -10,12 +10,12 @@ This file system can be used to access files made available by file servers
 which implement the SMBv1 protocol, such as Microsoft Windows or any other
 platform which supports the free Samba product.
 
-These files can be accessed using shell commands such as "List", the
-Workbench or utilities such as Directory Opus as if the file server were a
-local disk drive.
+These files can be accessed using shell commands such as "List", the Workbench
+or utilities such as Directory Opus as if the file server were a local disk
+drive.
 
-You may find smbfs useful if you want to access a NAS
-(network-attached storage) drive, or even a Linux file server.
+You may find smbfs useful if you want to access a NAS (network-attached
+storage) drive, or even a Linux file server.
 
 
 2. What do you need to get started?
@@ -85,12 +85,11 @@ would be "ARBEITSGRUPPE".
 
 4. Starting and stopping the file system
 
-smbfs is an uncommon kind of file system in that you do not use the
-"Mount" command to mount it. In fact, smbfs is a program which can be
-launched from the shell, using command line parameters to tell it which
-resources should be used. But you can also start it from Workbench: in this
-case you would have to put the program's command line options into icon tool
-types.
+smbfs is an uncommon kind of file system in that you do not use the "Mount"
+command to mount it. In fact, smbfs is a program which can be launched from
+the shell, using command line parameters to tell it which resources should be
+used. But you can also start it from Workbench: in this case you would have to
+put the program's command line options into icon tool types.
 
 4.1. Starting the file system
 
@@ -126,10 +125,9 @@ error messages it may produce.
 
 4.2. Stopping the file system
 
-How do you "unmount" the file system? Stopping the smbfs program will
-unmount the file system. This can be accomplished by either hitting the
-[Ctrl]+C keys or by using the "Status" shell command and then the "Break"
-command.
+How do you "unmount" the file system? Stopping the smbfs program will unmount
+the file system. This can be accomplished by either hitting the [Ctrl]+C keys
+or by using the "Status" shell command and then the "Break" command.
 
 For example, the "Status" shell command may produce the following output:
 
@@ -145,8 +143,7 @@ For example, the "Status" shell command may produce the following output:
     Process 10: Loaded as command: SMBFS '//sourcery/all'
 
 Look at the last line describing process number 10: it shows the name of the
-file system program smbfs and the name of the SMB share it is connected
-to.
+file system program smbfs and the name of the SMB share it is connected to.
 
 To stop this file system and effectively unmount it, use the shell "Break"
 command; in this case you would enter "Break 10" to stop the file system.
@@ -155,8 +152,25 @@ Note that the smbfs program may not quit immediately. It may have to wait
 until the last client has released all the resources it obtained from the file
 system.
 
-You may have to send more than one "Break" command to stop the smbfs
-program.
+You may have to send more than one "Break" command to stop the smbfs program.
+
+4.3. Temporarily disabling the file system
+
+If, for example, you need to temporarily shut down the network, smbfs will be
+unable to do its job, at least until the network becomes operational again. In
+the mean time Workbench and other programs will keep accessing the file system
+and may get stuck.
+
+You can avoid most of these problems by temporarily disabling the file system
+until it can access the network again. For this to work, you need to start the
+smbfs program in the shell and use the VOLUMENAME option, which will make a
+disk icon appear in the Workbench window.
+
+To disable the file system, hit the [Ctrl]+D keys or use the "Break" command
+(e.g. "Break 10 D" if smbfs is running as process number 10).
+
+To re-enable the file system again, hit the [Ctrl]+E keys or use the "Break"
+command (e.g. "Break 10 E" if smbfs is running as process number 10).
 
 
 5. Startup options
@@ -164,8 +178,7 @@ program.
 The smbfs program supports a number of options which control how it works.
 
 You can enter these options as command line parameters, or, if you start the
-smbfs program from Workbench, you can set these options as icon tool
-types.
+smbfs program from Workbench, you can set these options as icon tool types.
 
 Here is how the options look like, in alphabetical order (as command line
 parameters):
@@ -230,16 +243,16 @@ connection. The port number is optional, though. In place of the port (e.g.
 445) number you can also use the name of a TCP/UDP service (e.g.
 "microsoft-ds").
 
-Finally, you need to tell the SMB server which service you want to connect
-to, which for the smbfs program should be the name of a shared network
-file system. In the example the name of the shared network file system would
-be "share-name".
+Finally, you need to tell the SMB server which service you want to connect to,
+which for the smbfs program should be the name of a shared network file
+system. In the example the name of the shared network file system would be
+"share-name".
 
 5.1.2. "USER=USERNAME/K"
 
 In order to connect to an SMB share, the server requires that a user name is
-provided. If you omit the user name, the smbfs program will use "GUEST" as
-a replacement.
+provided. If you omit the user name, the smbfs program will use "GUEST" as a
+replacement.
 
 If you do provide a user name, it must not be longer than 64 characters. The
 name you provide will be translated to all upper case characters.
@@ -252,13 +265,13 @@ variable could be set up like this:
     Copy ENV:smbfs_username ENVARC:
 
 You may also use the "smbfs_user" environment variable in place of the
-"smbfs_username" variable. The two are aliases for one another, but smbfs
-will read only one of the two.
+"smbfs_username" variable. The two are aliases for one another, but smbfs will
+read only one of the two.
 
 5.1.3. "PASSWORD/K"
 
-You may not need to provide a password in order to connect to an SMB share.
-If you omit it, the smbfs program will use an empty password.
+You may not need to provide a password in order to connect to an SMB share. If
+you omit it, the smbfs program will use an empty password.
 
 If you do need a password to go along with the user name, your password cannot
 be longer than 64 characters.
@@ -271,24 +284,15 @@ variable could be set up like this:
     Copy ENV:smbfs_password ENVARC:
 
 Keep in mind that passwords like these really should not be exposed by storing
-them in environment variables. But then the protocol smbfs uses is almost
-as insecure as it gets anyway.
+them in environment variables. But then the protocol smbfs uses is almost as
+insecure as it gets anyway.
 
 The authentication process only works if the machine you are connecting to
 knows about the user name and password you want to use. As of this writing,
-smbfs can only be used for authenticating against a password server that
-is the same machine as the one on which you wish to access a share.
+smbfs can only be used for authenticating against a password server that is
+the same machine as the one on which you wish to access a share.
 
-5.1.4. "NETBIOS/S"
-
-Older server software such as "Microsoft Windows XP" may not respond to the
-requests of the smbfs program to connect to the shared network file system.
-
-If the connection attempt fails immediately you may want to try the "NETBIOS"
-switch which tells the smbfs program to use an older protocol when trying to
-talk to the server.
-
-5.1.5. "CHANGECASE/S"
+5.1.4. "CHANGECASE/S"
 
 By default the password you provide with the "PASSWORD" option will not be
 changed before it is used for accessing the server's shared network file
@@ -299,7 +303,7 @@ before it can be used. If this is necessary, you should either provide the
 password in this form or resort to the "CHANGECASE" option, which will cause
 it to be translated to all upper case characters.
 
-5.1.6. "DOMAIN=WORKGROUP/K"
+5.1.5. "DOMAIN=WORKGROUP/K"
 
 This option may be omitted, in which case the smbfs program will ask the file
 server about the work group which it is a member of. Should the server fail to
@@ -322,16 +326,25 @@ You may also use the "smbfs_domain" environment variable in place of the
 "smbfs_workgroup" variable. The two are aliases for one another, but smbfs
 will read only one of the two.
 
+5.1.6. "NETBIOS/S"
+
+Older server software such as "Microsoft Windows XP" may not respond to the
+requests of the smbfs program to connect to the shared network file system.
+
+If the connection attempt fails immediately you may want to try the "NETBIOS"
+switch which tells the smbfs program to use an older protocol when trying to
+talk to the server.
+
 5.1.7. "CLIENT=CLIENTNAME/K"
 
-The smbfs program will attempt to connect to the file server by providing
-the name of the computer you connect from.
+The smbfs program will attempt to connect to the file server by providing the
+name of the computer you connect from.
 
 In some cases this may be undesirable as the computer's name differs from what
 the file server expects.
 
-You can use the "CLIENT" parameter to tell smbfs under which name it
-should announce itself to the server.
+You can use the "CLIENT" parameter to tell smbfs under which name it should
+announce itself to the server.
 
 This parameter is optional and will be translated to all upper case
 characters; it cannot be longer than 16 characters.
@@ -375,18 +388,18 @@ containing reserved characters, will be "hidden" as well.
 5.2.1. "UNICODE/K"
 
 The built-in default translation method is restricted to the part of Unicode
-which is covered by the ISO-8859-1 character set. It is enabled by default,
-as if "UNICODE=on" had been used. You can disable it with "UNICODE=off", which
+which is covered by the ISO-8859-1 character set. It is enabled by default, as
+if "UNICODE=on" had been used. You can disable it with "UNICODE=off", which
 completely disables the translation.
 
 Note: some Samba versions will return corrupted file and drawer names unless
-Unicode support is enabled. Names which use only US-ASCII characters will not
-be corrupted.
+Unicode support is enabled. Names which use only US-ASCII characters appear to
+be generally safe to use and are unlikely to suffer from corruption.
 
 5.2.2. "CP437/S"
 
 The switch "CP437" enables a code page-based translation which works well
-enough with old Samba servers. "CP437" stands for "code page 437", which is
+enough with old Samba versions. "CP437" stands for "code page 437", which is
 what the original IBM-PC would use.
 
 The "CP437" switch disables Unicode support.
@@ -394,7 +407,7 @@ The "CP437" switch disables Unicode support.
 5.2.3. "CP850/S"
 
 The switch "CP850" enables a code page-based translation which works well
-enough with old Samba servers. "CP850" stands for "code page 850", which is a
+enough with old Samba versions. "CP850" stands for "code page 850", which is a
 variant of what the original IBM-PC would use. This variant is intended to be
 used in western Europe and is more compatible with the ISO-8859-1 character
 set than the "CP437" variant.
@@ -416,15 +429,17 @@ In most cases the "L:FileSystem_Trans/INTL.crossdos" translation table file
 should be sufficient.
 
 To specify which file contains the translation tables to use you would use the
-"TRANSLATIONFILE" parameter, e.g. TRANSLATIONFILE=L:FileSystem_Trans/INTL.crossdos
+"TRANSLATIONFILE" parameter, e.g. "TRANSLATIONFILE=L:FileSystem_Trans/INTL.crossdos".
+However, you might want to try the "CP850" switch instead which should produce
+the same effect.
 
 The "TRANSLATE" option disables Unicode support.
 
 5.3. Performance tuning
 
-You may be able to put the smbfs program to good use, but overall
-performance, reliability and memory usage may still be somewhat lacking. These
-aspects may be tuned with the following parameters.
+You may be able to put the smbfs program to good use, but overall performance,
+reliability and memory usage may still be somewhat lacking. These aspects may
+be tuned with the following parameters.
 
 5.3.1. "CACHE=CACHESIZE/N/K"
 
@@ -441,8 +456,8 @@ using the "CACHESIZE" parameter. The size of the cache cannot be smaller than
 
 5.3.2. "RAISEPRIORITY/S"
 
-The smbfs program can be run at a higher priority than it would normally
-do (normal would be priority 0), which might increase performance, but raise
+The smbfs program can be run at a higher priority than it would normally do
+(normal would be priority 0), which might increase performance, but raise
 system load, too. If the "RAISEPRIORITY" switch is used, the smbfs program
 will run at the same priority as other Amiga file systems do (this would be
 priority 10).
@@ -454,16 +469,16 @@ operations. While it will try to reestablish a connection to the server, some
 time has to pass before it becomes clear that the server connection is no
 longer working correctly.
 
-You can set the number of seconds which have to pass before the smbfs
-program will stop waiting for the server to respond, shut down the connection
-and try again. For example, "TIMEOUT=5" will select a timeout of 5 seconds.
+You can set the number of seconds which have to pass before the smbfs program
+will stop waiting for the server to respond, shut down the connection and try
+again. For example, "TIMEOUT=5" will select a timeout of 5 seconds.
 
 5.3.4. "WRITEBEHIND/S"
 
-The smbfs program can try to improve write performance by not waiting for
-the server to confirm that all the data just transmitted has in fact been
-stored. There is a risk involved in that the server may not have been able to
-store the data and you will never know about it.
+The smbfs program can try to improve write performance by not waiting for the
+server to confirm that all the data just transmitted has in fact been stored.
+There is a risk involved in that the server may not have been able to store
+the data and you will never know about it.
 
 Please note that the "WRITEBEHIND" switch has no effect if "PROTOCOL=nt1" is
 used because the smbfs program will then be using a different server write
@@ -491,8 +506,8 @@ different.
 There is a catch though: the AmigaDOS file naming scheme does not follow this
 model and you may run into problems when you are trying to use it.
 
-By default, the smbfs program does not treat file and drawer names
-differently which only differ with respect to the case of letters.
+By default, the smbfs program does not treat file and drawer names differently
+which only differ with respect to the case of letters.
 
 5.4.2. "DISABLEEXALL/S"
 
@@ -504,21 +519,21 @@ a time, and no name may be longer than 107 characters.
 
 The second method ("ExAll"), introduced with Kickstart 2.0, can deliver more
 entries and more quickly than the original method. Also, directory entry names
-may be longer than "just" 107 characters (the smbfs program supports file
-and drawer names of up to 255 characters).
+may be longer than "just" 107 characters (the smbfs program supports file and
+drawer names of up to 255 characters).
 
 The smbfs program supports both methods, but there is a catch: Some Amiga
 software struggles to handle the number of entries delivered by the "ExAll"
 method, and names longer than 30 characters are a problem. Such software may
 malfunction and even crash.
 
-To avoid problems with such software, the smbfs program can be made to
-pretend that it did not support the "ExAll" method. Use the "DISABLEEXALL"
-switch to disable the "ExAll" method.
+To avoid problems with such software, the smbfs program can be made to pretend
+that it did not support the "ExAll" method. Use the "DISABLEEXALL" switch to
+disable the "ExAll" method.
 
-Please note that if the "DISABLEEXALL" switch is used, the smbfs program
-will make files and drawers appear to be "hidden" if their names are longer
-than 107 characters.
+Please note that if the "DISABLEEXALL" switch is used, the smbfs program will
+make files and drawers appear to be "hidden" if their names are longer than
+107 characters.
 
 5.4.3. "MAXNAMELEN/N/K"
 
@@ -526,17 +541,16 @@ Some Amiga programs struggle with file and drawer names longer than 30
 characters. They may malfunction and even crash when the smbfs program
 delivers them.
 
-You can tell the smbfs program not to deliver any file or drawer names
-which are longer than a certain number of characters using the "MAXNAMELEN"
-option. For example, "MAXNAMELEN=30" would make files and drawers appear to be
+You can tell the smbfs program not to deliver any file or drawer names which
+are longer than a certain number of characters using the "MAXNAMELEN" option.
+For example, "MAXNAMELEN=30" would make files and drawers appear to be
 "hidden" if their names are longer than 30 characters.
 
 5.4.4. "MAXTRANSMIT/N/K"
 
-You can fine-tune the size of the transmission buffer which the smbfs
-program uses when reading and writing files. The server may not have picked a
-buffer size which suits smbfs well. You can choose a smaller buffer size,
-if needed.
+You can fine-tune the size of the transmission buffer which the smbfs program
+uses when reading and writing files. The server may not have picked a buffer
+size which suits smbfs well. You can choose a smaller buffer size, if needed.
 
 The minimum transmission buffer size is 8000 bytes (this is also the default
 buffer size), and the maximum permitted size is 65535 bytes.
@@ -546,23 +560,22 @@ accepted by the file server, which may choose to use a much smaller buffer.
 
 5.4.5. "PROTOCOL/K"
 
-The smbfs program talks to the file server using a protocol called
-SMBv1, using commands and data structures described by the Common
-Internet File System documentation.
+The smbfs program talks to the file server using a protocol called SMBv1,
+using commands and data structures described by the Common Internet File
+System documentation.
 
-There are several versions of the SMBv1 protocol in use, and depending
-upon how old the server software is, smbfs may not work well with the file
-server.
+There are several versions of the SMBv1 protocol in use, and depending upon
+how old the server software is, smbfs may not work well with the file server.
 
-It may help if you change the protocol level which the smbfs program uses.
-The default is "PROTOCOL=core" which should work well enough with SMB server
-software available before 2009, and which is particularly suited for use
-with the Samba server software. How do you know if the Samba* server software
-is being used? Unless you are connecting to a Microsoft Windows server, you
-can practically assume that Samba will provide the shared network file system.
+It may help if you change the protocol level which the smbfs program uses. The
+default is "PROTOCOL=core" which should work well enough with SMB server
+software available before 2009, and which is particularly suited for use with
+the Samba server software. How do you know if the Samba* server software is
+being used? Unless you are connecting to a Microsoft Windows server, you can
+practically assume that Samba will provide the shared network file system.
 
-The alternative is "PROTOCOL=nt1" which might provide better compatibility
-and performance with Microsoft Windows systems.
+The alternative is "PROTOCOL=nt1" which might provide better compatibility and
+performance with Microsoft Windows systems.
 
 When in doubt, stick with "PROTOCOL=core".
 
@@ -576,33 +589,23 @@ With UNICODE=ON the SESSIONSETUP=DELAY option will delay enabling Unicode
 support until after the session has been established. SESSIONSETUP=NODELAY
 will enable Unicode support at the earliest possible time instead.
 
-The default is SESSIONSETUP=DELAY which works both with Samba, and seems
-to be required for Microsoft Windows systems.
+The default is SESSIONSETUP=DELAY which works both with Samba, and seems to be
+required for Microsoft Windows systems.
 
 5.5. Time conversion
 
-The file server which the smbfs program connects to may not share the
-exact system time with your Amiga. Typically, it will expect file and drawer
+The file server which the smbfs program connects to may not share the exact
+system time with your Amiga. Typically, it will expect file and drawer
 modification time information to be recorded in Universally Coordinated Time
 (UTC), rather than your local time zone (and the effects of daylight savings
 time).
 
 You can, and should tell the smbfs program how far the local Amiga time
-deviates from UTC. By default the smbfs program will try to use the time
-zone information configured in the "Locale" preferences. This may not be
+deviates from UTC. By default the smbfs program will try to use the time zone
+information configured in the "Locale" preferences. This may not be
 sufficient, or even the wrong choice.
 
-5.5.1. "DST=DSTOFFSET/N/K"
-
-This option can be used to adjust the file date stamps to take local daylight
-savings time into account.
-
-The number to specify here is by how many minutes local time has been moved
-ahead, which is typically 60. Note that smbfs does not know when daylight
-savings time begins and ends. It is up to you to select the correct adjustment
-value when appropriate.
-
-5.5.2. "TZ=TIMEZONEOFFSET/N/K"
+5.5.1. "TZ=TIMEZONEOFFSET/N/K"
 
 By default the file system will use the current Locale settings to translate
 between the local time and the time used by the file server.
@@ -616,12 +619,26 @@ order to translate it into the corresponding UTC value. For example, in
 central Europe using CET, you would use "TZ=60" since CET is one hour ahead of
 UTC.
 
+If you use the "TIMEZONEOFFSET" option, then the smbfs program will ignore the
+time zone information configured in the "Locale" preferences.
+
+5.5.2. "DST=DSTOFFSET/N/K"
+
+This option can be used to adjust the file date stamps to take local daylight
+savings time into account.
+
+The number to specify here is by how many minutes local time has been moved
+ahead, which is typically 60.
+
+Note that smbfs does not know when daylight savings time begins and ends. It
+is up to you to select the correct adjustment value when appropriate.
+
 5.6. Miscellaneous
 
 5.6.1. "DEVICE=DEVICENAME/K" and "VOLUME=VOLUMENAME/K"
 
-The smbfs program can announce itself as an AmigaDOS file system by using
-one of two different methods.
+The smbfs program can announce itself as an AmigaDOS file system by using one
+of two different methods.
 
 The first method involves announcing itself only as a file system device. This
 should be sufficient in most cases but has a drawback in that the device will
@@ -630,8 +647,8 @@ icon.
 
 You tell smbfs to use a specific device name by using the "DEVICE" command
 line parameter, e.g. "DEVICE=SMBFS:". Note that device names must be unique,
-i.e. there must be no other device by the same name in the system; smbfs
-will report an error and exit if it finds one.
+i.e. there must be no other device by the same name in the system; smbfs will
+report an error and exit if it finds one.
 
 The second method involves announcing itself as a volume. This has the benefit
 of making the file system usable from Workbench since a disk icon will appear
@@ -641,23 +658,23 @@ You tell smbfs to use a specific volume name by using the "VOLUME" command
 line parameter, e.g. "VOLUME=Sourcery:".
 
 Both methods have advantages and drawbacks. The drawback of the "VOLUME"
-method is that it may deadlock the native Amiga Samba port as soon as the
-file system is mounted. The drawback of the "DEVICE" method is that the file
-system will not be usable from Workbench.
+method is that it may deadlock the native Amiga Samba port as soon as the file
+system is mounted. The drawback of the "DEVICE" method is that the file system
+will not be usable from Workbench.
 
 If you wish, you can combine both methods; this is the approach most other
 file systems use. And in fact, when you tell smbfs to add a volume it will
 also add a device to go along with it.
 
-The "VOLUME" and "DEVICE" keywords are optional; if you omit both, smbfs
-will pretend that you had used the "DEVICE=SMBFS:" parameter.
+The "VOLUME" and "DEVICE" keywords are optional; if you omit both, smbfs will
+pretend that you had used the "DEVICE=SMBFS:" parameter.
 
 5.6.2. "OMITHIDDEN/S"
 
 When requesting a directory listing, the file server may return some files and
-drawers tagged as being hidden. By default smbfs will not treat these
-"hidden" entries any different from the other directory entries, i.e. they are
-not hidden from view.
+drawers tagged as being hidden. By default smbfs will not treat these "hidden"
+entries any different from the other directory entries, i.e. they are not
+hidden from view.
 
 You can request that the hidden entries should be omitted from directory
 listings by using the "OMITHIDDEN" switch.
@@ -667,8 +684,8 @@ to open and examine it.
 
 5.6.3. "QUIET/S"
 
-When started from shell, the smbfs program will print a message as soon as
-the connection to the file server has been established.
+When started from shell, the smbfs program will print a message as soon as the
+connection to the file server has been established.
 
 If you do not want to see that message displayed, use the "QUIET" parameter.
 Please note that the smbfs program may still show error messages.
@@ -699,7 +716,7 @@ level greater than 0, e.g. "DEBUG=2". The larger the number you specify the
 more debugging output will be created.
 
 Note that unless you state which file the debug output should be written to,
-all debugging output will be sent to the shell.
+all debugging output will be sent to the shell window.
 
 If you launched the smbfs program from Workbench, debug output will be
 produced using the operating system's debug output functionality which
@@ -709,10 +726,10 @@ background.
 
 6. Known problems
 
-The design of smbfs follows the original file system concept behind the
-code which the "Sharity-Light" file system is based upon. And that is a
-Unix file system which differs from Amiga specific file systems in many
-ways which can lead to problems which are discussed briefly below:
+The design of smbfs follows the original file system concept behind the code
+which the "Sharity-Light" file system is based upon. And that is a Unix file
+system which differs from Amiga specific file systems in many ways which can
+lead to problems which are discussed briefly below:
 
    - Single threaded design
 
@@ -742,15 +759,14 @@ ways which can lead to problems which are discussed briefly below:
      even though it is empty or that for the same directory the same
      file may be reported twice in the listing.
 
-While there are no easy solutions for any of these problems, it does not
-mean that smbfs is unusable. You just have to be more careful when you
-use the file system. For example, if a directory's contents cannot be
-deleted due to one of the problems mentioned above, you might want to
-retry later.
+While there are no easy solutions for any of these problems, it does not mean
+that smbfs is unusable. You just have to be more careful when you use the file
+system. For example, if a directory's contents cannot be deleted due to one of
+the problems mentioned above, you might want to retry later.
 
-It should be noted that the problems described above are not inherent
-to the original file system design. It's just that transferring that
-design to an Amiga file system created the problems.
+It should be noted that the problems described above are not inherent to the
+original file system design. It's just that transferring that design to an
+Amiga file system created the problems.
 
 
 7. Credits
@@ -797,5 +813,5 @@ smbfs is distributed under the terms of the GNU General Public License
 (version 2). The source code should have accompanied this program; if it
 hasn't, please contact the author for a copy.
 
-The program was compiled using the SAS/C 6.58 compiler, with the Roadshow
-SDK providing for the TCP/IP stack API header files.
+The program was compiled using the SAS/C 6.58 compiler, with the Roadshow SDK
+providing for the TCP/IP stack API header files.

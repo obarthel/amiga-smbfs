@@ -1049,7 +1049,7 @@ smb_request_ok_with_payload (
 	}
 	else
 	{
-		D(("smb_request() returned %ld bytes\n", result));
+		LOG(("smb_request() returned %ld bytes\n", result));
 
 		/* Return 0 for success, rather than the number of
 		 * bytes received.
@@ -1234,7 +1234,7 @@ smb_proc_open (struct smb_server *server, const char *pathname, int len, int wri
 
 	ENTER();
 
-	D(("pathname = '%s'", escape_name(pathname)));
+	LOG(("pathname = '%s'\n", escape_name(pathname)));
 
 	/* Because the original code opened every file/directory in
 	 * read/write mode, we emulate the same behaviour. Why this
@@ -2745,7 +2745,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 				/* Skip directory entries whose names we cannot store. */
 				if(name_len >= (int)finfo->complete_path_size)
 				{
-					D(("name length >= %ld (skipping it)", finfo->complete_path_size));
+					LOG(("name length >= %ld (skipping it)\n", finfo->complete_path_size));
 
 					success = FALSE;
 					break;
@@ -2753,7 +2753,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 
 				if(name_len == 0)
 				{
-					D(("name length == 0 (skipping it)"));
+					LOG(("name length == 0 (skipping it)\n"));
 
 					success = FALSE;
 					break;
@@ -2779,7 +2779,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 
 				finfo->len = name_len;
 
-				D(("name = '%s', length=%ld, size=%ld",escape_name(finfo->complete_path),name_len,name_size));
+				LOG(("name = '%s', length=%ld, size=%ld\n",escape_name(finfo->complete_path),name_len,name_size));
 
 				#if DEBUG
 				{
@@ -2879,7 +2879,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 				/* Skip directory entries whose names we cannot store. */
 				if(name_len >= (int)finfo->complete_path_size)
 				{
-					D(("name length >= %ld (skipping it)", finfo->complete_path_size));
+					LOG(("name length >= %ld (skipping it)\n", finfo->complete_path_size));
 
 					success = FALSE;
 					break;
@@ -2887,7 +2887,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 
 				if(name_len == 0)
 				{
-					D(("name length == 0 (skipping it)"));
+					LOG(("name length == 0 (skipping it)\n"));
 
 					success = FALSE;
 					break;
@@ -2905,7 +2905,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 
 				finfo->len = name_len;
 
-				D(("name = '%s', length=%ld, size=%ld",escape_name(finfo->complete_path),name_len,name_size));
+				LOG(("name = '%s', length=%ld, size=%ld\n",escape_name(finfo->complete_path),name_len,name_size));
 
 				#if DEBUG
 				{
@@ -2934,7 +2934,7 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 			break;
 	}
 
-	D(("entry_length = %ld",(*entry_length_ptr)));
+	LOG(("entry_length = %ld\n",(*entry_length_ptr)));
 
 	RETURN(success);
 	return(success);
@@ -3192,7 +3192,7 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 						 */
 						const int grow_size_by = 16;
 
-						D(("increasing mask; old value = %ld new value = %ld",mask_buffer_size,len + grow_size_by));
+						LOG(("increasing mask; old value = %ld new value = %ld\n",mask_buffer_size,len + grow_size_by));
 
 						mask_buffer_size = len + grow_size_by;
 						SHOWVALUE(mask_buffer_size);
@@ -4709,7 +4709,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 		string_toupper(share_name);
 
-		D(("share_name = '%s'", escape_name(share_name)));
+		LOG(("share_name = '%s'\n", escape_name(share_name)));
 
 		if(server->unicode_enabled)
 			share_name_size = 2 * (share_name_len + 1);
@@ -4814,7 +4814,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		/* We need to allocate a larger packet buffer. */
 		packet_size = max_buffer_size;
 
-		D(("packet size updated to %ld bytes\n", packet_size));
+		LOG(("packet size updated to %ld bytes\n", packet_size));
 
 		free (server->transmit_buffer);
 
@@ -4843,7 +4843,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	if(8000 <= server->mount_data.given_max_xmit && server->mount_data.given_max_xmit < (int)max_buffer_size)
 	{
 		max_buffer_size = server->mount_data.given_max_xmit;
-		D(("maximum buffer size limited to %ld bytes\n", max_buffer_size));
+		LOG(("maximum buffer size limited to %ld bytes\n", max_buffer_size));
 	}
 
 	server->max_buffer_size = max_buffer_size;

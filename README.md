@@ -117,6 +117,16 @@ Note that the **smbfs** program may not quit immediately. It may have to wait un
 
 You may have to send more than one `Break` command to stop the **smbfs** program.
 
+### 4.3. Temporarily disabling the file system
+
+If, for example, you need to temporarily shut down the network, **smbfs** will be unable to do its job, at least until the network becomes operational again. In the mean time *Workbench* and other programs will keep accessing the file system and may get stuck.
+
+You can avoid most of these problems by temporarily disabling the file system until it can access the network again. For this to work, you need to start the **smbfs** program in the shell and use the `VOLUMENAME` option, which will make a disk icon appear in the *Workbench* window.
+
+To disable the file system, hit the `[Ctrl]+D` keys or use the `Break` command (e.g. `Break 10 D` if **smbfs** is running as process number 10).
+
+To re-enable the file system again, hit the `[Ctrl]+E` keys or use the `Break` command (e.g. `Break 10 E` if **smbfs** is running as process number 10).
+
 
 ## 5. Startup options
 

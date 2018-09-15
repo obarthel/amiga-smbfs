@@ -460,7 +460,7 @@ print_smb_data(struct line_buffer * lb,int num_data_bytes_left,const unsigned ch
 			/* Print the row offset (in bytes) at the start of the
 			 * output line.
 			 */
-			SPrintf(format_buffer,"%04lx:",row_offset);
+			LocalSNPrintf(format_buffer,sizeof(format_buffer),"%04lx:",row_offset);
 
 			copy_string_to_line_buffer(lb,format_buffer,5,0);
 
@@ -489,7 +489,7 @@ print_smb_data(struct line_buffer * lb,int num_data_bytes_left,const unsigned ch
 				/* Convert this data byte to hexadecimal
 				 * representation.
 				 */
-				SPrintf(format_buffer,"%02lx",c);
+				LocalSNPrintf(format_buffer,sizeof(format_buffer),"%02lx",c);
 
 				strcat(dword_buffer,format_buffer);
 				dword_buffer_len += 2;
@@ -586,7 +586,7 @@ convert_filetime_to_string(const unsigned long * qword)
 
 	tm = convert_filetime_to_tm(qword);
 
-	SPrintf(string,"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
+	LocalSNPrintf(string,sizeof(string),"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
 		tm->tm_year+1900,tm->tm_mon+1,tm->tm_mday,
 		tm->tm_hour,tm->tm_min,tm->tm_sec);
 
@@ -603,7 +603,7 @@ convert_smb_date_time_to_string(unsigned short smb_date,unsigned short smb_time)
 
 	tm = convert_smb_date_time_to_tm(smb_date,smb_time);
 
-	SPrintf(string,"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
+	LocalSNPrintf(string,sizeof(string),"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
 		tm->tm_year+1900,tm->tm_mon+1,tm->tm_mday,
 		tm->tm_hour,tm->tm_min,tm->tm_sec);
 
@@ -621,7 +621,7 @@ convert_utime_to_string(unsigned long utime)
 
 	tm = gmtime(&when);
 
-	SPrintf(string,"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
+	LocalSNPrintf(string,sizeof(string),"%ld-%02ld-%02ldT%02ld:%02ld:%02ldZ",
 		tm->tm_year+1900,tm->tm_mon+1,tm->tm_mday,
 		tm->tm_hour,tm->tm_min,tm->tm_sec);
 
@@ -978,7 +978,7 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 						{
 							char code_string[40];
 
-							SPrintf(code_string,"<%02lx%02ld>",unicode_char >> 8,unicode_char & 0xff);
+							LocalSNPrintf(code_string,sizeof(code_string),"<%02lx%02ld>",unicode_char >> 8,unicode_char & 0xff);
 
 							copy_string_to_line_buffer(&lb,code_string,strlen(code_string),output_offset);
 							output_offset += strlen(code_string);
@@ -2361,7 +2361,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 					{
 						char code_string[40];
 
-						SPrintf(code_string,"<%02lx%02ld>",unicode_char >> 8,unicode_char & 0xff);
+						LocalSNPrintf(code_string,sizeof(code_string),"<%02lx%02ld>",unicode_char >> 8,unicode_char & 0xff);
 
 						copy_string_to_line_buffer(&lb,code_string,strlen(code_string),output_offset);
 						output_offset += strlen(code_string);

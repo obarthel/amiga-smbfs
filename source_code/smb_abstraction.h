@@ -67,7 +67,7 @@ typedef struct smba_stat
 	unsigned		is_read_only:1;
 	unsigned		is_hidden:1;
 	unsigned		is_system:1;
-	unsigned		is_changed_since_last_archive:1;
+	unsigned		was_changed_since_last_archive:1;
 
 	unsigned long	size_low;
 	unsigned long	size_high;

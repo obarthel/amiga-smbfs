@@ -149,7 +149,7 @@ smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_p
 			 * NetBIOS session response, but for any command
 			 * these message types are invalid.
 			 */
-			D(("Invalid session header type 0x%02lx\n", netbios_session_buf[0]));
+			LOG(("Invalid session header type 0x%02lx\n", netbios_session_buf[0]));
 
 			(*error_ptr) = error_invalid_netbios_session;
 
@@ -165,7 +165,7 @@ smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_p
 		/* The length in the NetBIOS header is the raw data length (17 bits) */
 		if (netbios_session_payload_size > server->transmit_buffer_allocation_size)
 		{
-			D(("Received length (%ld) > max_xmit (%ld)!", netbios_session_payload_size, server->transmit_buffer_allocation_size));
+			LOG(("Received length (%ld) > max_xmit (%ld)!\n", netbios_session_payload_size, server->transmit_buffer_allocation_size));
 
 			(*error_ptr) = error_message_exceeds_buffer_size;
 
@@ -176,7 +176,7 @@ smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_p
 		result = receive_all (sock_fd, server->transmit_buffer, netbios_session_payload_size, error_ptr);
 		if (result < 0)
 		{
-			D(("recv error = %ld", (*error_ptr)));
+			LOG(("recv error = %ld\n", (*error_ptr)));
 			goto out;
 		}
 	}
