@@ -2573,3 +2573,10 @@ smbfs 1.181 (15.9.2018)
   file system is currently disabled.
 
 - Updated the documentation.
+
+
+smbfs 1.182 (19.9.2018)
+
+- Added the SETENV switch which should make it easier to stop, disable
+  and re-enable smbfs through shell scripts. Please note that this
+  feature only works if you start smbfs as a shell program.

@@ -159,6 +159,8 @@ QUIET/S
 RAISEPRIORITY/S
 SERVER=SERVERNAME/K
 SERVICE/A
+SESSIONSETUP/K
+SETENV/S
 TIMEOUT/N/K
 TRANSLATE=TRANSLATIONFILE/K
 TZ=TIMEZONEOFFSET/N/K
@@ -459,6 +461,34 @@ When started from shell, the **smbfs** program will print a message as soon as t
 connection to the file server has been established.
 
 If you do not want to see that message displayed, use the `QUIET` parameter. Please note that the **smbfs** program may still show error messages.
+
+#### 5.6.4. `SETENV/S`
+
+You may want to stop or disable/re-enabled a currently running **smbfs** program through the shell `Break` command, but it may be impractical to figure out which CLI process number is involved.
+
+This is where the `SETENV` switch can help. If enabled, a global environment variable will be set which can be used by script files to figure out which CLI process number the respective **smbfs** program uses. The environment variable will be deleted as soon as the **smbfs** program exits.
+
+The environment variable name will be `smbfs-process/<device name>`, e.g. `smbfs-process/smbfs0`, and it will contain the CLI process number which the `Break` command can make use of.
+
+You can find out which **smbfs** programs are currently running like so:
+
+<pre>
+1> List ENV:smbfs-process
+Directory "env:smbfs-process" on Wednesday 19-Sep-18 
+smbfs1                            3 ----rwed Today      10:43:16
+smbfs0                            2 ----rwed Today      10:43:13
+
+1> Echo "${smbfs-process/smbfs0}"
+8
+</pre>
+
+Stopping a program can then be accomplished as follows:
+
+<pre>
+1> Break 8
+</pre>
+
+**Note**: The `SETENV` switch only has an effect if you start the **smbfs** program from the shell.
 
 ### 5.7. Debugging, diagnostics and bug reports
 

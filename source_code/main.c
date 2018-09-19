@@ -562,6 +562,7 @@ main(void)
 		SWITCH	OmitHidden;
 		SWITCH	Quiet;
 		SWITCH	RaisePriority;
+		SWITCH	SetEnv;
 		KEY		ClientName;
 		KEY		ServerName;
 		KEY		DeviceName;
@@ -598,6 +599,7 @@ main(void)
 		"OMITHIDDEN/S,"
 		"QUIET/S,"
 		"RAISEPRIORITY/S,"
+		"SETENV/S,"
 		"CLIENT=CLIENTNAME/K,"
 		"SERVER=SERVERNAME/K,"
 		"DEVICE=DEVICENAME/K,"
@@ -1314,12 +1316,65 @@ main(void)
 		args.VolumeName,
 		args.TranslationFile))
 	{
+		char setenv_name[40];
+
 		Quiet = args.Quiet;
 
 		if(Locale != NULL)
 			SHOWVALUE(Locale->loc_GMTOffset);
 
+		/* This is where the CLI process number identifying
+		 * this smbfs instance goes.
+		 */
+		memset(setenv_name,0,sizeof(setenv_name));
+
+		/* Store the CLI process number of this smbfs
+		 * instance in an environment variable?
+		 */
+		if(Cli() != NULL && args.SetEnv)
+		{
+			const struct Process * this_process = (struct Process *)FindTask(NULL);
+			LONG which_cli = -1;
+			LONG max_cli;
+			LONG i;
+
+			/* Which CLI process number does this process use? */
+			Forbid();
+
+			max_cli = MaxCli();
+
+			for(i = 1 ; i <= max_cli ; i++)
+			{
+				if(FindCliProc(i) == this_process)
+				{
+					which_cli = i;
+					break;
+				}
+			}
+
+			Permit();
+
+			if(which_cli > 0)
+			{
+				char number[20];
+				int i, len;
+
+				LocalSNPrintf(number, sizeof(number),"%ld\n",which_cli);
+
+				LocalSNPrintf(setenv_name, sizeof(setenv_name),"smbfs-process/%b",DeviceNode->dol_Name);
+
+				for(i = 0, len = strlen(setenv_name) ; i < len ; i++)
+					setenv_name[i] = ToLower(setenv_name[i]);
+
+				SetVar(setenv_name,number,-1,GVF_GLOBAL_ONLY);
+			}
+		}
+
 		file_system_handler(args.RaisePriority,args.DeviceName,args.VolumeName,args.Service);
+
+		/* Clean up after the environment variable... */
+		if(setenv_name[0] != '\0')
+			DeleteVar(setenv_name,GVF_GLOBAL_ONLY);
 
 		result = RETURN_WARN;
 	}

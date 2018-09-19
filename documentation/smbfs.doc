@@ -204,6 +204,7 @@ parameters):
     SERVER=SERVERNAME/K
     SERVICE/A
     SESSIONSETUP/K
+    SETENV/S
     TIMEOUT/N/K
     TRANSLATE=TRANSLATIONFILE/K
     TZ=TIMEZONEOFFSET/N/K
@@ -690,6 +691,38 @@ connection to the file server has been established.
 If you do not want to see that message displayed, use the "QUIET" parameter.
 Please note that the smbfs program may still show error messages.
 
+5.6.4. "SETENV/S"
+
+You may want to stop or disable/re-enabled a currently running smbfs program
+through the shell "Break" command, but it may be impractical to figure out
+which CLI process number is involved.
+
+This is where the "SETENV" switch can help. If enabled, a global environment
+variable will be set which can be used by script files to figure out which
+CLI process number the respective smbfs program uses. The environment
+variable will be deleted as soon as the smbfs program exits.
+
+The environment variable name will be "smbfs-process/<device name>", e.g.
+"smbfs-process/smbfs0", and it will contain the CLI process number which
+the "Break" command can make use of.
+
+You can find out which smbfs programs are currently running like so:
+
+   1> List ENV:smbfs-process
+   Directory "env:smbfs-process" on Wednesday 19-Sep-18 
+   smbfs1                            3 ----rwed Today      10:43:16
+   smbfs0                            2 ----rwed Today      10:43:13
+
+   1> Echo "${smbfs-process/smbfs0}"
+   8
+
+Stopping a program can then be accomplished as follows:
+
+   1> Break 8
+
+Note: the "SETENV" switch only has an effect if you start the smbfs program
+from the shell.
+
 5.7. Debugging, diagnostics and bug reports
 
 The smbfs program may not work as expected, and in order to help figuring out
@@ -699,7 +732,7 @@ supplied along with the "normal" version you are using.
 This special debug-enabled smbfs program ("smbfs.debug") can produce
 diagnostic and progress report information which may be stored in a log file.
 
-#### 5.7.1. "DEBUGFILE/K"
+5.7.1. "DEBUGFILE/K"
 
 If you want to capture the debug output of the smbfs program and have it
 stored in a file for reference, please state the name of the file here, e.g.
