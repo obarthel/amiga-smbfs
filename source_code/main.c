@@ -3888,7 +3888,7 @@ escape_name(const TEXT * name)
 /****************************************************************************/
 
 /* Convert a BCPL string into a standard NUL-terminated 'C' string. */
-static void
+static int
 convert_from_bcpl_to_c_string(STRPTR cstring,int cstring_size,const void * bstring)
 {
 	const TEXT * from = bstring;
@@ -3909,6 +3909,8 @@ convert_from_bcpl_to_c_string(STRPTR cstring,int cstring_size,const void * bstri
 
 		cstring[len] = '\0';
 	}
+
+	return(len);
 }
 
 /* Convert a NUL-terminated 'C' string into a BCPL string. */
@@ -3997,9 +3999,10 @@ get_next_path_segment(
 		/* If there's a leading ":" or "/" character,
 		 * it means that this is not a path delimiter
 		 * but a control character instead. We return
-		 * that control character as is. Note that the
-		 * ":" only has meaning if it is the very first
-		 * character of the path string.
+		 * that control character as is.
+		 *
+		 * Note that the ":" only has meaning if it is
+		 * the very first character of the path string.
 		 */
 		if((c == ':' && offset == 0) || c == '/')
 		{
@@ -4008,7 +4011,11 @@ get_next_path_segment(
 			/* Return this as the next segment. */
 			if(segment_size > 0)
 			{
-				if(segment_size > 1)
+				/* This is for the terminating NUL byte. */
+				segment_size--;
+
+				/* Can we store the single control character? */
+				if(segment_size > 0)
 					(*segment++) = c;
 
 				(*segment) = '\0';
@@ -4036,15 +4043,20 @@ get_next_path_segment(
 
 					len = i - offset;
 
+					ASSERT( len > 0 );
+
 					(*segment_len_ptr) = len;
 
 					/* Return this as the next segment. */
 					if(segment_size > 0)
 					{
-						if(segment_size > 1)
-						{
-							segment_size--;
+						/* This is for the terminating NUL byte. */
+						segment_size--;
 
+						/* Can we store the path, or at least a part of it? */
+						if(segment_size > 0)
+						{
+							/* Don't copy more characters than will fit. */
 							if(segment_size < len)
 								len = segment_size;
 
@@ -4054,13 +4066,6 @@ get_next_path_segment(
 
 						(*segment) = '\0';
 					}
-
-					/* If the path ends with "/", skip the
-					 * trailing slash since nothing else
-					 * follows it.
-					 */
-					if(i+1 == path_len)
-						i++;
 
 					offset = i+1;
 					break;
@@ -4087,11 +4092,11 @@ static int
 build_full_path_name(
 	const TEXT *	parent_name,
 	const TEXT *	name,
+	int				name_len,
 	STRPTR *		result_ptr)
 {
 	int error = OK;
 	int parent_name_len;
-	int name_len;
 	STRPTR buffer;
 	STRPTR to;
 	int size;
@@ -4111,9 +4116,7 @@ build_full_path_name(
 
 	(*result_ptr) = NULL;
 
-	if(name != NULL)
-		name_len = strlen(name);
-	else
+	if(name == NULL)
 		name_len = 0;
 
 	/* A NULL parent name stands in for the ZERO lock,
@@ -4126,8 +4129,97 @@ build_full_path_name(
 
 	size = parent_name_len + 1;
 
+	/* The combined parent and path names may end up being shorter
+	 * than what we allocate memory for, but we'd rather play it
+	 * safe...
+	 */
 	if(name_len > 0)
-		size += name_len + 1;
+	{
+		BOOL name_changed = FALSE;
+		TEXT c;
+		int i;
+
+		/* Remove a trailing '/' since it has no meaning and
+		 * might just lead to trouble during parsing.
+		 */
+		if(name[name_len - 1] == '/' && name_len > 1)
+		{
+			if(name[name_len - 2] != '/')
+			{
+				name_len--;
+
+				name_changed = TRUE;
+			}
+		}
+
+		/* Remove a device, volume or assignment name from the path name.
+		 * If necessary, the path following the ':' character will be
+		 * retained.
+		 *
+		 * This process is necessary because the dos.library packet interface
+		 * will usually provide a FileLock along with the complete path name
+		 * of the file or drawer which must be interpreted relative to the
+		 * FileLock.
+		 *
+		 * In the simple case this would be, for example, a FileLock on the
+		 * "Workbench:Tools" directory and a path of name "Calculator". But
+		 * it is also possible for the path to contain a volume name or
+		 * assignment, e.g. a FileLock on "SYS:C" and a path name of "C:Dir".
+		 * In the latter case the FileLock already refers to the correct
+		 * parent directory and the device, volume or assignment must be
+		 * removed from the path, which in this case would replace "C:Dir"
+		 * with "Dir".
+		 */
+		for(i = 0 ; i < name_len ; i++)
+		{
+			c = name[i];
+
+			/* A path delimiter cannot be part of a volume, device or
+			 * assignment name, so we don't bother checking the remainder
+			 * of the path.
+			 */
+			if(c == '/')
+				break;
+
+			/* This is either a control character (the path name is
+			 * actually ":") or indicates the end of a volume, device
+			 * or assignment name.
+			 */
+			if(c == ':')
+			{
+				/* Remove the volume, device or assignment name if
+				 * there is one.
+				 */
+				if(i > 0)
+				{
+					name		+= i+1;
+					name_len	-= i+1;
+
+					name_changed = TRUE;
+				}
+
+				break;
+			}
+		}
+
+		#if DEBUG
+		{
+			if(name_changed)
+			{
+				TEXT printable_name[MAX_FILENAME_LEN+1];
+
+				ASSERT( name_len < (int)sizeof(printable_name) );
+
+				memmove(printable_name, name, name_len);
+				printable_name[name_len] = '\0';
+
+				D(("name changed to '%s'",escape_name(printable_name)));
+			}
+		}
+		#endif /* DEBUG */
+
+		size += 1 + name_len;
+	}
 
 	buffer = allocate_memory(size);
 	if(buffer == NULL)
@@ -4150,47 +4242,50 @@ build_full_path_name(
 	{
 		TEXT segment[MAX_FILENAME_LEN+1];
 		int segment_len;
-		int offset;
+		int offset, next_offset;
 
+		/* The parent directory name must be an absolute path. */
 		ASSERT( strncmp(buffer,SMB_ROOT_DIR_NAME,1) == SAME );
 
-		for(offset = 0 ; offset < name_len ; NOTHING)
+		for(offset = 0 ; offset < name_len ; offset = next_offset)
 		{
-			offset = get_next_path_segment(name,name_len,offset,segment,sizeof(segment),&segment_len);
+			next_offset = get_next_path_segment(name,name_len,offset,segment,sizeof(segment),&segment_len);
 
-			D(("segment = '%s', len=%ld, offset=%ld", segment, segment_len, offset));
+			D(("segment = '%s', len=%ld, offset=%ld -> %ld", segment, segment_len, offset, next_offset));
 
-			if(segment_len > 0)
+			/* Segment buffer overflow or something even weirder? */
+			if(segment_len == 0 || segment_len > (int)sizeof(segment))
 			{
-				/* Segment Buffer overflow? */
-				if(segment_len > (int)sizeof(segment))
-				{
+				if(segment_len == 0)
+					D(("segment path processing failed"));
+				else
 					D(("segment length %ld overflows buffer", segment_len));
 
-					error = ERROR_BUFFER_OVERFLOW;
-					goto out;
-				}
+				error = ERROR_BUFFER_OVERFLOW;
+				goto out;
+			}
 
-				/* Move up to the root directory? */
-				if (strcmp(segment,":") == SAME)
-				{
-					to = &buffer[1];
-					len = 1;
-				}
-				/* Move up to the parent directory? */
-				else if (strcmp(segment,"/") == SAME)
+			/* Move up to the root directory? Note that the ":" only has
+			 * this particular meaning if it is found as the first
+			 * character of the name.
+			 */
+			if (offset == 0 && strcmp(segment,":") == SAME)
+			{
+				to = &buffer[1];
+				len = 1;
+			}
+			/* Move up to the parent directory? */
+			else if (strcmp(segment,"/") == SAME)
+			{
+				/* Unless we are already at the root directory
+				 * level, try to find the parent of the current
+				 * path by looking for the last path separator.
+				 */
+				if(len > 1)
 				{
 					int i;
 
-					/* Are we already at the root directory level? */
-					if(len == 1)
-					{
-						D(("already at root level"));
-
-						/* Can't go any further. */
-						error = ERROR_OBJECT_NOT_FOUND;
-						goto out;
-					}
+					ASSERT( buffer[0] == SMB_PATH_SEPARATOR );
 
 					for(i = len-1 ; i >= 0 ; i--)
 					{
@@ -4199,11 +4294,11 @@ build_full_path_name(
 							/* Don't move above the root, e.g "\foo" must become "\". */
 							if(i == 0)
 							{
-								to = &buffer[i+1];
-								len = i+1;
+								to = &buffer[1];
+								len = 1;
 							}
-							/* Remove the final part of the path name, including
-							 * the path delimiter, e.g. "\foo\bar" must become "\foo".
+							/* Remove the final part of the path name, including the
+							 * path delimiter, e.g. "\foo\bar" must become "\foo".
 							 */
 							else
 							{
@@ -4215,36 +4310,46 @@ build_full_path_name(
 						}
 					}
 				}
-				/* Add the file/drawer name to the full path. */
+				/* Can't go any further. */
 				else
 				{
-					if(len == 1)
-					{
-						ASSERT( len + segment_len + 1 <= size );
-					}
-					else
-					{
-						/* Add a path delimiter. */
-						ASSERT( len + 1 + segment_len + 1 <= size );
+					D(("can't go any further up in the path"));
 
-						(*to++) = SMB_PATH_SEPARATOR;
-						len++;
-					}
-
-					memmove(to,segment,segment_len);
-					to += segment_len;
-
-					len += segment_len;
+					error = ERROR_OBJECT_NOT_FOUND;
+					goto out;
 				}
-
-				#if DEBUG
-				{
-					buffer[len] = '\0';
-
-					D(("full path name = '%s', length = %ld", escape_name(buffer), len));
-				}
-				#endif /* DEBUG */
 			}
+			/* Add the file/drawer name to the full path. */
+			else
+			{
+				/* Is the current path representing the root directory? */
+				if(len == 1)
+				{
+					/* So there better be enough room to add this path. */
+					ASSERT( len + segment_len + 1 <= size );
+				}
+				else
+				{
+					/* We need to add a path delimiter. */
+					ASSERT( len + 1 + segment_len + 1 <= size );
+
+					(*to++) = SMB_PATH_SEPARATOR;
+					len++;
+				}
+
+				memmove(to,segment,segment_len);
+				to += segment_len;
+
+				len += segment_len;
+			}
+
+			#if DEBUG
+			{
+				buffer[len] = '\0';
+
+				D(("full path name = '%s', length = %ld", escape_name(buffer), len));
+			}
+			#endif /* DEBUG */
 		}
 	}
 
@@ -4730,58 +4835,6 @@ file_is_invalid(const struct FileNode * fn,int * error_ptr)
 
 /****************************************************************************/
 
-/* Remove a device, volume or assignment name from the path name.
- * If necessary, the path following the ':' character will be copied
- * to the beginning of the string, removing it, and the name length
- * will be adjusted accordingly.
- *
- * This function is needed because the dos.library packet interface
- * will usually provide a FileLock along with the complete path name
- * of the file or drawer which must be interpreted relative to the
- * FileLock.
- *
- * In the simple case this would be, for example, a FileLock on the
- * "Workbench:Tools" directory and a path of name "Calculator". But
- * it is also possible for the path to contain a volume name or
- * assignment, e.g. a FileLock on "SYS:C" and a path name of "C:Dir".
- * In the latter case the FileLock already refers to the correct
- * parent directory and the device, volume or assignment must be
- * removed from the path, which in this case would replace "C:Dir"
- * with "Dir".
- */
-static void
-remove_device_name_from_path(TEXT * name, int * name_len_ptr)
-{
-	int name_len;
-	int i;
-
-	ASSERT( name != NULL && name_len_ptr != NULL );
-
-	name_len = (*name_len_ptr);
-
-	for(i = 0 ; i < name_len ; i++)
-	{
-		/* Stop at a path delimiter. A path delimiter
-		 * cannot be part of a device name.
-		 */
-		if(name[i] == '/')
-			break;
-
-		/* Remove the device/volume/assignment name
-		 * including the ':' character.
-		 */
-		if(name[i] == ':' && i > 0)
-		{
-			name_len -= i+1;
-
-			memmove(name,&name[i+1],name_len+1);
-
-			(*name_len_ptr) = name_len;
-			break;
-		}
-	}
-}
-
 /****************************************************************************/
 
 /* Check if the name of a file or drawer contains MS-DOS
@@ -5021,13 +5074,7 @@ Action_DeleteObject(
 	 * BCPL format and needs to be converted into
 	 * 'C' format.
 	 */
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	/* The SMB_COM_DELETE command supports deleting sets
 	 * of matching files/drawers through wildcards. Only
@@ -5053,7 +5100,7 @@ Action_DeleteObject(
 			goto out;
 	}
 
-	error = build_full_path_name(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_name);
 	if(error != OK)
 		goto out;
 
@@ -5165,6 +5212,7 @@ Action_DeleteObject(
 	SHOWMSG("done.");
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -5218,13 +5266,7 @@ Action_CreateDir(
 	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
 		goto out;
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	/* Do not allow for a directory to be created whose
 	 * name contains MS-DOS wildcard characters. This will
@@ -5245,7 +5287,7 @@ Action_CreateDir(
 			goto out;
 	}
 
-	error = build_full_path_name(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_name);
 	if(error != OK)
 		goto out;
 
@@ -5307,6 +5349,7 @@ Action_CreateDir(
 
 	full_name = NULL;
 	ln = NULL;
+	error = OK;
 
  out:
 
@@ -5354,13 +5397,7 @@ Action_LocateObject(
 	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
 		goto out;
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if(NOT ServerData->server.unicode_enabled)
 	{
@@ -5375,7 +5412,7 @@ Action_LocateObject(
 		goto out;
 	}
 
-	error = build_full_path_name(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_name);
 	if(error != OK)
 		goto out;
 
@@ -5406,6 +5443,7 @@ Action_LocateObject(
 
 	full_name = NULL;
 	ln = NULL;
+	error = OK;
 
  out:
 
@@ -5515,6 +5553,7 @@ Action_CopyDir(
 
 	full_name = NULL;
 	ln = NULL;
+	error = OK;
 
  out:
 
@@ -5726,13 +5765,7 @@ Action_SetProtect(
 	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
 		goto out;
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if(NOT ServerData->server.unicode_enabled)
 	{
@@ -5741,7 +5774,7 @@ Action_SetProtect(
 			goto out;
 	}
 
-	error = build_full_path_name(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_name);
 	if(error != OK)
 		goto out;
 
@@ -5833,6 +5866,7 @@ Action_SetProtect(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -5888,13 +5922,7 @@ Action_RenameObject(
 		goto out;
 	}
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
 
 	/* The SMB_COM_RENAME command supports renaming through
 	 * wildcards. Only the last part of the path (the name
@@ -5922,7 +5950,7 @@ Action_RenameObject(
 	if(CANNOT get_parent_name(source_lock, user, &parent_name, &error))
 		goto out;
 
-	error = build_full_path_name(parent_name,name,&full_source_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_source_name);
 	if(error != OK)
 		goto out;
 
@@ -5937,13 +5965,7 @@ Action_RenameObject(
 		goto out;
 	}
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
 
 	if(name_contains_wildcard_characters(name))
 	{
@@ -5967,7 +5989,7 @@ Action_RenameObject(
 	if(CANNOT get_parent_name(destination_lock, user, &parent_name, &error))
 		goto out;
 
-	error = build_full_path_name(parent_name,name,&full_destination_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_destination_name);
 	if(error != OK)
 		goto out;
 
@@ -6019,6 +6041,7 @@ Action_RenameObject(
 		restart_directory_scanning(user,parent_source_name);
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -6132,6 +6155,7 @@ Action_Info(
 	LONG *					error_ptr)
 {
 	LONG result = DOSFALSE;
+	LONG disk_info_error;
 	int error = OK;
 
 	ENTER();
@@ -6150,7 +6174,9 @@ Action_Info(
 	if(CANNOT get_parent_name(lock, user, NULL, &error))
 		goto out;
 
-	result = Action_DiskInfo(id,error_ptr);
+	result = Action_DiskInfo(id,&disk_info_error);
+
+	error = disk_info_error;
 
  out:
 
@@ -6368,6 +6394,7 @@ Action_ExamineObject(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
 	D(("fib->fib_FileName = \"%b\"",MKBADDR(fib->fib_FileName)));
 	SHOWVALUE(fib->fib_DirEntryType);
@@ -6705,6 +6732,7 @@ Action_ExamineNext(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -7311,6 +7339,7 @@ Action_ExamineAll(
 	SHOWMSG("ok");
 
 	call_exall_again = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -7387,6 +7416,7 @@ Action_ExamineAllEnd(
 	eac->eac_LastKey = (ULONG)-1;
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -7451,13 +7481,7 @@ Action_Find(
 	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
 		goto out;
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	/* Do not allow MS-DOS wildcard characters to be used
 	 * when creating a new file.
@@ -7496,7 +7520,7 @@ Action_Find(
 		goto out;
 	}
 
-	error = build_full_path_name(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_name);
 	if(error != OK)
 		goto out;
 
@@ -7646,6 +7670,7 @@ Action_Find(
 
 	full_name = NULL;
 	fn = NULL;
+	error = OK;
 
  out:
 
@@ -7701,6 +7726,8 @@ Action_Read(
 		add_64_plus_32_to_64(&fn->fn_OffsetQuad, result, &fn->fn_OffsetQuad);
 	}
 
+	error = OK;
+
  out:
 
 	(*error_ptr) = error;
@@ -7755,6 +7782,8 @@ Action_Write(
 
 		add_64_plus_32_to_64(&fn->fn_OffsetQuad, result, &fn->fn_OffsetQuad);
 	}
+
+	error = OK;
 
  out:
 
@@ -7818,6 +7847,7 @@ Action_End(
 	free_memory(found);
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -8091,13 +8121,7 @@ Action_SetDate(
 	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
 		goto out;
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if(NOT ServerData->server.unicode_enabled)
 	{
@@ -8106,7 +8130,7 @@ Action_SetDate(
 			goto out;
 	}
 
-	error = build_full_path_name(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_name);
 	if(error != OK)
 		goto out;
 
@@ -8174,6 +8198,7 @@ Action_SetDate(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -8342,6 +8367,7 @@ Action_ExamineFH(
 	#endif /* DEBUG */
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -8402,6 +8428,7 @@ Action_ParentFH(
 
 	parent_dir_name = NULL;
 	ln = NULL;
+	error = OK;
 
  out:
 
@@ -8474,6 +8501,7 @@ Action_CopyDirFH(
 
 	full_name = NULL;
 	ln = NULL;
+	error = OK;
 
  out:
 
@@ -8544,6 +8572,7 @@ Action_FHFromLock(
 
 	AddTail((struct List *)&FileList,(struct Node *)fn);
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -8561,7 +8590,7 @@ Action_RenameDisk(
 	LONG *			error_ptr)
 {
 	LONG result = DOSFALSE;
-	int error = OK;
+	int error;
 	STRPTR old_name;
 	STRPTR new_name;
 	const TEXT * name;
@@ -8628,6 +8657,7 @@ Action_RenameDisk(
 		send_disk_change_notification(IECLASS_DISKINSERTED);
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -8807,6 +8837,7 @@ Action_ChangeMode(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -8825,7 +8856,7 @@ Action_WriteProtect(
 	LONG *	error_ptr)
 {
 	LONG result = DOSFALSE;
-	int error = OK;
+	int error;
 
 	ENTER();
 
@@ -8875,6 +8906,7 @@ Action_WriteProtect(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -8946,13 +8978,7 @@ Action_SetComment(
 	if(CANNOT get_parent_name(parent, user, &parent_name, &error))
 		goto out;
 
-	convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
-	name_len = strlen(name);
-
-	/* Remove a device, volume or assignment name
-	 * from the path name.
-	 */
-	remove_device_name_from_path(name, &name_len);
+	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
 	if(NOT ServerData->server.unicode_enabled)
 	{
@@ -8961,7 +8987,7 @@ Action_SetComment(
 			goto out;
 	}
 
-	error = build_full_path_name(parent_name,name,&full_name);
+	error = build_full_path_name(parent_name,name,name_len,&full_name);
 	if(error != OK)
 		goto out;
 
@@ -8984,6 +9010,7 @@ Action_SetComment(
 
 	/* All this work and we're only doing something very silly... */
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -9063,6 +9090,7 @@ Action_LockRecord(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -9111,6 +9139,7 @@ Action_FreeRecord(
 	}
 
 	result = DOSTRUE;
+	error = OK;
 
  out:
 
@@ -9119,6 +9148,81 @@ Action_FreeRecord(
 	RETURN(result);
 	return(result);
 }
+
+/****************************************************************************/
+
+#if defined(ACTION_FILESYSTEM_ATTR)
+
+static LONG
+Action_FilesystemAttr(
+	struct TagItem *	args,
+	LONG *				error_ptr)
+{
+	LONG result = DOSFALSE;
+	struct TagItem * tags = args;
+	struct TagItem * ti;
+	ULONG * data;
+	ULONG length;
+	LONG error = OK;
+
+	ENTER();
+
+	while((ti = NextTagItem(&tags)) != NULL)
+	{
+		data = (ULONG *)ti->ti_Data;
+
+		switch(ti->ti_Tag)
+		{
+			case FSA_MaxFileNameLengthR:
+
+				(*data) = MaxNameLen;
+				break;
+
+			case FSA_DOSTypeR:
+
+				(*data) = VolumeNode->dol_misc.dol_volume.dol_DiskType;
+				break;
+
+			case FSA_VersionNumberR:
+
+				(*data) = (((ULONG)VERSION) << 16) | REVISION;
+				break;
+
+			case FSA_VersionStringR:
+
+				length = GetTagData(FSA_VersionStringR_Len,0,args);
+				if(length > 0)
+					strlcpy((char *)data,VERS " (" DATE ")",length);
+
+				break;
+
+			case FSA_VersionStringR_Len:
+
+				continue;
+
+			case FSA_HasRecycledEntriesR:
+
+				(*data) = FALSE;
+				break;
+
+			default:
+
+				error = ERROR_NOT_IMPLEMENTED;
+				goto out;
+		}
+	}
+
+	result = DOSTRUE;
+
+ out:
+
+	(*error_ptr) = error;
+
+	RETURN(result);
+	return(result);
+}
+
+#endif /* ACTION_FILESYSTEM_ATTR */
 
 /****************************************************************************/
 
@@ -9794,6 +9898,15 @@ file_system_handler(
 						res1 = -1;
 						res2 = ERROR_ACTION_NOT_KNOWN;
 						break;
+
+	#if defined(ACTION_FILESYSTEM_ATTR)
+
+					case ACTION_FILESYSTEM_ATTR:
+
+						res1 = Action_FilesystemAttr((struct TagItem *)dp->dp_Arg1,&res2);
+						break;
+
+	#endif /* ACTION_FILESYSTEM_ATTR */
 
 					default:
 

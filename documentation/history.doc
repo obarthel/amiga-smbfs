@@ -2580,3 +2580,22 @@ smbfs 1.182 (19.9.2018)
 - Added the SETENV switch which should make it easier to stop, disable
   and re-enable smbfs through shell scripts. Please note that this
   feature only works if you start smbfs as a shell program.
+
+
+smbfs 1.183 (13.10.2018)
+
+- Simplified the path name resolution code yet again, making it more
+  robust and integrating support for corner cases such as an unnecessary
+  "/" at the end of a path name. Verified that this actually produces the
+  results I expected.
+
+- All packet handling functions now set the secondary packet result
+  code to 0 if they succeed. This should not be necessary, but some
+  software unfortunately consults the secondary result to find out
+  if the file system operation was entirely successful rather than
+  first checking the primary result.
+
+- ACTION_INFO failed to properly indicate failure and also failed
+  to return a proper error code. Fixed.
+
+- Added support for the ACTION_FILESYSTEM_ATTR packet type.
