@@ -7805,6 +7805,8 @@ Action_End(
 	struct FileNode * found;
 	int error = OK;
 
+	ENTER();
+
 	if(file_system_disabled)
 	{
 		error = ERROR_NO_DISK;
@@ -7853,6 +7855,7 @@ Action_End(
 
 	(*error_ptr) = error;
 
+	RETURN(result);
 	return(result);
 }
 
