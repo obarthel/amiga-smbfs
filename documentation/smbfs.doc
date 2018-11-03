@@ -185,6 +185,8 @@ parameters):
 
     CACHE=CACHESIZE/N/K
     CASE=CASESENSITIVE/S
+    CHANGEUSERNAMECASE/K
+    CHANGEPASSWORDCASE/K
     CHANGECASE/S
     CLIENT=CLIENTNAME/K
     CP437/S
@@ -293,7 +295,36 @@ knows about the user name and password you want to use. As of this writing,
 smbfs can only be used for authenticating against a password server that is
 the same machine as the one on which you wish to access a share.
 
-5.1.4. "CHANGECASE/S"
+5.1.4. "CHANGEUSERNAMECASE/K"
+
+Many file servers require that the user name is provided in all-upper-case
+characters or they will refuse to grant you access. This is why smbfs
+defaults to convert the user name to all-upper-case characters.
+
+However, some file servers such as the Solaris/OpenSolaris/OpenIndiana SMB
+server require that the user name matches exactly and the conversion to
+all-upper-case characters will cause trouble.
+
+In order to disable the user name case conversion use the
+CHANGEUSERNAMECASE=NO option. If you omit the CHANGEUSERNAMECASE option
+altogether it will default to CHANGEUSERNAMECASE=YES.
+
+5.1.5. "CHANGEPASSWORDCASE/K"
+
+By default the password you provide with the "PASSWORD" option will not be
+changed before it is used for accessing the server's shared network file
+system.
+
+However, it may be required to change the password to all-uppercase characters
+before it can be used. If this is necessary, you should either provide the
+password in this form or use the "CHANGEPASSWORDCASE=YES" option, which will
+cause it to be translated to all upper case characters.
+
+Please note that the "CHANGEPASSWORDCASE" option will cause the "CHANGECASE"
+option to be ignored. If you omit the "CHANGEPASSWORDCASE" option, then the
+"CHANGECASE" option setting will be used instead.
+
+5.1.6. "CHANGECASE/S"
 
 By default the password you provide with the "PASSWORD" option will not be
 changed before it is used for accessing the server's shared network file
@@ -304,7 +335,7 @@ before it can be used. If this is necessary, you should either provide the
 password in this form or resort to the "CHANGECASE" option, which will cause
 it to be translated to all upper case characters.
 
-5.1.5. "DOMAIN=WORKGROUP/K"
+5.1.7. "DOMAIN=WORKGROUP/K"
 
 This option may be omitted, in which case the smbfs program will ask the file
 server about the work group which it is a member of. Should the server fail to
@@ -327,7 +358,7 @@ You may also use the "smbfs_domain" environment variable in place of the
 "smbfs_workgroup" variable. The two are aliases for one another, but smbfs
 will read only one of the two.
 
-5.1.6. "NETBIOS/S"
+5.1.8. "NETBIOS/S"
 
 Older server software such as "Microsoft Windows XP" may not respond to the
 requests of the smbfs program to connect to the shared network file system.
@@ -336,7 +367,7 @@ If the connection attempt fails immediately you may want to try the "NETBIOS"
 switch which tells the smbfs program to use an older protocol when trying to
 talk to the server.
 
-5.1.7. "CLIENT=CLIENTNAME/K"
+5.1.8. "CLIENT=CLIENTNAME/K"
 
 The smbfs program will attempt to connect to the file server by providing the
 name of the computer you connect from.
@@ -353,7 +384,7 @@ characters; it cannot be longer than 16 characters.
 Please note that the "CLIENT" parameter will be ignored unless the "NETBIOS"
 switch is used, too.
 
-5.1.8. "SERVER=SERVERNAME/K"
+5.1.10. "SERVER=SERVERNAME/K"
 
 smbfs will attempt to connect to the file server by providing the name you
 specified using the "SHARE" option.

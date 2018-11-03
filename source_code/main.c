@@ -161,7 +161,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static int LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, const TEXT * username, STRPTR opt_password, BOOL opt_changecase, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, const TEXT * device_name, const TEXT * volume_name, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -548,6 +548,45 @@ stack_usage_exit(const struct StackSwapStruct * stk)
 
 /****************************************************************************/
 
+/* Find out which switch keyword corresponds to TRUE or FALSE,
+ * and fall back onto a default value if no keyword was provided,
+ * or the keyword provided does not match what we have.
+ */
+static BOOL
+get_switch_status(const TEXT * value,BOOL default_value)
+{
+	BOOL result = default_value;
+
+	if(value != NULL)
+	{
+		const struct { const TEXT * key; BOOL value; } options[] =
+		{
+			{ "yes",	TRUE },
+			{ "true",	TRUE },
+			{ "on",		TRUE },
+			{ "no",		FALSE },
+			{ "false",	FALSE },
+			{ "off",	FALSE },
+			{ NULL,		0 }
+		};
+
+		int i;
+
+		for(i = 0 ; options[i].key != NULL ; i++)
+		{
+			if(Stricmp(value, options[i].key) == SAME)
+			{
+				result = options[i].value;
+				break;
+			}
+		}
+	}
+
+	return(result);
+}
+
+/****************************************************************************/
+
 /* This is the traditional main() program. */
 static LONG
 main(void)
@@ -557,6 +596,8 @@ main(void)
 		KEY		Workgroup;
 		KEY		UserName;
 		KEY		Password;
+		KEY		ChangeUserNameCase;
+		KEY		ChangePasswordCase;
 		SWITCH	ChangeCase;
 		SWITCH	CaseSensitive;
 		SWITCH	OmitHidden;
@@ -594,6 +635,8 @@ main(void)
 		"DOMAIN=WORKGROUP/K,"
 		"USER=USERNAME/K,"
 		"PASSWORD/K,"
+		"CHANGEUSERNAMECASE/K,"
+		"CHANGEPASSWORDCASE/K,"
 		"CHANGECASE/S,"
 		"CASE=CASESENSITIVE/S,"
 		"OMITHIDDEN/S,"
@@ -781,10 +824,14 @@ main(void)
 
 		args.UserName = str;
 
+		str = FindToolType(Icon->do_ToolTypes,"CHANGEUSERNAMECASE");
+		args.ChangeUserNameCase = (str != NULL) ? str : (STRPTR)"yes";
+
 		args.Password = FindToolType(Icon->do_ToolTypes,"PASSWORD");
 
-		if(FindToolType(Icon->do_ToolTypes,"CHANGECASE") != NULL)
-			args.ChangeCase = TRUE;
+		args.ChangePasswordCase = FindToolType(Icon->do_ToolTypes,"CHANGEPASSWORDCASE");
+		if(args.ChangePasswordCase == NULL && FindToolType(Icon->do_ToolTypes,"CHANGECASE") != NULL)
+			args.ChangePasswordCase = "yes";
 
 		if(FindToolType(Icon->do_ToolTypes,"DISABLEEXALL") != NULL)
 			args.DisableExAll = TRUE;
@@ -1127,6 +1174,14 @@ main(void)
 		D(("no user name given, using '%s' instead.", args.UserName));
 	}
 
+	/* Change the case of the user name? */
+	if(args.ChangeUserNameCase == NULL)
+		args.ChangeUserNameCase = "yes";
+
+	/* Change the case of the password? */
+	if(args.ChangePasswordCase == NULL && args.ChangeCase)
+		args.ChangePasswordCase = "yes";
+
 	/* Use the default if no device or volume name is given. */
 	if(args.DeviceName == NULL && args.VolumeName == NULL)
 	{
@@ -1236,12 +1291,14 @@ main(void)
 	D(("work group = '%s'.", args.Workgroup));
 	D(("user name = '%s'.", args.UserName));
 
+	D(("change user name case = %s", get_switch_status(args.ChangeUserNameCase, TRUE) ? "yes" : "no"));
+
 	if(args.Password != NULL)
 		D(("password = ..."));
 	else
 		D(("password = empty"));
 
-	D(("change case = %s", args.ChangeCase ? "yes" : "no"));
+	D(("change password case = %s", get_switch_status(args.ChangePasswordCase, FALSE) ? "yes" : "no"));
 	D(("unicode = '%s'", args.Unicode));
 	D(("protocol = '%s'", args.Protocol));
 	D(("netbios transport = '%s'", args.NetBIOSTransport ? "yes" : "no"));
@@ -1299,7 +1356,8 @@ main(void)
 		args.Workgroup,
 		args.UserName,
 		args.Password,
-		args.ChangeCase,
+		get_switch_status(args.ChangeUserNameCase, TRUE),
+		get_switch_status(args.ChangePasswordCase, FALSE),
 		args.ClientName,
 		args.ServerName,
 		cache_size,
@@ -3356,9 +3414,10 @@ setup(
 	const TEXT *	program_name,
 	const TEXT *	service,
 	const TEXT *	workgroup,
-	const TEXT *	username,
+	STRPTR			username,
 	STRPTR			opt_password,
-	BOOL			opt_changecase,
+	BOOL			opt_change_username_case,
+	BOOL			opt_change_password_case,
 	const TEXT *	opt_clientname,
 	const TEXT *	opt_servername,
 	int				opt_cachesize,
@@ -3495,8 +3554,15 @@ setup(
 		goto out;
 	}
 
+	/* Convert the user name into all-uppercase characters? */
+	if(opt_change_username_case)
+	{
+		for(i = 0 ; i < (int)strlen(username) ; i++)
+			username[i] = ToUpper(username[i]);
+	}
+
 	/* Convert the password into all-uppercase characters? */
-	if(opt_changecase)
+	if(opt_change_password_case)
 	{
 		for(i = 0 ; i < (int)strlen(opt_password) ; i++)
 			opt_password[i] = ToUpper(opt_password[i]);
@@ -9178,24 +9244,39 @@ Action_FilesystemAttr(
 		{
 			case FSA_MaxFileNameLengthR:
 
-				(*data) = MaxNameLen;
+				(*data) = MaxNameLen > 0 ? MaxNameLen : sizeof(((struct FileInfoBlock *)0)->fib_FileName)-1;
+
+				D(("FSA_MaxFileNameLengthR = %ld", (*data)));
+
 				break;
 
 			case FSA_DOSTypeR:
 
 				(*data) = VolumeNode->dol_misc.dol_volume.dol_DiskType;
+
+				D(("FSA_DOSTypeR = 0x%08lx", (*data)));
+
 				break;
 
 			case FSA_VersionNumberR:
 
 				(*data) = (((ULONG)VERSION) << 16) | REVISION;
+
+				D(("FSA_VersionNumberR = 0x%08lx", (*data)));
+
 				break;
 
 			case FSA_VersionStringR:
 
 				length = GetTagData(FSA_VersionStringR_Len,0,args);
+
+				D(("FSA_VersionStringR_Len = %ld", length));
+
 				if(length > 0)
+				{
 					strlcpy((char *)data,VERS " (" DATE ")",length);
+					D(("FSA_VersionStringR = \"%s\"", data));
+				}
 
 				break;
 
@@ -9206,6 +9287,9 @@ Action_FilesystemAttr(
 			case FSA_HasRecycledEntriesR:
 
 				(*data) = FALSE;
+
+				D(("FSA_HasRecycledEntriesR = %s", (*data) ? "TRUE" : "FALSE"));
+
 				break;
 
 			default:

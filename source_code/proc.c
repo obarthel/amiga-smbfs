@@ -510,7 +510,7 @@ smb_encode_dialect (byte * p, const byte * name, int len)
 static byte *
 smb_encode_ascii (byte * p, const byte * name, int len)
 {
-	(*p++) = 4;
+	(*p++) = 4; /* A NUL-terminated string follows. */
 
 	memcpy (p, name, len);
 	p[len] = '\0';
@@ -4213,7 +4213,10 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		p = smb_name_mangle (p, server->mount_data.server_name);
 		p = smb_name_mangle (p, server->mount_data.client_name);
 
-		smb_encode_smb_length (packet, (byte *) p - (byte *) (packet));
+		/* Careful: the SMB packet length does not include the
+		 *          size of the NetBIOS header itself.
+		 */
+		smb_encode_smb_length (packet, (byte *) p - (byte *) (packet + NETBIOS_HEADER_SIZE));
 
 		packet[0] = 0x81; /* SESSION REQUEST */
 

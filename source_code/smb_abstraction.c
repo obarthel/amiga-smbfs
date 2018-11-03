@@ -40,7 +40,7 @@ static int smba_setup_dircache (struct smba_server * server,int cache_size, int 
 
 static int
 smba_connect (
-	smba_connect_parameters_t *	p,
+	smba_connect_parameters_t *	connect_parameters,
 	struct sockaddr_in			server_ip_addr,
 	const char *				tcp_service_name,
 	int							use_E,
@@ -207,14 +207,14 @@ smba_connect (
 		goto error_occured;
 	}
 
-	strlcpy (data.service, p->service, sizeof(data.service));
+	strlcpy (data.service, connect_parameters->service, sizeof(data.service));
 
 	LOG(("service = '%s'\n",data.service));
 
 	string_toupper (data.service);
 
-	strlcpy (data.username, p->username, sizeof(data.username));
-	strlcpy (data.password, p->password, sizeof(data.password));
+	strlcpy (data.username, connect_parameters->username, sizeof(data.username));
+	strlcpy (data.password, connect_parameters->password, sizeof(data.password));
 
 	LOG(("user name = '%s'\n",data.username));
 
@@ -222,23 +222,23 @@ smba_connect (
 
 	LOG(("max transmit = %ld bytes\n",max_transmit));
 
-	strlcpy (data.server_name, p->server_name, sizeof(data.server_name));
-	strlcpy (data.client_name, p->client_name, sizeof(data.client_name));
+	strlcpy (data.server_name, connect_parameters->server_name, sizeof(data.server_name));
+	strlcpy (data.client_name, connect_parameters->client_name, sizeof(data.client_name));
 
 	LOG(("server name = '%s'\n",data.server_name));
 	LOG(("client name = '%s'\n",data.client_name));
 
 	if (data.server_name[0] == '\0')
 	{
-		if (!res->server.raw_smb && strlen (p->server_ipname) > 16)
+		if (!res->server.raw_smb && strlen (connect_parameters->server_ipname) > 16)
 		{
-			report_error("Server name '%s' is too long for NetBIOS (max %ld characters).",p->server_ipname,16);
+			report_error("Server name '%s' is too long for NetBIOS (max %ld characters).",connect_parameters->server_ipname,16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto error_occured;
 		}
 
-		strlcpy (data.server_name, p->server_ipname, sizeof(data.server_name));
+		strlcpy (data.server_name, connect_parameters->server_ipname, sizeof(data.server_name));
 	}
 
 	string_toupper (data.server_name);
@@ -1994,7 +1994,6 @@ smba_start(
 	}
 
 	strlcpy(username,opt_username,sizeof(username));
-	string_toupper(username);
 
 	if(opt_servername != NULL)
 	{

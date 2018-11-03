@@ -2599,3 +2599,26 @@ smbfs 1.183 (13.10.2018)
   to return a proper error code. Fixed.
 
 - Added support for the ACTION_FILESYSTEM_ATTR packet type.
+
+
+smbfs 1.184 (3.11.2018)
+
+- The maximum file name length reported by ACTION_FILESYSTEM_ATTR returned
+  the file name length limit, not the actual maximum length. Fixed.
+
+- If raw SMB transport is disabled and the NetBIOS session setup procedure
+  is used, the packet sent now has the correct length. Thanks go to
+  Robert Kidd who found the problem and provided a patch.
+
+- smbfs used to convert the user name provided to all-upper case characters.
+  As Robert Kidd could demonstrate, this is not a requirement for all
+  SMBv1/CIFS servers. The server can even deny access if the user
+  name does not match exactly, which is what the Solaris/OpenSolaris/OpenIndiana
+  SMB server dos. smbfs can now be told not to change the user name through the
+  CHANGEUSERNAMECASE=NO option. If omitted, this option defaults to
+  CHANGEUSERNAMECASE=YES, which used to be the default for all previous
+  smbfs versions.
+
+- For consistency the new CHANGEPASSWORDCASE option replaces and overrides
+  the old CHANGECASE option. If you omit the CHANGEPASSWORDCASE option,
+  the CHANGECASE option value will be used instead, which defaults to NO.
