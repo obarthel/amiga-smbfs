@@ -492,7 +492,7 @@ You can find out which **smbfs** programs are currently running like so:
 
 <pre>
 1> List ENV:smbfs-process
-Directory "env:smbfs-process" on Wednesday 19-Sep-18 
+Directory "env:smbfs-process" on Wednesday 19-Sep-18
 smbfs1                            3 ----rwed Today      10:43:16
 smbfs0                            2 ----rwed Today      10:43:13
 
@@ -550,16 +550,40 @@ While there are no easy solutions for any of these problems, it does not mean th
 It should be noted that the problems described above are not inherent to the original file system design. It's just that transferring that design to an Amiga file system created the problems.
 
 
-## 7. Credits
+## 7. Notes on smbfs version 2.1
+
+**smbfs** is ultimatively based upon code created by reverse-engineering the **SMB** protocol. This effort led to the **smbfs** kernel module which was included with **Linux** 2.0.1 in 1995.
+
+Subsequent work went into modifying the code, allowing it to be used as a file system on **NeXTSTEP** and various Unix versions (e.g. **NetBSD**, **Solaris** and **IRIX**) in the form of the 1996/1997 **Sharity** and **Sharity-Light** file systems. The Amiga **smbfs** is a port of **Sharity-Light**.
+
+Because **smbfs** is based upon reverse-engineered code, it was always difficult to maintain it, even for minor changes needed to fix small bugs or to improve overall compatibility. How **smbfs** went about when communicating with a remote file server, and why, would remain unclear because the documentation which could shed some light on these matters was unavailable until around 2009/2012.
+
+When I picked up development of **smbfs** again in 2016 I decided that I needed to know more about how the file system is supposed to work if I were ever going to be able make robust changes to the code.
+
+This is what led me to collecting more than 30 MB of documentation on **SMBv1**/**CIFS**, **NetBIOS** and the way in which Microsoft operating systems implemented these over the years.
+
+What insights I managed to gain from this collection allowed me to update and rewrite the **smbfs** code so that its functionality and data structures now reflect the official **SMBv1**/**CIFS** documentation. The idea is that with these changes in place, future maintenance and enhancements should be easier to perform and to add. I wish I would not have needed to write my own **SMB** protocol disassembler and stumble through so many blind alleys, but this is how it goes with **SMBv1**/**CIFS**...
+
+Now you know why it took almost two years to get from **smbfs** version 1.80 to version 2.1.
+
+
+## 8. Credits
 
 The **smbfs** file system is based upon prior work by Pål-Kristian Engstad, Volker Lendecke, Mark A. Shand, Donald J. Becker, Rick Sladkey, Fred N. van Kempen, Eric Kasten and Rudolf König. It is a direct descendant of the *Sharity-Light* file system written by Christian Starkjohann.
 
-Version 1.80 incorporates changes from the *MorphOS* smbfs version 50.3, which was kindly provided by Frank Mariak. The individual changes came from Harry Sintonen, David Gerber and Frank Mariak.
+Versions including 1.80 and beyond incorporate changes from the *MorphOS* smbfs version 50.3, which was kindly provided by Frank Mariak. The individual changes came from Harry Sintonen, David Gerber and Frank Mariak.
 
 The password encryption code was lifted from the *Samba* package. It was written by Andrew Tridgell and the Samba Team.
 
+The great majority of changes and bug fixes which found their way into version 2.1 are due to Hubert Maier who patiently tested the various attempts to address the problems he reported.
 
-## 8. Author
+Renaud Schweingruber kicked off the last stretch of the version 2.1 development work during 2017, encouraging me to complete the work I had begun.
+
+Much of the testing and feedback during the development of version 2.1 in Summer 2017 was performed by and came from the www.a1k.org forum members, who put each test version through its paces, on hardware which I would have never been able to test it. The rapid testing and feedback finally allowed version 2.1 to be released in 2017.
+
+Robert Kidd provided detailed information on how to make the **smbfs** client/server authentication work with **OpenSolaris**/**OpenIndiana**. The changes made allow **smbfs** not just to work better with **OpenSolaris**, but with other **SMBv1**/**CIFS** server software, too.
+
+## 9. Author
 
 The *Sharity-Light* source code was adapted, wrapped into an AmigaOS layer, subsequently debugged and enhanced by Olaf Barthel. If you wish to contact me, you can reach me at:
 
@@ -573,7 +597,7 @@ Or via e-mail:
 
 If you want to submit a bug report or an enhancement request, please enclose sufficient information to allow me to make sense of the problem. That includes debugging logs produced using the `DEBUG` and `DEBUGFILE` options.
 
-## 9. Source code
+## 10. Source code
 
 **smbfs** is distributed under the terms of the GNU General Public License (version 2). The source code should have accompanied this program; if it hasn't, please contact the author for a copy.
 
