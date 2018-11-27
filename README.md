@@ -577,9 +577,9 @@ The password encryption code was lifted from the *Samba* package. It was written
 
 The great majority of changes and bug fixes which found their way into version 2.1 are due to Hubert Maier who patiently tested the various attempts to address the problems he reported.
 
-Renaud Schweingruber kicked off the last stretch of the version 2.1 development work during 2017, encouraging me to complete the work I had begun.
+Renaud Schweingruber kicked off the last stretch of the version 2.1 development work during 2018, encouraging me to complete the work I had begun.
 
-Much of the testing and feedback during the development of version 2.1 in Summer 2017 was performed by and came from the www.a1k.org forum members, who put each test version through its paces, on hardware which I would have never been able to test it. The rapid testing and feedback finally allowed version 2.1 to be released in 2017.
+Much of the testing and feedback during the development of version 2.1 in Summer 2018 was performed by and came from the www.a1k.org forum members, who put each test version through its paces, on hardware which I would have never been able to test it. The rapid testing and feedback finally allowed version 2.1 to be released in 2018.
 
 Robert Kidd provided detailed information on how to make the **smbfs** client/server authentication work with **OpenSolaris**/**OpenIndiana**. The changes made allow **smbfs** not just to work better with **OpenSolaris**, but with other **SMBv1**/**CIFS** server software, too.
 
