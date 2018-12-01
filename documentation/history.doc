@@ -2629,3 +2629,19 @@ smbfs 2.1 (25.11.2018)
 - Even though not all the known issues have been addressed and resolved,
   in particular the AsyncWB/AmigaOS4 oddities which were hard to
   reproduce, it's time to finally make a release.
+
+
+smbfs 2.2 (1.12.2018)
+
+- The OS4 version could crash if no user name was provided and the builtin
+  default ("GUEST") was used by smbfs instead. Because this built-in default
+  was not meant to be modified by converting it to all-upper-case characters,
+  smbfs would crash. The default string remains, but it is no longer stored
+  as read-only.
+
+- Passwords, as processed by the SMB/NT encryption methods, cannot be longer
+  than 23 characters. Note that plain text passwords may still be longer.
+  Whether or not password encryption is supported cannot be guessed/detected
+  before the protocol negotiation has concluded. Note that you will probably
+  only ever encounter SMB servers which require password encryption, so
+  a sensible upper limit appears to be 23 characters.

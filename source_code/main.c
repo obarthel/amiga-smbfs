@@ -257,6 +257,14 @@ static BOOL					file_system_disabled;
 
 /****************************************************************************/
 
+/* This the default user name needed if no specific user name is provided.
+ * Because the user name may have to be converted to all-upper-case characters
+ * it must be writable (and not marked as "const").
+ */
+static TEXT guest_name[] = "GUEST";
+
+/****************************************************************************/
+
 #if defined(__amigaos4__)
 
 /* The AmigaOS 2.x/3.x version needs about 20000 bytes of stack,
@@ -279,7 +287,8 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 {
 	struct StackSwapStruct * stk = NULL;
 	APTR new_stack = NULL;
-	LONG new_stack_size = 20000;
+	LONG minimum_stack_size = 20000;
+	LONG new_stack_size = 0;
 	struct Process * this_process;
 	LONG result = RETURN_FAIL;
 
@@ -384,10 +393,10 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 	#else
 	{
 		/* Not enough stack size available? */
-		if(get_stack_size() < new_stack_size)
+		if(get_stack_size() < minimum_stack_size)
 		{
 			/* Make the new stack size a multiple of 32 bytes. */
-			new_stack_size = 32 + ((new_stack_size + 31UL) & ~31UL);
+			new_stack_size = 32 + ((minimum_stack_size + 31UL) & ~31UL);
 
 			/* Allocate the new stack swapping data structure
 			 * and the stack space separately.
@@ -430,7 +439,7 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 	if(stk != NULL)
 		FreeVec(stk);
 
-	if(new_stack != NULL)
+	if(new_stack != NULL && new_stack_size > 0)
 		FreeMem(new_stack,new_stack_size);
 
 	#if defined(__amigaos4__)
@@ -1169,7 +1178,7 @@ main(void)
 	/* Use the default if no user name is given. */
 	if(args.UserName == NULL)
 	{
-		args.UserName = "GUEST";
+		args.UserName = guest_name;
 
 		D(("no user name given, using '%s' instead.", args.UserName));
 	}
@@ -3556,17 +3565,11 @@ setup(
 
 	/* Convert the user name into all-uppercase characters? */
 	if(opt_change_username_case)
-	{
-		for(i = 0 ; i < (int)strlen(username) ; i++)
-			username[i] = ToUpper(username[i]);
-	}
+		string_toupper(username);
 
 	/* Convert the password into all-uppercase characters? */
 	if(opt_change_password_case)
-	{
-		for(i = 0 ; i < (int)strlen(opt_password) ; i++)
-			opt_password[i] = ToUpper(opt_password[i]);
-	}
+		string_toupper(opt_password);
 
 	/* Read the translation file, if possible. */
 	if(translation_file != NULL)
