@@ -257,8 +257,9 @@ In order to connect to an SMB share, the server requires that a user name is
 provided. If you omit the user name, the smbfs program will use "GUEST" as a
 replacement.
 
-If you do provide a user name, it must not be longer than 64 characters. The
-name you provide will be translated to all upper case characters.
+If you do provide a user name, it must not be longer than 63 characters.
+Unless you use the CHANGEUSERNAMECASE=NO option the name you provide will be
+translated to all upper case characters.
 
 You need not provide for a user name on the command line. Alternatively, you
 may configure an environment variable whose contents will be used instead. The
@@ -277,7 +278,15 @@ You may not need to provide a password in order to connect to an SMB share. If
 you omit it, the smbfs program will use an empty password.
 
 If you do need a password to go along with the user name, your password cannot
-be longer than 64 characters.
+be longer than 63 characters.
+
+If password encryption is supported by the server the usable length of the
+password will be limited to 23 characters.
+
+Whether or not password encryption is supported cannot be guessed/detected
+before the protocol negotiation has concluded. Note that you will probably
+only ever encounter SMB servers which require password encryption, so a
+sensible upper limit appears to be 23 characters.
 
 You need not provide for a password on the command line. Alternatively, you
 may configure an environment variable whose contents will be used instead. The
