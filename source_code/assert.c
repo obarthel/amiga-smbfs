@@ -362,7 +362,7 @@ static void __asm putch(register __d0 UBYTE c)
 
 #elif defined(__GNUC__) && defined(__amigaos4__)
 
-static void putch(UBYTE c)
+static void putch(UBYTE c, APTR unused)
 {
 	if(c != '\0')
 		kputc(c);

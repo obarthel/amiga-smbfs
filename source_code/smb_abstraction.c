@@ -1805,6 +1805,8 @@ smba_start(
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,
+	smba_connect_parameters_t *
+						smba_connect_par,
 	smba_server_t **	smba_server_ptr)
 {
 	smba_connect_parameters_t par;
@@ -2072,6 +2074,9 @@ smba_start(
 
 		goto out;
 	}
+
+	if(smba_connect_par != NULL)
+		(*smba_connect_par) = par;
 
 	(*smba_server_ptr) = the_server;
 

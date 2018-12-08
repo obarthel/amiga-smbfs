@@ -4373,43 +4373,26 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 		if(server->security_mode & NEGOTIATE_ENCRYPT_PASSWORDS)
 		{
+			char smb_password[15];
+
 			SHOWMSG("encrypted passwords required");
 
-			memset(oem_password,0,sizeof(oem_password));
-			strlcpy(oem_password,server->mount_data.password,sizeof(oem_password));
+			/* Maximum password length for smb_encrypt() is 14 characters, which
+			 * does not include the terminating NUL byte. The password will be
+			 * converted to all-upper-case characters prior to encryption which
+			 * is why we make a copy first.
+			 */
+			strlcpy(smb_password,server->mount_data.password,sizeof(smb_password));
 
 			smb_encrypt(oem_password,server->crypt_key,oem_password);
 			oem_password_len = 24;
 
-			/*
-			PRINTHEADER();
-			PRINTF(("password: "));
-			for(i = 0 ; i < 24 ; i++)
-				PRINTF(("%02lx ",oem_password[i]));
-			PRINTF(("\n"));
-			*/
-
-			memset(unicode_password,0,sizeof(unicode_password));
-			strlcpy(unicode_password,server->mount_data.password,sizeof(unicode_password));
-
-			smb_nt_encrypt(unicode_password,server->crypt_key,unicode_password);
+			/* Maximum password length for smb_nt_encrypt() is 128 characters, which
+			 * does not include the terminating NUL byte. The password provided
+			 * will not be changed prior to encryption.
+			 */
+			smb_nt_encrypt(server->mount_data.password,server->crypt_key,unicode_password);
 			unicode_password_len = 24;
-
-			/*
-			PRINTHEADER();
-			PRINTF(("unicode_password: "));
-			for(i = 0 ; i < 24 ; i++)
-				PRINTF(("%02lx ",unicode_password[i]));
-			PRINTF(("\n"));
-			*/
-
-			/*
-			PRINTHEADER();
-			PRINTF(("crypt_key: "));
-			for(i = 0 ; i < server->crypt_key_length ; i++)
-				PRINTF(("%02lx ",server->crypt_key[i]));
-			PRINTF(("\n"));
-			*/
 		}
 		else
 		{
@@ -4644,7 +4627,10 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			p += oem_password_len;
 
 			/* User name must be NUL-terminated. */
-			memcpy (p, server->mount_data.username, user_len+1);
+			if(user_len > 0)
+				memcpy (p, server->mount_data.username, user_len+1);
+			else
+				(*p) = 0;
 		}
 
 		result = smb_request_ok (server, SMBsesssetupX, 3, 0, error_ptr);

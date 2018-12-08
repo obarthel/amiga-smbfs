@@ -2645,3 +2645,47 @@ smbfs 2.2 (1.12.2018)
   before the protocol negotiation has concluded. Note that you will probably
   only ever encounter SMB servers which require password encryption, so
   a sensible upper limit appears to be 23 characters.
+
+
+smbfs 2.3 (8.12.2018)
+
+- Added the ADDVOLUME option, which defaults to "yes". If no volume name is
+  provided, smbfs will use the service name as the template, e.g. if you
+  connect to //server-name/pictures then the default volume name will
+  be "pictures". The idea is that if the file server allows this, you
+  should not need to start the smbfs program with any parameter other
+  than the service/share name and it should work out of the box.
+
+- Preparations for showing error messages when running as a Workbench
+  program would corrupt memory once the message was ready for display,
+  but this only happened in the AmigaOS4 build. As far as I can tell
+  this never worked correctly on AmigaOS4. Thanks go to Matthew Kille
+  who reported the problem!
+
+- Simplified the icon parameter processing used when running smbfs
+  as a Workbench program. The reworked code is now basically limited
+  to processing and setting up the same configuration data which the
+  shell command use employs. Both paths share the same configuration
+  data checking and handling.
+
+- Turns out that the ACTION_CURRENT_VOLUME function does need to return
+  the volume node, not the device node. Note to self: a 'struct DeviceList'
+  refers to a volume (DLT_VOLUME), whereas a 'struct DeviceNode' refers
+  to a device (DLT_DEVICE). See? This could have been easily been avoided :-/
+
+- Added more code documentation, especially for the various constants and
+  data structures defined and used in "main.c".
+
+- Reading from the file name translation file now performs better error
+  detection and reporting. If read errors should crop up, the error message
+  will now say so. If the file is shorter than required the error message
+  will reflect this.
+
+- Reworked the smb_proc_reconnect() function so that it does not end up
+  truncating the password before it is encrypted. This means that up to
+  63 characters of the password can be used to produce the encrypted
+  form, resolving problems with longer server passwords not quite
+  matching what you entered. However, since this long encrypted password
+  is still accompanied by the legacy encrypted form which truncates the
+  password to 14 characters (which are converted to all-upper-case
+  letters) there is no actual gain in terms of security...

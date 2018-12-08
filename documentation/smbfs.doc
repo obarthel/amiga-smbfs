@@ -183,6 +183,7 @@ smbfs program from Workbench, you can set these options as icon tool types.
 Here is how the options look like, in alphabetical order (as command line
 parameters):
 
+    ADDVOLUME/K
     CACHE=CACHESIZE/N/K
     CASE=CASESENSITIVE/S
     CHANGEUSERNAMECASE/K
@@ -223,9 +224,9 @@ information:
     1. The name or the IPv4 address of the file server and the name of
        the "share" (file system) you want to access.
     2. The user name required to access the "share" (file system),
-       unless the server does not need it.
+       unless the server does not need it ("guest" access).
     3. The password required to access the "share" (file system),
-       unless the server does not need it.
+       unless the server does not need it ("guest" access).
 
 The parameters relevant for this information are described below.
 
@@ -250,6 +251,11 @@ Finally, you need to tell the SMB server which service you want to connect to,
 which for the smbfs program should be the name of a shared network file
 system. In the example the name of the shared network file system would be
 "share-name".
+
+Unless you use the "VOLUMENAME" option (e.g. "VOLUMENAME=MyData"), smbfs will
+pick a volume name identical to the share name, e.g for "//nas:445/pictures"
+the volume name would be "pictures" and a disk icon named "pictures" will
+appear in the Workbench window.
 
 5.1.2. "USER=USERNAME/K"
 
@@ -279,14 +285,6 @@ you omit it, the smbfs program will use an empty password.
 
 If you do need a password to go along with the user name, your password cannot
 be longer than 63 characters.
-
-If password encryption is supported by the server the usable length of the
-password will be limited to 23 characters.
-
-Whether or not password encryption is supported cannot be guessed/detected
-before the protocol negotiation has concluded. Note that you will probably
-only ever encounter SMB servers which require password encryption, so a
-sensible upper limit appears to be 23 characters.
 
 You need not provide for a password on the command line. Alternatively, you
 may configure an environment variable whose contents will be used instead. The
@@ -676,39 +674,28 @@ is up to you to select the correct adjustment value when appropriate.
 
 5.6. Miscellaneous
 
-5.6.1. "DEVICE=DEVICENAME/K" and "VOLUME=VOLUMENAME/K"
+5.6.1. "DEVICE=DEVICENAME/K", "ADDVOLUME/K" and "VOLUME=VOLUMENAME/K"
 
-The smbfs program can announce itself as an AmigaDOS file system by using one
-of two different methods.
+By default the smbfs program will pick a unique file system device name such
+as "smbfs0:" and a volume name which is identical to the share name. For
+example, for "//192.168.0.1/pictures" the volume name would be "pictures"
+and a disk icon named "pictures" will appear in the Workbench window.
 
-The first method involves announcing itself only as a file system device. This
-should be sufficient in most cases but has a drawback in that the device will
-not be usable from Workbench since the file system will not appear as a disk
-icon.
+You may override the device name which smbfs will use, e.g. the "DEVICE=nas:"
+option will try to use "nas:" if possible. Please note that device names have
+to be unique and smbfs may refuse to use it if there is already a file system
+device of that name.
 
-You tell smbfs to use a specific device name by using the "DEVICE" command
-line parameter, e.g. "DEVICE=SMBFS:". Note that device names must be unique,
-i.e. there must be no other device by the same name in the system; smbfs will
-report an error and exit if it finds one.
+You can tell smbfs not to add a volume, which may be useful because the native
+Amiga Samba port can hang as soon as the file system is started. In such cases,
+use the "ADDVOLUME=NO" option. Please note that the "ADDVOLUME=NO" option will
+keep smbfs from showing the file system's disk icon in the Workbench window.
+If you omit the "ADDVOLUME" option, smbfs will pretend that "ADDVOLUME=YES"
+was in effect.
 
-The second method involves announcing itself as a volume. This has the benefit
-of making the file system usable from Workbench since a disk icon will appear
-for it.
-
-You tell smbfs to use a specific volume name by using the "VOLUME" command
-line parameter, e.g. "VOLUME=Sourcery:".
-
-Both methods have advantages and drawbacks. The drawback of the "VOLUME"
-method is that it may deadlock the native Amiga Samba port as soon as the file
-system is mounted. The drawback of the "DEVICE" method is that the file system
-will not be usable from Workbench.
-
-If you wish, you can combine both methods; this is the approach most other
-file systems use. And in fact, when you tell smbfs to add a volume it will
-also add a device to go along with it.
-
-The "VOLUME" and "DEVICE" keywords are optional; if you omit both, smbfs will
-pretend that you had used the "DEVICE=SMBFS:" parameter.
+If you want to use a specific volume name, use the "VOLUME" option, e.g.
+"VOLUME=Sourcery:". Otherwise a volume name derived from the share name will
+be used instead.
 
 5.6.2. "OMITHIDDEN/S"
 

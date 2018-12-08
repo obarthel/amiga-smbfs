@@ -159,8 +159,8 @@ size_t strlcat(char *dst, const char *src, size_t siz);
 
 /****************************************************************************/
 
-extern void smb_encrypt(unsigned char *passwd, unsigned char *c8, unsigned char *p24);
-extern void smb_nt_encrypt(unsigned char *passwd, unsigned char *c8, unsigned char *p24);
+extern void smb_encrypt(unsigned char *passwd, const unsigned char *c8, unsigned char *p24);
+extern void smb_nt_encrypt(const unsigned char *passwd, const unsigned char *c8, unsigned char *p24);
 
 /****************************************************************************/
 

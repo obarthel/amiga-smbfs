@@ -38,8 +38,8 @@ WARNINGS = \
 	-Wall -W -Wshadow -Wpointer-arith -Wsign-compare -Wmissing-prototypes \
 	-Wundef -Wbad-function-cast -Wmissing-declarations
 
-#OPTIONS = -DNDEBUG
-OPTIONS = -DDEBUG=1 -DDUMP_SMB=1
+OPTIONS = -DNDEBUG
+#OPTIONS = -DDEBUG=1 -DDUMP_SMB=1
 OPTIMIZE = -O3
 DEBUG = -ggdb
 

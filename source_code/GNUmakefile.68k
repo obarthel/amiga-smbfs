@@ -35,9 +35,9 @@ WARNINGS = \
 	-Wundef -Wbad-function-cast -Wmissing-declarations -Wconversion
 
 CPU = -m68020-60
-OPTIONS = -DNDEBUG -fno-builtin -Inetinclude -Iinclude
+OPTIONS = -fno-builtin -Inetinclude -Iinclude
 OPTIMIZE = -O2 -fomit-frame-pointer
-DEBUG = -g
+DEBUG = -DNDEBUG -g
 
 ###############################################################################
 
