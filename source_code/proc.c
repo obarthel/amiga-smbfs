@@ -1225,7 +1225,14 @@ smb_payload_size(const struct smb_server *server, int wct, int bcc)
  ****************************************************************************/
 
 int
-smb_proc_open (struct smb_server *server, const char *pathname, int len, int writable, int truncate_file, struct smb_dirent *entry,int * error_ptr)
+smb_proc_open (
+	struct smb_server *server,
+	const char *pathname,
+	int len,
+	int writable,
+	int truncate_file,
+	struct smb_dirent *entry,
+	int * error_ptr)
 {
 	int result = 0;
 	char *p;
@@ -4373,23 +4380,16 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 
 		if(server->security_mode & NEGOTIATE_ENCRYPT_PASSWORDS)
 		{
-			char smb_password[15];
-
 			SHOWMSG("encrypted passwords required");
 
 			/* Maximum password length for smb_encrypt() is 14 characters, which
-			 * does not include the terminating NUL byte. The password will be
-			 * converted to all-upper-case characters prior to encryption which
-			 * is why we make a copy first.
+			 * does not include the terminating NUL byte.
 			 */
-			strlcpy(smb_password,server->mount_data.password,sizeof(smb_password));
-
-			smb_encrypt(oem_password,server->crypt_key,oem_password);
+			smb_encrypt(server->mount_data.password,server->crypt_key,oem_password);
 			oem_password_len = 24;
 
 			/* Maximum password length for smb_nt_encrypt() is 128 characters, which
-			 * does not include the terminating NUL byte. The password provided
-			 * will not be changed prior to encryption.
+			 * does not include the terminating NUL byte.
 			 */
 			smb_nt_encrypt(server->mount_data.password,server->crypt_key,unicode_password);
 			unicode_password_len = 24;
@@ -4403,10 +4403,10 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			unicode_password_len = 0;
 		}
 
-		/* If in share level security then don't send a password now */
+		/* If in share level security then don't send a password just now, it will follow later. */
 		if((server->security_mode & NEGOTIATE_USER_SECURITY) == 0)
 		{
-			SHOWMSG("share level security; not sending a password or user name");
+			SHOWMSG("share level security; not sending a password or user name just now");
 
 			oem_password_len = 0;
 			unicode_password_len = 0;

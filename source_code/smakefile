@@ -57,13 +57,23 @@ VERSION = 2
  CPU =		any
 #CPU =		060 optschedule
  DEBUG =	line
-#DEBUG =	symbolflush noopt define=DEBUG define=DUMP_SMB
+#DEBUG =	symbolflush noopt
+
+###########################################################################
+
+# This enables full debugging support, which will significantly
+# increase the size of the program and also make it run slower.
+#
+# Note that the debug build requires the "code=far data=faronly"
+# option and linking against "lib:scnb.lib".
+# 
+#DEBUG_OPTIONS = define=DEBUG define=DUMP_SMB code=far data=faronly
 
 ###############################################################################
 
 CFLAGS = \
 	idlen=64 comnest streq strmerge nostkchk \
-	$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) code=far data=faronly \
+	$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) $(DEBUG_OPTIONS) \
 	params=register idir=netinclude idir=include \
 	ignore=306 gst=system_headers.gst
 
@@ -74,11 +84,13 @@ LFLAGS = \
 
 OBJS = \
 	main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o \
-	cp437.o cp850.o swap_stack_and_call.o
+	cp437.o cp850.o splay.o swap_stack_and_call.o
 
 ###############################################################################
 
-LIBS = lib:scnb.lib lib:amiga.lib lib:debug.lib
+# Note: if DEBUG_OPTIONS are enabled you will need against "lib:scnb.lib"
+#       rather than "lib:sc.lib".
+LIBS = lib:sc.lib lib:amiga.lib lib:debug.lib
 
 ###############################################################################
 
@@ -107,14 +119,14 @@ exall-example: exall-example.c
 assert.o : assert.c
 cp437.o : cp437.c
 cp850.o : cp850.c
-crypt.o : crypt.c system_headers.h assert.h quad_math.h smbfs.h
-dump_smb.o : dump_smb.c system_headers.h assert.h quad_math.h smbfs.h dump_smb.h
-main.o : main.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h cp437.h cp850.h errors.h dump_smb.h smbfs_rev.h
-proc.o : proc.c system_headers.h assert.h quad_math.h smbfs.h errors.h smbfs_rev.h
+crypt.o : crypt.c system_headers.h assert.h quad_math.h splay.h smbfs.h
+dump_smb.o : dump_smb.c system_headers.h assert.h quad_math.h splay.h smbfs.h dump_smb.h
+main.o : main.c system_headers.h assert.h quad_math.h splay.h smbfs.h smb_abstraction.h cp437.h cp850.h errors.h dump_smb.h smbfs_rev.h
+proc.o : proc.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smbfs_rev.h
 quad_math.o : quad_math.c quad_math.h
-smb_abstraction.o : smb_abstraction.c system_headers.h assert.h quad_math.h smbfs.h errors.h smb_abstraction.h
-sock.o : sock.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h dump_smb.h errors.h
-swap_stack_and_call.o : swap_stack_and_call.asm
+smb_abstraction.o : smb_abstraction.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smb_abstraction.h
+sock.o : sock.c system_headers.h assert.h quad_math.h splay.h smbfs.h smb_abstraction.h dump_smb.h errors.h
+splay.o : splay.c system_headers.h assert.h quad_math.h splay.h smbfs.h
 
 ###############################################################################
 

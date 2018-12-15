@@ -38,22 +38,36 @@ WARNINGS = \
 	-Wall -W -Wshadow -Wpointer-arith -Wsign-compare -Wmissing-prototypes \
 	-Wundef -Wbad-function-cast -Wmissing-declarations
 
-OPTIONS = -DNDEBUG
-#OPTIONS = -DDEBUG=1 -DDUMP_SMB=1
 OPTIMIZE = -O3
 DEBUG = -ggdb
 
 ###########################################################################
 
-CFLAGS = -mcrt=clib2 -D__NO_NET_API $(WARNINGS) $(OPTIMIZE) $(DEBUG) $(OPTIONS) \
-         -I. -I/V/include -I/usr/local/amiga/ppc-amigaos/sys-include -Iinclude -Inetinclude
+# For the standard version without any debugging support whatsoever,
+# use the following debug option.
+DEBUG_OPTIONS = -DNDEBUG
+
+# This enables full debugging support, which will significantly
+# increase the size of the program and also make it run slower.
+#DEBUG_OPTIONS = -DDEBUG=1 -DDUMP_SMB=1
+
+###########################################################################
+
+# This is useful only for cross-compilation. Do not set this variable
+# if you build smbfs natively under AmigaOS4.
+#INCLUDE_CROSS_COMPILE=-I/V/include -I/usr/local/amiga/ppc-amigaos/sys-include
+
+###########################################################################
+
+CFLAGS = -mcrt=clib2 -D__NO_NET_API $(WARNINGS) $(OPTIMIZE) $(DEBUG) \
+         $(DEBUG_OPTIONS) -I. $(INCLUDE_CROSS_COMPILE) -Iinclude -Inetinclude
 LFLAGS = -nostartfiles -nostdlib -L.
 
 ###########################################################################
 
 OBJS = \
 	main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o \
-	cp437.o cp850.o assert.o
+	cp437.o cp850.o splay.o assert.o
 
 ###########################################################################
 
@@ -76,13 +90,14 @@ exall-example: exall-example.c
 assert.o : assert.c
 cp437.o : cp437.c
 cp850.o : cp850.c
-crypt.o : crypt.c system_headers.h assert.h quad_math.h smbfs.h
-dump_smb.o : dump_smb.c system_headers.h assert.h quad_math.h smbfs.h dump_smb.h
-main.o : main.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h cp437.h cp850.h errors.h dump_smb.h smbfs_rev.h
-proc.o : proc.c system_headers.h assert.h quad_math.h smbfs.h errors.h smbfs_rev.h
+crypt.o : crypt.c system_headers.h assert.h quad_math.h splay.h smbfs.h
+dump_smb.o : dump_smb.c system_headers.h assert.h quad_math.h splay.h smbfs.h dump_smb.h
+main.o : main.c system_headers.h assert.h quad_math.h splay.h smbfs.h smb_abstraction.h cp437.h cp850.h errors.h dump_smb.h smbfs_rev.h
+proc.o : proc.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smbfs_rev.h
 quad_math.o : quad_math.c quad_math.h
-smb_abstraction.o : smb_abstraction.c system_headers.h assert.h quad_math.h smbfs.h errors.h smb_abstraction.h
-sock.o : sock.c system_headers.h assert.h quad_math.h smbfs.h smb_abstraction.h dump_smb.h errors.h
+smb_abstraction.o : smb_abstraction.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smb_abstraction.h
+sock.o : sock.c system_headers.h assert.h quad_math.h splay.h smbfs.h smb_abstraction.h dump_smb.h errors.h
+splay.o : splay.c system_headers.h assert.h quad_math.h splay.h smbfs.h
 
 ###########################################################################
 

@@ -38,6 +38,47 @@ static int smba_setup_dircache (struct smba_server * server,int cache_size, int 
 
 /*****************************************************************************/
 
+#ifdef USE_SPLAY_TREE
+
+/* This is used by the splay tree functions to compare individual
+ * key values. These key values are smba_file_t addresses.
+ */
+static int
+compare_files_by_address(const BYTE * a, const BYTE * b)
+{
+	int result;
+
+	if (a < b)
+		result = -1;
+	else if (a == b)
+		result = 0;
+	else
+		result = 1;
+
+	return(result);
+}
+
+#endif /* USE_SPLAY_TREE */
+
+/*****************************************************************************/
+
+static void
+init_open_file_list(smba_server_t *res)
+{
+	NewList((struct List *)&res->open_files);
+
+	#ifdef USE_SPLAY_TREE
+
+	splay_tree_init(&res->open_file_address_tree, (splay_key_compare_t)compare_files_by_address);
+
+	splay_tree_init(&res->open_file_name_tree, (splay_key_compare_t)compare_names);
+	res->open_file_name_tree.st_allow_duplicates = TRUE;
+
+	#endif /* USE_SPLAY_TREE */
+}
+
+/*****************************************************************************/
+
 static int
 smba_connect (
 	smba_connect_parameters_t *	connect_parameters,
@@ -168,9 +209,19 @@ smba_connect (
 			 * valid for a TCP service.
 			 */
 			n = strtol(tcp_service_name,&str,10);
-			if(str != tcp_service_name && (*str) == '\0' && 0 < n && n < 65536)
+			if(str != tcp_service_name && (*str) == '\0')
 			{
-				data.addr.sin_port = htons (n);
+				if(0 < n && n < 65536)
+				{
+					data.addr.sin_port = htons (n);
+				}
+				else
+				{
+					report_error("Port number '%s' is out of range.", tcp_service_name);
+
+					(*error_ptr) = EINVAL;
+					goto error_occured;
+				}
 			}
 			else
 			{
@@ -232,7 +283,7 @@ smba_connect (
 	{
 		if (!res->server.raw_smb && strlen (connect_parameters->server_ipname) > 16)
 		{
-			report_error("Server name '%s' is too long for NetBIOS (max %ld characters).",connect_parameters->server_ipname,16);
+			report_error("Server name '%s' is too long for NetBIOS (%ld characters are possible).",connect_parameters->server_ipname,16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto error_occured;
@@ -247,7 +298,7 @@ smba_connect (
 	{
 		if (!res->server.raw_smb && strlen (hostname) > 16)
 		{
-			report_error("Local host name '%s' is too long for NetBIOS (max %ld characters).", hostname, 16);
+			report_error("Local host name '%s' is too long for NetBIOS (%ld characters are possible).", hostname, 16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto error_occured;
@@ -259,7 +310,7 @@ smba_connect (
 
 	res->server.mount_data = data;
 
-	NewList((struct List *)&res->open_files);
+	init_open_file_list(res);
 
 	if (smb_proc_connect (&res->server, error_ptr) < 0)
 		goto error_occured;
@@ -401,8 +452,49 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 
 /*****************************************************************************/
 
+static void
+add_smba_file(smba_server_t * s, smba_file_t *f)
+{
+	AddTail ((struct List *)&s->open_files, (struct Node *)f);
+
+	#ifdef USE_SPLAY_TREE
+
+	f->splay_address_node.sn_key = f;
+	f->splay_address_node.sn_userdata = f;
+	splay_tree_add(&s->open_file_address_tree, &f->splay_address_node);
+
+	f->splay_name_node.sn_key = f->dirent.complete_path;
+	f->splay_name_node.sn_userdata = f;
+	splay_tree_add(&s->open_file_name_tree, &f->splay_name_node);
+
+	#endif /* USE_SPLAY_TREE */
+}
+
+/*****************************************************************************/
+
+static void
+remove_smba_file(smba_server_t * s, smba_file_t *f)
+{
+	Remove((struct Node *)f);
+
+	#ifdef USE_SPLAY_TREE
+
+	splay_tree_remove(&s->open_file_address_tree, NULL, (splay_key_t)f);
+	splay_tree_remove(&s->open_file_name_tree, &f->splay_name_node, f->splay_name_node.sn_key);
+
+	#endif /* USE_SPLAY_TREE */
+}
+
+/*****************************************************************************/
+
 int
-smba_open (smba_server_t * s, const char *name, int writable, int truncate_file, smba_file_t ** file, int * error_ptr)
+smba_open (
+	smba_server_t * s,
+	const char *name,
+	int writable,
+	int truncate_file,
+	smba_file_t ** file,
+	int * error_ptr)
 {
 	smba_file_t *f;
 	int result;
@@ -418,7 +510,7 @@ smba_open (smba_server_t * s, const char *name, int writable, int truncate_file,
 		goto out;
 	}
 
-	memset(f,0,sizeof(*f));
+	memset(f, 0, sizeof(*f));
 
 	f->dirent.complete_path = (char *)name;
 	f->dirent.len = strlen (name);
@@ -433,7 +525,7 @@ smba_open (smba_server_t * s, const char *name, int writable, int truncate_file,
 		goto out;
 	}
 
-	AddTail ((struct List *)&s->open_files, (struct Node *)f);
+	add_smba_file(s, f);
 	s->num_open_files++;
 
 	LOG(("file has been 'opened', number of open files = %ld\n",s->num_open_files));
@@ -541,54 +633,71 @@ write_attr (smba_file_t * f, int * error_ptr)
 
 /*****************************************************************************/
 
-void
-smba_close (smba_server_t * s, smba_file_t * f)
+static int
+file_is_valid(smba_server_t * s, const smba_file_t * f)
 {
-	smba_file_t * found;
-	smba_file_t * file;
+	int is_valid;
 
-	found = NULL;
+	#ifndef USE_SPLAY_TREE
 
-	for(file = (smba_file_t *)s->open_files.mlh_Head ;
+	const smba_file_t * file;
+
+	is_valid = FALSE;
+
+	for (file = (smba_file_t *)s->open_files.mlh_Head ;
 	    file->node.mln_Succ != NULL ;
 	    file = (smba_file_t *)file->node.mln_Succ)
 	{
-		if(file == f)
+		if (file == f)
 		{
-			found = f;
+			is_valid = TRUE;
 			break;
 		}
 	}
 
-	if(found != NULL)
+	#else
+
+	is_valid = (splay_tree_find(&s->open_file_address_tree, (splay_key_t)f) != NULL);
+
+	#endif /* USE_SPLAY_TREE */
+
+	return(is_valid);
+}
+
+/*****************************************************************************/
+
+void
+smba_close (smba_server_t * s, smba_file_t * f)
+{
+	if (file_is_valid(s, f))
 	{
 		int ignored_error;
 
-		Remove((struct Node *)found);
+		remove_smba_file(s, f);
 
-		if(found->attr_dirty)
-			write_attr(found, &ignored_error);
+		if(f->attr_dirty)
+			write_attr(f, &ignored_error);
 
-		if (found->dirent.opened)
+		if (f->dirent.opened)
 		{
-			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(found->dirent.complete_path), found->dirent.fileid));
+			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
 
 			/* Don't change the modification time. */
-			smb_proc_close (&found->server->server, found->dirent.fileid, -1, &ignored_error);
+			smb_proc_close (&f->server->server, f->dirent.fileid, -1, &ignored_error);
 		}
 
-		if (found->dircache != NULL)
+		if (f->dircache != NULL)
 		{
-			found->dircache->cache_for = NULL;
-			found->dircache->len = 0;
-			found->dircache = NULL;
+			f->dircache->cache_for = NULL;
+			f->dircache->len = 0;
+			f->dircache = NULL;
 		}
 
-		found->server->num_open_files--;
+		f->server->num_open_files--;
 
-		LOG(("file closed, number of open files = %ld\n",found->server->num_open_files));
+		LOG(("file closed, number of open files = %ld\n",f->server->num_open_files));
 
-		free (found);
+		free (f);
 	}
 	else
 	{
@@ -1042,6 +1151,8 @@ smba_lockrec (smba_file_t *f, long offset, long len, long mode, int unlocked, lo
 		goto out;
 	}
 
+	memset(rec_lock, 0, sizeof(*rec_lock));
+
 	rec_lock->offset = offset,
 	rec_lock->len = len;
 
@@ -1351,13 +1462,39 @@ invalidate_dircache (struct smba_server * server)
 
 /*****************************************************************************/
 
+static char *
+allocate_path_name(const smba_file_t * dir, const char *name, size_t * path_name_len_ptr)
+{
+	size_t dir_len = dir->dirent.len;
+	char * path;
+	size_t len;
+
+	len = strlen(name);
+
+	path = malloc (dir_len + 1 + len + 1);
+	if(path != NULL)
+	{
+		memcpy (path, dir->dirent.complete_path, dir_len);
+		path[dir_len] = DOS_PATHSEP;
+		memcpy(&path[dir_len], name, len+1); /* length includes terminating NUL character */
+
+		ASSERT( path_name_len_ptr != NULL );
+
+		(*path_name_len_ptr) = dir_len + 1 + len;
+	}
+
+	return(path);
+}
+
+/*****************************************************************************/
+
 int
 smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 {
 	struct smb_dirent entry;
 	int ignored_error;
 	char *path = NULL;
-	size_t len;
+	size_t path_len = 0;
 	int result;
 
 	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
@@ -1368,9 +1505,7 @@ smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 
 	entry.atime = entry.mtime = entry.ctime = get_current_time();
 
-	len = strlen(name);
-
-	path = malloc (len + 1 + dir->dirent.len + 1);
+	path = allocate_path_name(dir, name, &path_len);
 	if(path == NULL)
 	{
 		(*error_ptr) = ENOMEM;
@@ -1379,19 +1514,15 @@ smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 		goto out;
 	}
 
-	memcpy (path, dir->dirent.complete_path, dir->dirent.len);
-	path[dir->dirent.len] = DOS_PATHSEP;
-	memcpy(&path[dir->dirent.len+1], name, len+1); /* Length includes terminating NUL byte. */
-
 	if (!dir->server->server.prefer_core_protocol && dir->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
-		result = smb_proc_open (&dir->server->server, path, strlen(path), open_writable, truncate, &entry, error_ptr);
+		result = smb_proc_open (&dir->server->server, path, path_len, open_writable, truncate, &entry, error_ptr);
 		if(result < 0)
 			goto out;
 	}
 	else
 	{
-		result = smb_proc_create (&dir->server->server, path, strlen (path), &entry, error_ptr);
+		result = smb_proc_create (&dir->server->server, path, path_len, &entry, error_ptr);
 		if(result < 0)
 			goto out;
 	}
@@ -1415,18 +1546,14 @@ int
 smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 {
 	char *path = NULL;
-	int path_len;
-	int name_len;
+	size_t path_len = 0;
 	int result;
 
 	result = make_open (dir, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
-	name_len = strlen (name);
-	path_len = dir->dirent.len + 1 + name_len;
-
-	path = malloc (path_len + 1);
+	path = allocate_path_name(dir, name, &path_len);
 	if(path == NULL)
 	{
 		(*error_ptr) = ENOMEM;
@@ -1434,11 +1561,6 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 		result = -1;
 		goto out;
 	}
-
-	memcpy (path, dir->dirent.complete_path, dir->dirent.len);
-	path[dir->dirent.len] = DOS_PATHSEP;
-	memcpy (&path[dir->dirent.len + 1], name, name_len);
-	path[path_len] = '\0';
 
 	result = smb_proc_mkdir (&dir->server->server, path, path_len, error_ptr);
 	if(result < 0)
@@ -1454,11 +1576,41 @@ smba_mkdir (smba_file_t * dir, const char *name, int * error_ptr)
 
 /*****************************************************************************/
 
+/* Mark a file/directory as no longer valid, closing it if necessary. */
+static int
+invalidate_smba_file(smba_server_t * s, smba_file_t *f, const char *path, int * error_ptr)
+{
+	int result = 0;
+
+	if (f->dirent.opened)
+	{
+		/* Don't change the modification time. */
+		result = smb_proc_close (&s->server, f->dirent.fileid, -1, error_ptr);
+		if(result < 0)
+		{
+			LOG(("closing '%s' with file id %ld failed\n", escape_name(path), f->dirent.fileid));
+			goto out;
+		}
+
+		f->dirent.opened = FALSE;
+	}
+
+	f->is_valid = FALSE;
+
+ out:
+
+	return(result);
+}
+
+/*****************************************************************************/
+
 static int
 close_path (smba_server_t * s, const char *path, int * error_ptr)
 {
 	int result = 0;
 	smba_file_t *p;
+
+	#ifndef USE_SPLAY_TREE
 
 	for (p = (smba_file_t *)s->open_files.mlh_Head;
 	     p->node.mln_Succ != NULL;
@@ -1466,22 +1618,39 @@ close_path (smba_server_t * s, const char *path, int * error_ptr)
 	{
 		if (p->is_valid && compare_names(p->dirent.complete_path, path) == SAME)
 		{
-			if (p->dirent.opened)
-			{
-				/* Don't change the modification time. */
-				result = smb_proc_close (&s->server, p->dirent.fileid, -1, error_ptr);
-				if(result < 0)
-				{
-					LOG(("closing '%s' with file id %ld failed\n", escape_name(path), p->dirent.fileid));
-					break;
-				}
-
-				p->dirent.opened = FALSE;
-			}
-
-			p->is_valid = FALSE;
+			result = invalidate_smba_file(s, p, path, error_ptr);
+			if(result < 0)
+				break;
 		}
 	}
+
+	#else
+
+	struct splay_node * sn;
+
+	/* Find all files which match the same path name. */
+	sn = splay_tree_find(&s->open_file_name_tree, (splay_key_t)path);
+	if(sn != NULL)
+	{
+		/* Walk through all the files, marking them as no longer
+		 * valid and closing them, if necessary. Note that we
+		 * do not remove them from the list of open files, we just
+		 * mark them for reopening later, if needed.
+		 */
+		for((void)NULL ; sn != NULL ; sn = sn->sn_next)
+		{
+			p = sn->sn_userdata;
+
+			if (p->is_valid)
+			{
+				result = invalidate_smba_file(s, p, path, error_ptr);
+				if(result < 0)
+					break;
+			}
+		}
+	}
+
+	#endif /* USE_SPLAY_TREE */
 
 	return(result);
 }
@@ -1633,7 +1802,7 @@ smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr
 		goto out;
 	}
 
-	memset(the_dircache,0,sizeof(*the_dircache));
+	memset(the_dircache, 0, sizeof(*the_dircache));
 	the_dircache->cache_size = cache_size;
 
 	for (i = 0; i < the_dircache->cache_size; i++)
@@ -1755,7 +1924,7 @@ extract_service (
 
 	if (strlen (complete_service) > 63)
 	{
-		report_error("Server name is too long in '%s' (max %ld characters).",service,63);
+		report_error("Server name is too long in '%s' (%ld characters are possible).",service,63);
 
 		(*error_ptr) = ENAMETOOLONG;
 
@@ -1764,7 +1933,7 @@ extract_service (
 
 	if (strlen (share_start) > 255)
 	{
-		report_error("Share name is too long in '%s' (max %ld characters).",service,255);
+		report_error("Share name is too long in '%s' (%ld characters are possible).",service,255);
 
 		(*error_ptr) = ENAMETOOLONG;
 
@@ -1978,7 +2147,7 @@ smba_start(
 	{
 		if(strlen(opt_password) >= sizeof(password))
 		{
-			report_error("Password is too long (max %ld characters).", sizeof(password)-1);
+			report_error("Password is too long (%ld characters are possible).", sizeof(password)-1);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;
@@ -1989,7 +2158,7 @@ smba_start(
 
 	if(strlen(opt_username) >= sizeof(username))
 	{
-		report_error("User name '%s' is too long (max %ld characters).", username,sizeof(username)-1);
+		report_error("User name '%s' is too long (%ld characters are possible).", username,sizeof(username)-1);
 
 		(*error_ptr) = ENAMETOOLONG;
 		goto out;
@@ -2001,7 +2170,7 @@ smba_start(
 	{
 		if (!opt_raw_smb && strlen (opt_servername) > 16)
 		{
-			report_error("Server name '%s' is too long (max %ld characters).", opt_servername,16);
+			report_error("Server name '%s' is too long (%ld characters are possible).", opt_servername,16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;
@@ -2014,7 +2183,7 @@ smba_start(
 	{
 		if (!opt_raw_smb && strlen (opt_clientname) > 16)
 		{
-			report_error("Client name '%s' is too long (max %ld characters).", opt_clientname,16);
+			report_error("Client name '%s' is too long (%ld characters are possible).", opt_clientname,16);
 
 			(*error_ptr) = ENAMETOOLONG;
 			goto out;

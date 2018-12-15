@@ -40,27 +40,26 @@
 
 /****************************************************************************/
 
-static void permute (char *out, char *in, const unsigned char * const p, int n);
+static void permute (char *out, const char *in, const unsigned char * const p, int n);
 static void left_shift (char *d, int count, int n);
-static void concat (char *out, char *in1, char *in2, int l1, int l2);
-static void xor (char *out, char *in1, char *in2, int n);
-static void dohash (char *out, char *in, char *key, int forw);
-static void str_to_key (unsigned char *str, unsigned char *key);
-static void smbhash (unsigned char *out, const unsigned char *in, unsigned char *key, int forw);
-static void E_P16 (unsigned char *p14, unsigned char *p16);
-static void E_P24 (unsigned char *p21, const unsigned char *c8, unsigned char *p24);
-static int local_wcslen (short *str);
+static void concat (char *out, const char *in1, const char *in2, int l1, int l2);
+static void xor (char *out, const char *in1, const char *in2, int n);
+static void dohash (char *out, const char *in, const char *key, int forw);
+static void str_to_key (const unsigned char *str, unsigned char *key);
+static void smbhash (unsigned char *out, const unsigned char *in, const unsigned char *key, int forw);
+static void E_P16 (const unsigned char *p14, unsigned char *p16);
+static void E_P24 (const unsigned char *p21, const unsigned char *c8, unsigned char *p24);
 static int local_mbstowcs (short *dst, const unsigned char *src, int len);
 static void E_md4hash (const unsigned char *passwd, unsigned char *p16);
-static void smb_owf_encrypt (unsigned char *passwd, const unsigned char *c8, unsigned char *p24);
+static void smb_owf_encrypt (const unsigned char *passwd, const unsigned char *c8, unsigned char *p24);
 static unsigned long F (unsigned long X, unsigned long Y, unsigned long Z);
 static unsigned long G (unsigned long X, unsigned long Y, unsigned long Z);
 static unsigned long H (unsigned long X, unsigned long Y, unsigned long Z);
 static unsigned long lshift (unsigned long x, int s);
 static void mdfour64 (unsigned long *M);
-static void copy64 (unsigned long *M, unsigned char *in);
+static void copy64 (unsigned long *M, const unsigned char *in);
 static void copy4 (unsigned char *out, unsigned long x);
-static void mdfour (unsigned char *out, unsigned char *in, int n);
+static void mdfour (unsigned char *out, const unsigned char *in, int n);
 
 /****************************************************************************/
 
@@ -225,7 +224,7 @@ static const unsigned char sbox[8][4][16] =
 };
 
 static void
-permute (char *out, char *in, const unsigned char * const p, int n)
+permute (char *out, const char *in, const unsigned char * const p, int n)
 {
 	int i;
 
@@ -247,7 +246,7 @@ left_shift (char *d, int count, int n)
 }
 
 static void
-concat (char *out, char *in1, char *in2, int l1, int l2)
+concat (char *out, const char *in1, const char *in2, int l1, int l2)
 {
 	while (l1--)
 		(*out++) = (*in1++);
@@ -257,7 +256,7 @@ concat (char *out, char *in1, char *in2, int l1, int l2)
 }
 
 static void
-xor (char *out, char *in1, char *in2, int n)
+xor (char *out, const char *in1, const char *in2, int n)
 {
 	int i;
 
@@ -266,7 +265,7 @@ xor (char *out, char *in1, char *in2, int n)
 }
 
 static void
-dohash (char *out, char *in, char *key, int forw)
+dohash (char *out, const char *in, const char *key, int forw)
 {
 	int i, j, k;
 	char pk1[56];
@@ -357,7 +356,7 @@ dohash (char *out, char *in, char *key, int forw)
 }
 
 static void
-str_to_key (unsigned char *str, unsigned char *key)
+str_to_key (const unsigned char *str, unsigned char *key)
 {
 	int i;
 
@@ -375,7 +374,7 @@ str_to_key (unsigned char *str, unsigned char *key)
 }
 
 static void
-smbhash (unsigned char *out, const unsigned char *in, unsigned char *key, int forw)
+smbhash (unsigned char *out, const unsigned char *in, const unsigned char *key, int forw)
 {
 	int i;
 	char outb[64];
@@ -405,7 +404,7 @@ smbhash (unsigned char *out, const unsigned char *in, unsigned char *key, int fo
 }
 
 static void
-E_P16 (unsigned char *p14, unsigned char *p16)
+E_P16 (const unsigned char *p14, unsigned char *p16)
 {
 	const unsigned char sp8[8] =
 	{
@@ -417,7 +416,7 @@ E_P16 (unsigned char *p14, unsigned char *p16)
 }
 
 static void
-E_P24 (unsigned char *p21, const unsigned char *c8, unsigned char *p24)
+E_P24 (const unsigned char *p21, const unsigned char *c8, unsigned char *p24)
 {
 	smbhash (p24, c8, p21, 1);
 	smbhash (p24 + 8, c8, p21 + 7, 1);
@@ -430,7 +429,7 @@ E_P24 (unsigned char *p21, const unsigned char *c8, unsigned char *p24)
    It takes a password, a 8 byte "crypt key" and puts 24 bytes of
    encrypted password into p24 */
 void
-smb_encrypt (unsigned char *passwd, const unsigned char *c8, unsigned char *p24)
+smb_encrypt (const unsigned char *passwd, const unsigned char *c8, unsigned char *p24)
 {
 	unsigned char p14[15], p21[21];
 	int len;
@@ -451,18 +450,6 @@ smb_encrypt (unsigned char *passwd, const unsigned char *c8, unsigned char *p24)
 }
 
 /****************************************************************************/
-
-/* Routines for Windows NT MD4 Hash functions. */
-static int
-local_wcslen (short *str)
-{
-	int len = 0;
-
-	while ((*str++) != 0)
-		len++;
-
-	return len;
-}
 
 /* Convert a string into an NT UNICODE string.
    Note that regardless of processor type
@@ -492,7 +479,7 @@ static void
 E_md4hash (const unsigned char *passwd, unsigned char *p16)
 {
 	short wpwd[129];
-	int len;
+	int len, size;
 
 	/* Password cannot be longer than 128 characters */
 	len = strlen ((char *) passwd);
@@ -503,15 +490,15 @@ E_md4hash (const unsigned char *passwd, unsigned char *p16)
 	local_mbstowcs (wpwd, passwd, len);
 	wpwd[len] = 0; /* Ensure string is null terminated */
 
-	/* Calculate length in bytes */
-	len = local_wcslen (wpwd) * sizeof (short);
+	/* Calculate size in bytes */
+	size = len * sizeof (short);
 
-	mdfour (p16, (unsigned char *) wpwd, len);
+	mdfour (p16, (unsigned char *) wpwd, size);
 }
 
-/* Does the des encryption from the NT or LM MD4 hash. */
+/* Does the DES encryption from the NT or LM MD4 hash. */
 static void
-smb_owf_encrypt (unsigned char *passwd, const unsigned char *c8, unsigned char *p24)
+smb_owf_encrypt (const unsigned char *passwd, const unsigned char *c8, unsigned char *p24)
 {
 	unsigned char p21[21];
 
@@ -639,7 +626,7 @@ mdfour64 (unsigned long *M)
 }
 
 static void
-copy64 (unsigned long *M, unsigned char *in)
+copy64 (unsigned long *M, const unsigned char *in)
 {
 	int i;
 
@@ -661,7 +648,7 @@ copy4 (unsigned char *out, unsigned long x)
 
 /* produce a md4 message digest from data of length n bytes */
 static void
-mdfour (unsigned char *out, unsigned char *in, int n)
+mdfour (unsigned char *out, const unsigned char *in, int n)
 {
 	unsigned char buf[128];
 	unsigned long M[16];

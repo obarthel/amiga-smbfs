@@ -24,6 +24,12 @@
 #include "quad_math.h"
 #endif /* _QUAD_MATH_H */
 
+/****************************************************************************/
+
+#ifndef _SPLAY_H
+#include "splay.h"
+#endif /* _SPLAY_H */
+
 /*****************************************************************************/
 
 #ifndef _SMB_FS_SB
@@ -84,9 +90,12 @@ typedef struct dircache
 	int					base;
 	int					len;
 	int					eof;		/* cache end is eof */
+
 	ULONG				created_at;	/* for invalidation */
+
 	struct smba_file *	cache_for;	/* owner of this cache */
 	int					cache_size;
+
 	struct smb_dirent	cache[1];
 } dircache_t;
 
@@ -94,8 +103,18 @@ typedef struct smba_server
 {
 	struct smb_server	server;
 	struct MinList		open_files;
+
+	#ifdef USE_SPLAY_TREE
+
+	struct splay_tree	open_file_address_tree;
+	struct splay_tree	open_file_name_tree;
+
+	#endif /* USE_SPLAY_TREE */
+
 	ULONG				num_open_files;
+
 	dircache_t *		dircache;
+
 	unsigned			supports_E:1;
 	unsigned			supports_E_known:1;
 } smba_server_t;
@@ -103,10 +122,20 @@ typedef struct smba_server
 typedef struct smba_file
 {
 	struct MinNode			node;
+
+	#ifdef USE_SPLAY_TREE
+
+	struct splay_node		splay_address_node;
+	struct splay_node		splay_name_node;
+
+	#endif /* USE_SPLAY_TREE */
+
 	struct smba_server *	server;
+
 	struct smb_dirent		dirent;
 	ULONG					attr_time;		/* time when dirent was read */
 	dircache_t *			dircache;		/* content cache for directories */
+
 	unsigned				is_valid:1;		/* server was down, entry removed, ... */
 	unsigned				attr_dirty:1;	/* attribute cache is dirty */
 } smba_file_t;

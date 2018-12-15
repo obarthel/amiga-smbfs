@@ -2689,3 +2689,33 @@ smbfs 2.3 (8.12.2018)
   is still accompanied by the legacy encrypted form which truncates the
   password to 14 characters (which are converted to all-upper-case
   letters) there is no actual gain in terms of security...
+
+
+smbfs 2.4 (15.12.2018)
+
+- Added const qualifiers to the parameters used by the functions
+  in "crypt.c". This in turn revealed that the smb_encrypt() function
+  did not in fact modify the password string passed to it, which
+  allowed the smb_proc_reconnect() function in "proc.c" to be simplified.
+
+- Augmented the file handle, file lock and SMB file access operations
+  with splay trees to improve performance for validation and lookup.
+  Instead of having to walk the entire list of file, lock or SMB file
+  entries, comparing the list entries by name or address, the entire
+  process should have to check 1-5 entries only.
+
+  This splay tree functionality is a compile time option which has
+  to be enabled in the "splay.h" header file.
+
+- If there is a port number given as part of the share name which is
+  out of range, smbfs now reports this as a specific error rather than
+  just stating that the service is not valid.
+
+- Replaced duplicate code in "smb_abstraction.c" which built path
+  names from a parent directory name and a file/directory name
+  with a single common solution.
+
+- Revised the build makefiles to create the standard smbfs variant
+  rather than the one with full debugging support enabled. The AmigaOS4
+  variant specifically avoids using cross-compilation options which
+  would have to be enabled first, if needed.

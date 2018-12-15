@@ -99,6 +99,13 @@ struct FileNode
 {
 	struct MinNode		fn_MinNode;
 
+	#ifdef USE_SPLAY_TREE
+
+	struct splay_node	fn_SplayNameNode;
+	struct splay_node	fn_SplayAddressNode;
+
+	#endif /* USE_SPLAY_TREE */
+
 	ULONG				fn_Magic;		/* Magic number which helps to
 										 * identify this data structure
 										 * as being managed by smbfs.
@@ -142,6 +149,13 @@ struct FileNode
 struct LockNode
 {
 	struct MinNode			ln_MinNode;
+
+	#ifdef USE_SPLAY_TREE
+
+	struct splay_node		ln_SplayNameNode;
+	struct splay_node		ln_SplayAddressNode;
+
+	#endif /* USE_SPLAY_TREE */
 
 	ULONG					ln_Magic;	/* Magic number which helps to
 										 * identify this data structure
@@ -236,14 +250,14 @@ static void file_system_handler(BOOL raise_priority, const TEXT * device_name, c
 
 /****************************************************************************/
 
-struct Library *			SysBase;
-struct Library *			DOSBase;
-struct Library *			UtilityBase;
-struct Library *			IntuitionBase;
-struct Library *			SocketBase;
-struct Library *			LocaleBase;
-struct Library *			TimerBase;
-struct Library *			IconBase;
+struct Library * SysBase;
+struct Library * DOSBase;
+struct Library * UtilityBase;
+struct Library * IntuitionBase;
+struct Library * SocketBase;
+struct Library * LocaleBase;
+struct Library * TimerBase;
+struct Library * IconBase;
 
 /****************************************************************************/
 
@@ -251,14 +265,14 @@ struct Library *			IconBase;
 
 /****************************************************************************/
 
-struct ExecIFace *			IExec;
-struct DOSIFace *			IDOS;
-struct UtilityIFace *		IUtility;
-struct IntuitionIFace *		IIntuition;
-struct SocketIFace *		ISocket;
-struct LocaleIFace *		ILocale;
-struct TimerIFace *			ITimer;
-struct IconIFace *			IIcon;
+struct ExecIFace *		IExec;
+struct DOSIFace *		IDOS;
+struct UtilityIFace *	IUtility;
+struct IntuitionIFace *	IIntuition;
+struct SocketIFace *	ISocket;
+struct LocaleIFace *	ILocale;
+struct TimerIFace *		ITimer;
+struct IconIFace *		IIcon;
 
 /****************************************************************************/
 
@@ -266,16 +280,16 @@ struct IconIFace *			IIcon;
 
 /****************************************************************************/
 
-struct timerequest			TimerRequest;
+struct timerequest TimerRequest;
 
 /****************************************************************************/
 
-struct Locale *				Locale;
+struct Locale * Locale;
 
 /****************************************************************************/
 
-int							errno;
-int							h_errno;
+int errno;
+int h_errno;
 
 /****************************************************************************/
 
@@ -302,6 +316,16 @@ static ULONG				WriteProtectKey;
 
 static struct MinList		FileList;
 static struct MinList		LockList;
+
+#ifdef USE_SPLAY_TREE
+
+static struct splay_tree	FileAddressTree;
+static struct splay_tree	FileNameTree;
+
+static struct splay_tree	LockAddressTree;
+static struct splay_tree	LockNameTree;
+
+#endif /* USE_SPLAY_TREE */
 
 static APTR					MemoryPool;
 static ULONG				total_memory_allocated;
@@ -2870,6 +2894,8 @@ find_file_node_by_name(const TEXT * name,const struct FileNode * skip)
 	struct FileNode * result = NULL;
 	struct FileNode * fn;
 
+	#ifndef USE_SPLAY_TREE
+
 	for(fn = (struct FileNode *)FileList.mlh_Head ;
 	    fn->fn_MinNode.mln_Succ != NULL ;
 	    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
@@ -2880,6 +2906,30 @@ find_file_node_by_name(const TEXT * name,const struct FileNode * skip)
 			break;
 		}
 	}
+
+	#else
+
+	struct splay_node * sn;
+
+	/* Find the list of all files which match the given name. */
+	sn = splay_tree_find(&FileNameTree, (splay_key_t)name);
+	if(sn != NULL)
+	{
+		fn = (struct FileNode *)sn->sn_userdata;
+
+		ASSERT( fn != NULL );
+
+		/* Use this entry, unless it's the one which we
+		 * wanted to skip.
+		 */
+		if (fn != skip)
+			result = fn;
+		/* Use the next entry in the list, if possible. */
+		else if (sn->sn_next != NULL)
+			result = (struct FileNode *)sn->sn_next->sn_userdata;
+	}
+
+	#endif /* USE_SPLAY_TREE */
 
 	return(result);
 }
@@ -2893,6 +2943,8 @@ find_lock_node_by_name(const TEXT * name,const struct LockNode * skip)
 	struct LockNode * result = NULL;
 	struct LockNode * ln;
 
+	#ifndef USE_SPLAY_TREE
+
 	for(ln = (struct LockNode *)LockList.mlh_Head ;
 	    ln->ln_MinNode.mln_Succ != NULL ;
 	    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
@@ -2903,6 +2955,25 @@ find_lock_node_by_name(const TEXT * name,const struct LockNode * skip)
 			break;
 		}
 	}
+
+	#else
+
+	struct splay_node * sn;
+
+	sn = splay_tree_find(&LockNameTree, (splay_key_t)name);
+	if(sn != NULL)
+	{
+		ln = (struct LockNode *)sn->sn_userdata;
+
+		ASSERT( ln != NULL );
+
+		if (ln != skip)
+			result = ln;
+		else if (sn->sn_next != NULL)
+			result = (struct LockNode *)sn->sn_next->sn_userdata;
+	}
+
+	#endif /* USE_SPLAY_TREE */
 
 	return(result);
 }
@@ -3524,6 +3595,32 @@ cleanup(void)
 	LEAVE();
 }
 
+/*****************************************************************************/
+
+#ifdef USE_SPLAY_TREE
+
+/* This is used by the splay tree functions to compare the
+ * file and lock node addresses.
+ */
+static int
+compare_file_or_lock_by_address(const BYTE * a, const BYTE * b)
+{
+	int result;
+
+	if (a < b)
+		result = -1;
+	else if (a == b)
+		result = 0;
+	else
+		result = 1;
+
+	return(result);
+}
+
+#endif /* USE_SPLAY_TREE */
+
+/*****************************************************************************/
+
 /* Allocate all the necessary resources to get going. */
 static BOOL
 setup(
@@ -3567,7 +3664,23 @@ setup(
 	NewList((struct List *)&FileList);
 	NewList((struct List *)&LockList);
 
-	MemoryPool = CreatePool(MEMF_ANY|MEMF_PUBLIC,4096,4096);
+	#ifdef USE_SPLAY_TREE
+
+	/* File names may not be unique. */
+	splay_tree_init(&FileNameTree, (splay_key_compare_t)compare_names);
+	FileNameTree.st_allow_duplicates = TRUE;
+
+	splay_tree_init(&FileAddressTree, compare_file_or_lock_by_address);
+
+	/* Lock names may not be unique. */
+	splay_tree_init(&LockNameTree, (splay_key_compare_t)compare_names);
+	LockNameTree.st_allow_duplicates = TRUE;
+
+	splay_tree_init(&LockAddressTree, compare_file_or_lock_by_address);
+
+	#endif /* USE_SPLAY_TREE */
+
+	MemoryPool = CreatePool(MEMF_ANY|MEMF_PUBLIC, 4096, 4096);
 	if(MemoryPool == NULL)
 	{
 		report_error("Could not create memory pool.");
@@ -3941,6 +4054,94 @@ setup(
 
 	RETURN(result);
 	return(result);
+}
+
+/****************************************************************************/
+
+static void
+add_file_node(struct FileNode * fn)
+{
+	ASSERT( fn != NULL );
+
+	AddTail((struct List *)&FileList,(struct Node *)fn);
+
+	#ifdef USE_SPLAY_TREE
+
+	fn->fn_SplayNameNode.sn_key = (splay_key_t)fn->fn_FullName;
+	fn->fn_SplayNameNode.sn_userdata = fn;
+	splay_tree_add(&FileNameTree, &fn->fn_SplayNameNode);
+
+	fn->fn_SplayAddressNode.sn_key = (splay_key_t)fn;
+	fn->fn_SplayAddressNode.sn_userdata = fn;
+	splay_tree_add(&FileAddressTree, &fn->fn_SplayAddressNode);
+
+	#endif /* USE_SPLAY_TREE */
+}
+
+/****************************************************************************/
+
+static void
+remove_file_node(struct FileNode * fn)
+{
+	ASSERT( fn != NULL );
+
+	Remove((struct Node *)fn);
+
+	#ifdef USE_SPLAY_TREE
+
+	splay_tree_remove(&FileNameTree, &fn->fn_SplayNameNode, (splay_key_t)fn->fn_FullName);
+	splay_tree_remove(&FileAddressTree, NULL, (splay_key_t)fn);
+
+	#endif /* USE_SPLAY_TREE */
+}
+
+/****************************************************************************/
+
+static void
+add_lock_node(struct LockNode * ln)
+{
+	ASSERT( ln != NULL );
+
+	AddTail((struct List *)&LockList,(struct Node *)ln);
+
+	#ifdef USE_SPLAY_TREE
+
+	ln->ln_SplayNameNode.sn_key = (splay_key_t)ln->ln_FullName;
+	ln->ln_SplayNameNode.sn_userdata = ln;
+	splay_tree_add(&LockNameTree, &ln->ln_SplayNameNode);
+
+	ln->ln_SplayAddressNode.sn_key = (splay_key_t)ln;
+	ln->ln_SplayAddressNode.sn_userdata = ln;
+	splay_tree_add(&LockAddressTree, &ln->ln_SplayAddressNode);
+
+	#endif /* USE_SPLAY_TREE */
+}
+
+/****************************************************************************/
+
+static void
+remove_lock_node(struct LockNode * ln)
+{
+	ASSERT( ln != NULL );
+
+	Remove((struct Node *)ln);
+
+	#ifdef USE_SPLAY_TREE
+
+	splay_tree_remove(&LockNameTree, &ln->ln_SplayNameNode, ln->ln_SplayNameNode.sn_key);
+	splay_tree_remove(&LockAddressTree, NULL, (splay_key_t)ln);
+
+	#endif /* USE_SPLAY_TREE */
+
+	/* This will make the lock_is_invalid() tests return
+	 * TRUE, which should make it easier to detect
+	 * files which have been closed already, should the
+	 * file system receive them.
+	 */
+	ln->ln_FileLock.fl_Volume = (BPTR)NULL;
+	ln->ln_FileLock.fl_Key = 0;
+	ln->ln_File = NULL;
+	ln->ln_Magic = 0;
 }
 
 /****************************************************************************/
@@ -4927,10 +5128,13 @@ static void
 restart_directory_scanning(const struct MsgPort * user,const TEXT * parent_dir_name)
 {
 	struct LockNode * ln;
+	struct splay_node * sn;
 
 	ENTER();
 
 	SHOWSTRING(parent_dir_name);
+
+	#ifndef USE_SPLAY_TREE
 
 	for(ln = (struct LockNode *)LockList.mlh_Head ;
 	    ln->ln_MinNode.mln_Succ != NULL ;
@@ -4949,6 +5153,32 @@ restart_directory_scanning(const struct MsgPort * user,const TEXT * parent_dir_n
 			ln->ln_RestartExamine = TRUE;
 		}
 	}
+
+	#else
+
+	/* Find all the locks which share the same directory name. */
+	sn = splay_tree_find(&LockNameTree, (splay_key_t)parent_dir_name);
+	if(sn != NULL)
+	{
+		/* Check each lock in turn, restarting the directory
+		 * scanning process unless the same program which
+		 * requires the restart is the one currently
+		 * doing the scanning.
+		 */
+		for((void)NULL ; sn != NULL ; sn = sn->sn_next)
+		{
+			ln = sn->sn_userdata;
+
+			if(ln->ln_LastUser != user)
+			{
+				D(("restart scanning for '%s'", escape_name(ln->ln_FullName)));
+
+				ln->ln_RestartExamine = TRUE;
+			}
+		}
+	}
+
+	#endif /* USE_SPLAY_TREE */
 
 	LEAVE();
 }
@@ -5234,7 +5464,8 @@ Action_Parent(
 				goto out;
 			}
 
-			AddTail((struct List *)&LockList,(struct Node *)ln);
+			add_lock_node(ln);
+
 			result = MKBADDR(&ln->ln_FileLock);
 			SHOWVALUE(&ln->ln_FileLock);
 
@@ -5573,7 +5804,8 @@ Action_CreateDir(
 		goto out;
 	}
 
-	AddTail((struct List *)&LockList,(struct Node *)ln);
+	add_lock_node(ln);
+
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
@@ -5663,7 +5895,8 @@ Action_LocateObject(
 		goto out;
 	}
 
-	AddTail((struct List *)&LockList,(struct Node *)ln);
+	add_lock_node(ln);
+
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
@@ -5777,7 +6010,8 @@ Action_CopyDir(
 		goto out;
 	}
 
-	AddTail((struct List *)&LockList,(struct Node *)ln);
+	add_lock_node(ln);
+
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
@@ -5819,6 +6053,7 @@ Action_FreeLock(
 		const struct LockNode * key;
 		struct LockNode * found;
 		struct LockNode * ln;
+		struct splay_node * sn;
 
 		if(file_system_disabled)
 		{
@@ -5835,6 +6070,8 @@ Action_FreeLock(
 
 		D(("lock on '%s'", escape_name(key->ln_FullName)));
 
+		#ifndef USE_SPLAY_TREE
+
 		for(ln = (struct LockNode *)LockList.mlh_Head ;
 			ln->ln_MinNode.mln_Succ != NULL ;
 			ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
@@ -5846,6 +6083,14 @@ Action_FreeLock(
 			}
 		}
 
+		#else
+
+		sn = splay_tree_find(&LockAddressTree, (splay_key_t)key);
+		if(sn != NULL)
+			found = (struct LockNode *)sn->sn_userdata;
+
+		#endif /* USE_SPLAY_TREE */
+
 		/* This should never happen. */
 		if(found == NULL)
 		{
@@ -5853,11 +6098,9 @@ Action_FreeLock(
 			goto out;
 		}
 
-		Remove((struct Node *)found);
-
 		smba_close(ServerData,found->ln_File);
 
-		found->ln_Magic = 0;
+		remove_lock_node(found);
 
 		free_memory(found->ln_FullName);
 		free_memory(found);
@@ -7919,7 +8162,8 @@ Action_Find(
 
 	fh->fh_Arg1 = (LONG)fn;
 
-	AddTail((struct List *)&FileList,(struct Node *)fn);
+	add_file_node(fn);
+
 	result = DOSTRUE;
 
 	full_name = NULL;
@@ -8057,6 +8301,7 @@ Action_End(
 	LONG result = DOSFALSE;
 	struct FileNode * fn;
 	struct FileNode * found;
+	struct splay_node * sn;
 	int error = OK;
 
 	ENTER();
@@ -8078,6 +8323,8 @@ Action_End(
 	 */
 	found = NULL;
 
+	#ifndef USE_SPLAY_TREE
+
 	for(fn = (struct FileNode *)FileList.mlh_Head ;
 	    fn->fn_MinNode.mln_Succ != NULL ;
 	    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
@@ -8089,6 +8336,14 @@ Action_End(
 		}
 	}
 
+	#else
+
+	sn = splay_tree_find(&FileAddressTree, (splay_key_t)which_fn);
+	if(sn != NULL)
+		found = (struct FileNode *)sn->sn_userdata;
+
+	#endif /* USE_SPLAY_TREE */
+
 	if(found == NULL)
 	{
 		SHOWMSG("file not known");
@@ -8097,7 +8352,7 @@ Action_End(
 		goto out;
 	}
 
-	Remove((struct Node *)found);
+	remove_file_node(found);
 
 	smba_close(ServerData,found->fn_File);
 
@@ -8688,7 +8943,8 @@ Action_ParentFH(
 		goto out;
 	}
 
-	AddTail((struct List *)&LockList,(struct Node *)ln);
+	add_lock_node(ln);
+
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
@@ -8761,7 +9017,8 @@ Action_CopyDirFH(
 		goto out;
 	}
 
-	AddTail((struct List *)&LockList,(struct Node *)ln);
+	add_lock_node(ln);
+
 	result = MKBADDR(&ln->ln_FileLock);
 	SHOWVALUE(&ln->ln_FileLock);
 
@@ -8826,17 +9083,18 @@ Action_FHFromLock(
 		goto out;
 	}
 
-	/* The file handle absorbs the lock. */
-	ln->ln_FullName = NULL;
-	ln->ln_File = NULL;
-	ln->ln_Magic = 0;
+	/* The file handle absorbs the lock, which in this case includes
+	 * the full path name and the SMB file.
+	 */
+	remove_lock_node(ln);
 
-	Remove((struct Node *)ln);
+	ln->ln_FullName = NULL;
 	free_memory(ln);
 
 	fh->fh_Arg1 = (LONG)fn;
 
-	AddTail((struct List *)&FileList,(struct Node *)fn);
+	add_file_node(fn);
+
 	result = DOSTRUE;
 	error = OK;
 
