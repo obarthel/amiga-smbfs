@@ -71,6 +71,12 @@ VERSION = 2
 
 ###############################################################################
 
+# Note: if DEBUG_OPTIONS are enabled you will need to link smbfs against
+#       "lib:scnb.lib" rather than "lib:sc.lib".
+LIBS = lib:sc.lib lib:amiga.lib lib:debug.lib
+
+###############################################################################
+
 CFLAGS = \
 	idlen=64 comnest streq strmerge nostkchk \
 	$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) $(DEBUG_OPTIONS) \
@@ -85,12 +91,6 @@ LFLAGS = \
 OBJS = \
 	main.o proc.o smb_abstraction.o sock.o crypt.o quad_math.o dump_smb.o \
 	cp437.o cp850.o splay.o swap_stack_and_call.o
-
-###############################################################################
-
-# Note: if DEBUG_OPTIONS are enabled you will need against "lib:scnb.lib"
-#       rather than "lib:sc.lib".
-LIBS = lib:sc.lib lib:amiga.lib lib:debug.lib
 
 ###############################################################################
 

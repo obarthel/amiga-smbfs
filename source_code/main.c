@@ -58,6 +58,18 @@ TEXT Version[] = VERSTAG;
 
 /****************************************************************************/
 
+/* The fully optimized build for SAS/C needs the following
+ * definition because it uses the so-called "small data model"
+ * for accessing local program data.
+ */
+#if defined(__SASC) && DEBUG == 0
+#define SAVE_DS __saveds
+#else
+#define SAVE_DS
+#endif /* __SASC && !DEBUG */
+
+/****************************************************************************/
+
 /* This macro lets us long-align structures on the stack */
 #define D_S(type, name) \
 	UBYTE a_##name[sizeof(type) + 3]; \
@@ -65,7 +77,10 @@ TEXT Version[] = VERSTAG;
 
 /****************************************************************************/
 
-/* Difference between January 1st 1970 and January 1st 1978 in seconds. */
+/* Difference between January 1st 1970 and January 1st 1978 in seconds,
+ * which is needed because the Amiga system time base uses 1978 and we
+ * have to deal with Unix time information.
+ */
 #define UNIX_TIME_OFFSET 252460800
 
 /* Maximum length of a file name, as supported by AmigaDOS. */
@@ -78,8 +93,9 @@ TEXT Version[] = VERSTAG;
  */
 #define SMB_ROOT_DIR_NAME	"\\"
 
-/* Individual directory/file names are separated by the
- * backslash for SMB path names. AmigaDOS uses the slash.
+/* Individual directory/file names are separated by the backslash for SMB
+ * path names (actually, SMB uses the MS-DOS path separator). AmigaDOS
+ * uses the slash.
  */
 #define SMB_PATH_SEPARATOR	'\\'
 
@@ -376,7 +392,7 @@ extern int STDARGS swap_stack_and_call(struct StackSwapStruct * stk,APTR functio
 
 /****************************************************************************/
 
-LONG
+LONG SAVE_DS
 _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 {
 	struct StackSwapStruct * stk = NULL;

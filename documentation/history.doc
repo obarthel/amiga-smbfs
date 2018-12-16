@@ -2719,3 +2719,9 @@ smbfs 2.4 (15.12.2018)
   rather than the one with full debugging support enabled. The AmigaOS4
   variant specifically avoids using cross-compilation options which
   would have to be enabled first, if needed.
+
+
+smbfs 2.5 (16.12.2018)
+
+- This version fixes the instant crash in the fully optimized 68k/020+
+  builds, which was cased by a missing __saveds keyword.

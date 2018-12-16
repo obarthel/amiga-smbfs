@@ -42,6 +42,10 @@
 
 /*****************************************************************************/
 
+/* The network header files (e.g. AmiTCP, Miami) define this type,
+ * which clashes with how AmigaOS uses it. This moves it out of the
+ * way.
+ */
 #define byte IGNORE_THIS
 
 /*****************************************************************************/
