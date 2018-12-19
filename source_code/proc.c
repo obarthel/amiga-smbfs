@@ -483,15 +483,17 @@ smb_encode_smb_length (byte * p, int len)
 	/* 0x00 = NetBIOS session message */
 	p[0] = 0;
 
-	/* 0 = reserved */
-	p[1] = 0;
+	/* Length is a 17 bit integer, the most significant
+	 * bit of which goes into bit #0. The other 7 bits
+	 * are reserved.
+	 */
+	p[1] = (len >> 16) & 1;
 
-	/* Payload length in network byte order. */
+	/* Payload length in network byte order
+	 * (least significant 16 bits).
+	 */
 	p[2] = (len & 0xFF00) >> 8;
 	p[3] = (len & 0xFF);
-
-	/* Length is actually a 17 bit integer. */
-	p[1] |= (len >> 16) & 1;
 
 	return &p[4];
 }
@@ -1593,7 +1595,13 @@ smb_proc_close (struct smb_server *server, word fileid, dword wtime, int * error
  * the file-id to be valid again after a reconnection.
  */
 int
-smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, char *data, int * error_ptr)
+smb_proc_read (
+	struct smb_server *server,
+	struct smb_dirent *finfo,
+	off_t offset,
+	long count,
+	char *data,
+	int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -1643,7 +1651,13 @@ smb_proc_read (struct smb_server *server, struct smb_dirent *finfo, off_t offset
  * call.
  */
 int
-smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, char *data, int * error_ptr)
+smb_proc_read_raw (
+	struct smb_server *server,
+	struct smb_dirent *finfo,
+	const QUAD * const offset_quad,
+	long count,
+	char *data,
+	int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -1678,7 +1692,13 @@ smb_proc_read_raw (struct smb_server *server, struct smb_dirent *finfo, const QU
 }
 
 int
-smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offset, long count, const char *data, int * error_ptr)
+smb_proc_write (
+	struct smb_server *server,
+	struct smb_dirent *finfo,
+	off_t offset,
+	long count,
+	const char *data,
+	int * error_ptr)
 {
 	int result;
 	char *buf = server->transmit_buffer;
@@ -1717,7 +1737,13 @@ smb_proc_write (struct smb_server *server, struct smb_dirent *finfo, off_t offse
 }
 
 int
-smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, const char *data, int * error_ptr)
+smb_proc_write_raw (
+	struct smb_server *server,
+	struct smb_dirent *finfo,
+	const QUAD * const offset_quad,
+	long count,
+	const char *data,
+	int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int num_bytes_written = 0;
@@ -1893,7 +1919,13 @@ smb_proc_write_raw (struct smb_server *server, struct smb_dirent *finfo, const Q
 }
 
 int
-smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, const char *data, int * error_ptr)
+smb_proc_writex (
+	struct smb_server *server,
+	struct smb_dirent *finfo,
+	const QUAD * const offset_quad,
+	long count,
+	const char *data,
+	int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -1961,7 +1993,13 @@ smb_proc_writex (struct smb_server *server, struct smb_dirent *finfo, const QUAD
 }
 
 int
-smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, const QUAD * const offset_quad, long count, char *data, int * error_ptr)
+smb_proc_readx (
+	struct smb_server *server,
+	struct smb_dirent *finfo,
+	const QUAD * const offset_quad,
+	long count,
+	char *data,
+	int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
 	int result;
@@ -2021,7 +2059,14 @@ smb_proc_readx (struct smb_server *server, struct smb_dirent *finfo, const QUAD 
 
 /* smb_proc_lockingX: We don't chain any further packets to the initial one */
 int
-smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, const struct smb_lkrng *locks, int num_entries, int mode, long timeout, int * error_ptr)
+smb_proc_lockingX (
+	struct smb_server *server,
+	struct smb_dirent *finfo,
+	const struct smb_lkrng *locks,
+	int num_entries,
+	int mode,
+	long timeout,
+	int * error_ptr)
 {
 	int result;
 	int num_locks, num_unlocks;
@@ -2073,7 +2118,7 @@ smb_proc_lockingX (struct smb_server *server, struct smb_dirent *finfo, const st
 	return result;
 }
 
-/* smb_proc_do_create: We expect entry->attry & entry->ctime to be set. */
+/* smb_proc_do_create: We expect entry->attry and entry->ctime to be set. */
 int
 smb_proc_create (struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr)
 {
@@ -2153,7 +2198,13 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 }
 
 int
-smb_proc_mv (struct smb_server *server, const char *old_path, const int old_path_len, const char *new_path, const int new_path_len, int * error_ptr)
+smb_proc_mv (
+	struct smb_server *server,
+	const char *old_path,
+	const int old_path_len,
+	const char *new_path,
+	const int new_path_len,
+	int * error_ptr)
 {
 	char *p;
 	char *buf = server->transmit_buffer;
@@ -2373,12 +2424,10 @@ smb_decode_dirent (const char *p, struct smb_dirent *entry)
 	entry->size_low = DVAL (p, 5);
 	entry->size_high = 0;
 
-	/* The name is given in 8.3 MS-DOS style format,
-	 * including the "." delimiter. This is a NUL-
-	 * terminated OEM string, with one byte per
-	 * character. If the name is shorter than 12
-	 * characters, it is padded with " " (space)
-	 * characters.
+	/* The name is given in 8.3 MS-DOS style format, including the "."
+	 * delimiter. This is a NUL-terminated OEM string, with one byte per
+	 * character. If the name is shorter than 12 characters, it is
+	 * padded with " " (space) characters.
 	 */
 	name_len = 12;
 
@@ -2423,7 +2472,13 @@ smb_decode_dirent (const char *p, struct smb_dirent *entry)
  * Note that it is for short directory name seeks, i.e.: protocol < PROTOCOL_LANMAN2
  */
 static int
-smb_proc_readdir_short (struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
+smb_proc_readdir_short (
+	struct smb_server *server,
+	const char *path,
+	int fpos,
+	int cache_size,
+	struct smb_dirent *entry,
+	int * error_ptr)
 {
 	char *p;
 	char *buf;
@@ -2712,7 +2767,12 @@ smb_get_dirent_name(char *p,int level,char ** name_ptr,int * len_ptr)
 
 /* interpret a long filename structure */
 static int
-smb_decode_long_dirent (const struct smb_server *server, const char *p, struct smb_dirent *finfo, int level, int * entry_length_ptr)
+smb_decode_long_dirent (
+	const struct smb_server *server,
+	const char *p,
+	struct smb_dirent *finfo,
+	int level,
+	int * entry_length_ptr)
 {
 	int success = TRUE;
 
@@ -2948,7 +3008,13 @@ smb_decode_long_dirent (const struct smb_server *server, const char *p, struct s
 }
 
 static int
-smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
+smb_proc_readdir_long (
+	struct smb_server *server,
+	const char *path,
+	int fpos,
+	int cache_size,
+	struct smb_dirent *entry,
+	int * error_ptr)
 {
 	int max_matches = 512; /* this should actually be based on the max_recv value */
 
@@ -3317,7 +3383,13 @@ smb_proc_readdir_long (struct smb_server *server, const char *path, int fpos, in
 }
 
 int
-smb_proc_readdir (struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr)
+smb_proc_readdir (
+	struct smb_server *server,
+	const char *path,
+	int fpos,
+	int cache_size,
+	struct smb_dirent *entry,
+	int * error_ptr)
 {
 	int result;
 
@@ -3410,7 +3482,13 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 }
 
 int
-smb_query_path_information(struct smb_server *server, const char *path, int len, int fid, struct smb_dirent *entry, int * error_ptr)
+smb_query_path_information(
+	struct smb_server *server,
+	const char *path,
+	int len,
+	int fid,
+	struct smb_dirent *entry,
+	int * error_ptr)
 {
 	unsigned char *outbuf = server->transmit_buffer;
 	dword ext_file_attributes;

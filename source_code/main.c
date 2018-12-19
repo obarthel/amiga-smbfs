@@ -261,7 +261,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static int LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -758,6 +758,8 @@ main(void)
 		KEY		Protocol;
 		SWITCH	NetBIOSTransport;
 		SWITCH	WriteBehind;
+		NUMBER	WriteThreshold;
+		NUMBER	ReadThreshold;
 		KEY		SessionSetup;
 		KEY		Unicode;
 		SWITCH	CP437;
@@ -798,6 +800,8 @@ main(void)
 		"PROTOCOL/K,"
 		"NETBIOS/S,"
 		"WRITEBEHIND/S,"
+		"WRITETHRESHOLD/N/K,"
+		"READTHRESHOLD/N/K,"
 		"SESSIONSETUP/K,"
 		"UNICODE/K,"
 		"CP437/S,"
@@ -817,6 +821,8 @@ main(void)
 	LONG tz_number, dst_number, debug_number;
 	LONG cache_size = 0;
 	LONG max_transmit = -1;
+	LONG smb_write_threshold = 0;
+	LONG smb_read_threshold = 0;
 	LONG timeout = 0;
 	TEXT env_protocol[8];
 	TEXT env_workgroup_name[17];
@@ -1013,6 +1019,30 @@ main(void)
 			}
 
 			args.MaxNameLen = &MaxNameLen;
+		}
+
+		str = get_icon_tool_type_value("WRITETHRESHOLD", NULL);
+		if(str != NULL)
+		{
+			if(StrToLong(str,&smb_write_threshold) == -1)
+			{
+				report_error("Invalid number '%s' for 'WRITETHRESHOLD' parameter.",str);
+				goto out;
+			}
+
+			args.WriteThreshold = &smb_write_threshold;
+		}
+
+		str = get_icon_tool_type_value("READTHRESHOLD", NULL);
+		if(str != NULL)
+		{
+			if(StrToLong(str,&smb_read_threshold) == -1)
+			{
+				report_error("Invalid number '%s' for 'READTHRESHOLD' parameter.",str);
+				goto out;
+			}
+
+			args.ReadThreshold = &smb_read_threshold;
 		}
 
 		str = get_icon_tool_type_value("TZ","TIMEZONEOFFSET");
@@ -1326,8 +1356,8 @@ main(void)
 	{
 		SHOWMSG("using code page 437 translation");
 
-		memmove(map_amiga_to_smb_name,unicode_to_cp437,sizeof(unicode_to_cp437));
-		memmove(map_smb_to_amiga_name,cp437_to_unicode,sizeof(cp437_to_unicode));
+		memcpy(map_amiga_to_smb_name,unicode_to_cp437,sizeof(unicode_to_cp437));
+		memcpy(map_smb_to_amiga_name,cp437_to_unicode,sizeof(cp437_to_unicode));
 
 		TranslateNames = TRUE;
 	}
@@ -1335,8 +1365,8 @@ main(void)
 	{
 		SHOWMSG("using code page 850 translation");
 
-		memmove(map_amiga_to_smb_name,unicode_to_cp850,sizeof(unicode_to_cp850));
-		memmove(map_smb_to_amiga_name,cp850_to_unicode,sizeof(cp850_to_unicode));
+		memcpy(map_amiga_to_smb_name,unicode_to_cp850,sizeof(unicode_to_cp850));
+		memcpy(map_smb_to_amiga_name,cp850_to_unicode,sizeof(cp850_to_unicode));
 
 		TranslateNames = TRUE;
 	}
@@ -1380,6 +1410,16 @@ main(void)
 			goto out;
 		}
 	}
+
+	if(args.WriteThreshold == NULL)
+		args.WriteThreshold = &smb_write_threshold;
+
+	D(("write threshold = %ld", (*args.WriteThreshold)));
+
+	if(args.ReadThreshold == NULL)
+		args.ReadThreshold = &smb_read_threshold;
+
+	D(("read threshold = %ld", (*args.ReadThreshold)));
 
 	DisableExAll = (BOOL)(args.DisableExAll != 0);
 	CaseSensitive = (BOOL)(args.CaseSensitive != 0);
@@ -1492,6 +1532,8 @@ main(void)
 		Stricmp(args.Protocol,"CORE") == SAME,
 		Stricmp(args.SessionSetup,"DELAY") == SAME,
 		args.WriteBehind,
+		(*args.WriteThreshold),
+		(*args.ReadThreshold),
 		args.DeviceName,
 		args.VolumeName,
 		get_switch_status(args.AddVolume, TRUE),
@@ -2910,41 +2952,71 @@ find_file_node_by_name(const TEXT * name,const struct FileNode * skip)
 	struct FileNode * result = NULL;
 	struct FileNode * fn;
 
-	#ifndef USE_SPLAY_TREE
+	ASSERT( name != NULL );
 
-	for(fn = (struct FileNode *)FileList.mlh_Head ;
-	    fn->fn_MinNode.mln_Succ != NULL ;
-	    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
+	#ifndef USE_SPLAY_TREE
 	{
-		if(fn != skip && compare_names(name,fn->fn_FullName) == SAME)
+		D(("searching for file with name '%s'", name));
+
+		for(fn = (struct FileNode *)FileList.mlh_Head ;
+		    fn->fn_MinNode.mln_Succ != NULL ;
+		    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
 		{
-			result = fn;
-			break;
+			if(fn != skip && compare_names(name,fn->fn_FullName) == SAME)
+			{
+				result = fn;
+				break;
+			}
+		}
+
+		if(result != NULL)
+			D(("found it (= 0x%08lx)", result));
+		else
+			D(("didn't find it"));
+	}
+	#else
+	{
+		struct splay_node * sn;
+
+		D(("looking up file with name '%s'", name));
+
+		/* Find the list of all files which match the given name. */
+		sn = splay_tree_find(&FileNameTree, (splay_key_t)name);
+		if(sn != NULL)
+		{
+			fn = (struct FileNode *)sn->sn_userdata;
+
+			ASSERT( fn != NULL );
+
+			/* Use this entry, unless it's the one which we
+			 * wanted to skip.
+			 */
+			if (fn != skip)
+			{
+				result = fn;
+
+				D(("found it (= 0x%08lx)", result));
+			}
+			/* Use the next entry in the list, if possible. */
+			else if (sn->sn_next != NULL)
+			{
+				result = (struct FileNode *)sn->sn_next->sn_userdata;
+
+				D(("found it, but can't use it, so using the next best entry (= 0x%08lx)", result));
+
+				if(result == NULL)
+					D(("...but didn't actually find it"));
+			}
+			else
+			{
+				D(("didn't find it"));
+			}
+		}
+		else
+		{
+			D(("didn't find it"));
 		}
 	}
-
-	#else
-
-	struct splay_node * sn;
-
-	/* Find the list of all files which match the given name. */
-	sn = splay_tree_find(&FileNameTree, (splay_key_t)name);
-	if(sn != NULL)
-	{
-		fn = (struct FileNode *)sn->sn_userdata;
-
-		ASSERT( fn != NULL );
-
-		/* Use this entry, unless it's the one which we
-		 * wanted to skip.
-		 */
-		if (fn != skip)
-			result = fn;
-		/* Use the next entry in the list, if possible. */
-		else if (sn->sn_next != NULL)
-			result = (struct FileNode *)sn->sn_next->sn_userdata;
-	}
-
 	#endif /* USE_SPLAY_TREE */
 
 	return(result);
@@ -2960,35 +3032,63 @@ find_lock_node_by_name(const TEXT * name,const struct LockNode * skip)
 	struct LockNode * ln;
 
 	#ifndef USE_SPLAY_TREE
-
-	for(ln = (struct LockNode *)LockList.mlh_Head ;
-	    ln->ln_MinNode.mln_Succ != NULL ;
-	    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 	{
-		if(ln != skip && compare_names(name,ln->ln_FullName) == SAME)
+		D(("searching for lock with name '%s'", name));
+
+		for(ln = (struct LockNode *)LockList.mlh_Head ;
+		    ln->ln_MinNode.mln_Succ != NULL ;
+		    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 		{
-			result = ln;
-			break;
+			if(ln != skip && compare_names(name,ln->ln_FullName) == SAME)
+			{
+				result = ln;
+				break;
+			}
+		}
+
+		if(result != NULL)
+			D(("found it (= 0x%08lx)", result));
+		else
+			D(("didn't find it"));
+	}
+	#else
+	{
+		struct splay_node * sn;
+
+		D(("looking up lock with name '%s'", name));
+
+		sn = splay_tree_find(&LockNameTree, (splay_key_t)name);
+		if(sn != NULL)
+		{
+			ln = (struct LockNode *)sn->sn_userdata;
+
+			ASSERT( ln != NULL );
+
+			if (ln != skip)
+			{
+				result = ln;
+
+				D(("found it (= 0x%08lx)", result));
+			}
+			else if (sn->sn_next != NULL)
+			{
+				result = (struct LockNode *)sn->sn_next->sn_userdata;
+
+				D(("found it, but can't use it, so using the next best entry (= 0x%08lx)", result));
+
+				if(result == NULL)
+					D(("...but didn't actually find it"));
+			}
+			else
+			{
+				D(("didn't find it"));
+			}
+		}
+		else
+		{
+			D(("didn't find it"));
 		}
 	}
-
-	#else
-
-	struct splay_node * sn;
-
-	sn = splay_tree_find(&LockNameTree, (splay_key_t)name);
-	if(sn != NULL)
-	{
-		ln = (struct LockNode *)sn->sn_userdata;
-
-		ASSERT( ln != NULL );
-
-		if (ln != skip)
-			result = ln;
-		else if (sn->sn_next != NULL)
-			result = (struct LockNode *)sn->sn_next->sn_userdata;
-	}
-
 	#endif /* USE_SPLAY_TREE */
 
 	return(result);
@@ -3659,6 +3759,8 @@ setup(
 	BOOL			opt_prefer_core_protocol,
 	BOOL			opt_session_setup_delay_unicode,
 	BOOL			opt_write_behind,
+	int				opt_smb_request_write_threshold,
+	int				opt_smb_request_read_threshold,
 	const TEXT *	device_name,
 	const TEXT *	volume_name,
 	BOOL			opt_add_volume,
@@ -3681,19 +3783,19 @@ setup(
 	NewList((struct List *)&LockList);
 
 	#ifdef USE_SPLAY_TREE
+	{
+		/* File names may not be unique. */
+		splay_tree_init(&FileNameTree, (splay_key_compare_t)compare_names);
+		FileNameTree.st_allow_duplicates = TRUE;
 
-	/* File names may not be unique. */
-	splay_tree_init(&FileNameTree, (splay_key_compare_t)compare_names);
-	FileNameTree.st_allow_duplicates = TRUE;
+		splay_tree_init(&FileAddressTree, compare_file_or_lock_by_address);
 
-	splay_tree_init(&FileAddressTree, compare_file_or_lock_by_address);
+		/* Lock names may not be unique. */
+		splay_tree_init(&LockNameTree, (splay_key_compare_t)compare_names);
+		LockNameTree.st_allow_duplicates = TRUE;
 
-	/* Lock names may not be unique. */
-	splay_tree_init(&LockNameTree, (splay_key_compare_t)compare_names);
-	LockNameTree.st_allow_duplicates = TRUE;
-
-	splay_tree_init(&LockAddressTree, compare_file_or_lock_by_address);
-
+		splay_tree_init(&LockAddressTree, compare_file_or_lock_by_address);
+	}
 	#endif /* USE_SPLAY_TREE */
 
 	MemoryPool = CreatePool(MEMF_ANY|MEMF_PUBLIC, 4096, 4096);
@@ -3898,6 +4000,8 @@ setup(
 		CaseSensitive,
 		opt_session_setup_delay_unicode,
 		opt_write_behind,
+		opt_smb_request_write_threshold,
+		opt_smb_request_read_threshold,
 		&error,
 		&smb_error_class,
 		&smb_error,
@@ -4082,15 +4186,15 @@ add_file_node(struct FileNode * fn)
 	AddTail((struct List *)&FileList,(struct Node *)fn);
 
 	#ifdef USE_SPLAY_TREE
+	{
+		fn->fn_SplayNameNode.sn_key = (splay_key_t)fn->fn_FullName;
+		fn->fn_SplayNameNode.sn_userdata = fn;
+		splay_tree_add(&FileNameTree, &fn->fn_SplayNameNode);
 
-	fn->fn_SplayNameNode.sn_key = (splay_key_t)fn->fn_FullName;
-	fn->fn_SplayNameNode.sn_userdata = fn;
-	splay_tree_add(&FileNameTree, &fn->fn_SplayNameNode);
-
-	fn->fn_SplayAddressNode.sn_key = (splay_key_t)fn;
-	fn->fn_SplayAddressNode.sn_userdata = fn;
-	splay_tree_add(&FileAddressTree, &fn->fn_SplayAddressNode);
-
+		fn->fn_SplayAddressNode.sn_key = (splay_key_t)fn;
+		fn->fn_SplayAddressNode.sn_userdata = fn;
+		splay_tree_add(&FileAddressTree, &fn->fn_SplayAddressNode);
+	}
 	#endif /* USE_SPLAY_TREE */
 }
 
@@ -4104,10 +4208,17 @@ remove_file_node(struct FileNode * fn)
 	Remove((struct Node *)fn);
 
 	#ifdef USE_SPLAY_TREE
+	{
+		APTR found;
 
-	splay_tree_remove(&FileNameTree, &fn->fn_SplayNameNode, (splay_key_t)fn->fn_FullName);
-	splay_tree_remove(&FileAddressTree, NULL, (splay_key_t)fn);
+		found = splay_tree_remove(&FileNameTree, &fn->fn_SplayNameNode, (splay_key_t)fn->fn_FullName);
 
+		D(("file name node removal %s", found != NULL ? "succeeded" : "failed"));
+
+		found = splay_tree_remove(&FileAddressTree, NULL, (splay_key_t)fn);
+
+		D(("file address node removal %s", found != NULL ? "succeeded" : "failed"));
+	}
 	#endif /* USE_SPLAY_TREE */
 }
 
@@ -4121,15 +4232,15 @@ add_lock_node(struct LockNode * ln)
 	AddTail((struct List *)&LockList,(struct Node *)ln);
 
 	#ifdef USE_SPLAY_TREE
+	{
+		ln->ln_SplayNameNode.sn_key = (splay_key_t)ln->ln_FullName;
+		ln->ln_SplayNameNode.sn_userdata = ln;
+		splay_tree_add(&LockNameTree, &ln->ln_SplayNameNode);
 
-	ln->ln_SplayNameNode.sn_key = (splay_key_t)ln->ln_FullName;
-	ln->ln_SplayNameNode.sn_userdata = ln;
-	splay_tree_add(&LockNameTree, &ln->ln_SplayNameNode);
-
-	ln->ln_SplayAddressNode.sn_key = (splay_key_t)ln;
-	ln->ln_SplayAddressNode.sn_userdata = ln;
-	splay_tree_add(&LockAddressTree, &ln->ln_SplayAddressNode);
-
+		ln->ln_SplayAddressNode.sn_key = (splay_key_t)ln;
+		ln->ln_SplayAddressNode.sn_userdata = ln;
+		splay_tree_add(&LockAddressTree, &ln->ln_SplayAddressNode);
+	}
 	#endif /* USE_SPLAY_TREE */
 }
 
@@ -4143,10 +4254,17 @@ remove_lock_node(struct LockNode * ln)
 	Remove((struct Node *)ln);
 
 	#ifdef USE_SPLAY_TREE
+	{
+		APTR found;
 
-	splay_tree_remove(&LockNameTree, &ln->ln_SplayNameNode, ln->ln_SplayNameNode.sn_key);
-	splay_tree_remove(&LockAddressTree, NULL, (splay_key_t)ln);
+		found = splay_tree_remove(&LockNameTree, &ln->ln_SplayNameNode, ln->ln_SplayNameNode.sn_key);
 
+		D(("lock name node removal %s", found != NULL ? "succeeded" : "failed"));
+
+		found = splay_tree_remove(&LockAddressTree, NULL, (splay_key_t)ln);
+
+		D(("lock address node removal %s", found != NULL ? "succeeded" : "failed"));
+	}
 	#endif /* USE_SPLAY_TREE */
 
 	/* This will make the lock_is_invalid() tests return
@@ -5151,41 +5269,18 @@ restart_directory_scanning(const struct MsgPort * user,const TEXT * parent_dir_n
 	SHOWSTRING(parent_dir_name);
 
 	#ifndef USE_SPLAY_TREE
-
-	for(ln = (struct LockNode *)LockList.mlh_Head ;
-	    ln->ln_MinNode.mln_Succ != NULL ;
-	    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 	{
-		/* Try not to self-disrupt directory scanning while
-		 * deleting the contents of the directory.
-		 */
-		if(ln->ln_LastUser == user)
-			continue;
-
-		if(compare_names(parent_dir_name,ln->ln_FullName) == SAME)
+		for(ln = (struct LockNode *)LockList.mlh_Head ;
+		    ln->ln_MinNode.mln_Succ != NULL ;
+		    ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 		{
-			D(("restart scanning for '%s'", escape_name(ln->ln_FullName)));
+			/* Try not to self-disrupt directory scanning while
+			 * deleting the contents of the directory.
+			 */
+			if(ln->ln_LastUser == user)
+				continue;
 
-			ln->ln_RestartExamine = TRUE;
-		}
-	}
-
-	#else
-
-	/* Find all the locks which share the same directory name. */
-	sn = splay_tree_find(&LockNameTree, (splay_key_t)parent_dir_name);
-	if(sn != NULL)
-	{
-		/* Check each lock in turn, restarting the directory
-		 * scanning process unless the same program which
-		 * requires the restart is the one currently
-		 * doing the scanning.
-		 */
-		for((void)NULL ; sn != NULL ; sn = sn->sn_next)
-		{
-			ln = sn->sn_userdata;
-
-			if(ln->ln_LastUser != user)
+			if(compare_names(parent_dir_name,ln->ln_FullName) == SAME)
 			{
 				D(("restart scanning for '%s'", escape_name(ln->ln_FullName)));
 
@@ -5193,7 +5288,30 @@ restart_directory_scanning(const struct MsgPort * user,const TEXT * parent_dir_n
 			}
 		}
 	}
+	#else
+	{
+		/* Find all the locks which share the same directory name. */
+		sn = splay_tree_find(&LockNameTree, (splay_key_t)parent_dir_name);
+		if(sn != NULL)
+		{
+			/* Check each lock in turn, restarting the directory
+			 * scanning process unless the same program which
+			 * requires the restart is the one currently
+			 * doing the scanning.
+			 */
+			for((void)NULL ; sn != NULL ; sn = sn->sn_next)
+			{
+				ln = sn->sn_userdata;
 
+				if(ln->ln_LastUser != user)
+				{
+					D(("restart scanning for '%s'", escape_name(ln->ln_FullName)));
+
+					ln->ln_RestartExamine = TRUE;
+				}
+			}
+		}
+	}
 	#endif /* USE_SPLAY_TREE */
 
 	LEAVE();
@@ -6087,24 +6205,34 @@ Action_FreeLock(
 		D(("lock on '%s'", escape_name(key->ln_FullName)));
 
 		#ifndef USE_SPLAY_TREE
-
-		for(ln = (struct LockNode *)LockList.mlh_Head ;
-			ln->ln_MinNode.mln_Succ != NULL ;
-			ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 		{
-			if(ln == key)
+			for(ln = (struct LockNode *)LockList.mlh_Head ;
+				ln->ln_MinNode.mln_Succ != NULL ;
+				ln = (struct LockNode *)ln->ln_MinNode.mln_Succ)
 			{
-				found = ln;
-				break;
+				if(ln == key)
+				{
+					found = ln;
+					break;
+				}
 			}
 		}
-
 		#else
+		{
+			D(("looking up the lock address (what happened to trust?)"));
 
-		sn = splay_tree_find(&LockAddressTree, (splay_key_t)key);
-		if(sn != NULL)
-			found = (struct LockNode *)sn->sn_userdata;
+			sn = splay_tree_find(&LockAddressTree, (splay_key_t)key);
+			if(sn != NULL)
+			{
+				D(("found it"));
 
+				found = (struct LockNode *)sn->sn_userdata;
+			}
+			else
+			{
+				D(("didn't find it (this should never happen)"));
+			}
+		}
 		#endif /* USE_SPLAY_TREE */
 
 		/* This should never happen. */
@@ -8340,24 +8468,34 @@ Action_End(
 	found = NULL;
 
 	#ifndef USE_SPLAY_TREE
-
-	for(fn = (struct FileNode *)FileList.mlh_Head ;
-	    fn->fn_MinNode.mln_Succ != NULL ;
-	    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
 	{
-		if(fn == which_fn)
+		for(fn = (struct FileNode *)FileList.mlh_Head ;
+		    fn->fn_MinNode.mln_Succ != NULL ;
+		    fn = (struct FileNode *)fn->fn_MinNode.mln_Succ)
 		{
-			found = fn;
-			break;
+			if(fn == which_fn)
+			{
+				found = fn;
+				break;
+			}
 		}
 	}
-
 	#else
+	{
+		D(("looking up the file address (what happened to trust?)"));
 
-	sn = splay_tree_find(&FileAddressTree, (splay_key_t)which_fn);
-	if(sn != NULL)
-		found = (struct FileNode *)sn->sn_userdata;
+		sn = splay_tree_find(&FileAddressTree, (splay_key_t)which_fn);
+		if(sn != NULL)
+		{
+			D(("found it"));
 
+			found = (struct FileNode *)sn->sn_userdata;
+		}
+		else
+		{
+			D(("didn't find it (this should never happen)"));
+		}
+	}
 	#endif /* USE_SPLAY_TREE */
 
 	if(found == NULL)
