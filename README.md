@@ -4,7 +4,7 @@
 
 This document describes the **smbfs** program, which implements an *SMB* file system for AmigaOS.
 
-This file system can be used to access files made available by file servers which implement the *SMBv1* protocol, such as *Microsoft Windows* or any other platform which supports the free *Samba* product.
+This file system can be used to access files made available by file servers which implement the *SMBv1* protocol (*SMBv1* is also called *CIFS*, which stands for *Common Internet File System*), such as *Microsoft Windows* or any other platform which supports the free *Samba* product.
 
 These files can be accessed using shell commands such as `List`, the *Workbench* or utilities such as *Directory Opus* as if the file server were a local disk drive.
 
@@ -15,7 +15,7 @@ You may find **smbfs** useful if you want to access a NAS (*network-attached sto
 
 You need a TCP/IP stack that supports the *AmiTCP V3* API, such as *Miami*, the original free *AmiTCP 3.0* release, *AmiTCP 4.x*, *Miami Deluxe*, *AmiTCP Genesis* or *Roadshow* and the obligatory networking gear. All these items need to be in good shape and properly configured.
 
-Most important, you need a computer which offers file sharing services using the *SMBv1* protocol.
+Most important, you need a computer which offers file sharing services using the *SMBv1* protocol (instead of being referred to as *SMBv1*, it may be called *CIFS*, too).
 
 It often helps to have *Samba* installed on your Amiga, too, as this can aid in tracking down bugs and obtaining information which **smbfs** cannot obtain all by itself.
 
@@ -59,26 +59,28 @@ Password: Domain=[ARBEITSGRUPPE] OS=[AmigaOS] Server=[Samba 2.0.7]
 
 The share name to connect to would be `ALL`.
 
-You may need to know which login name and which password are required to connect to the shared resource.
+You may need to know which login name and which password are required to connect to the shared disk.
 
 Very rarely, you would need to know the name of the work group or domain which the file server is a member of. In the example above, the name of the domain would be `ARBEITSGRUPPE`.
 
 
 ## 4. Starting and stopping the file system
 
-**smbfs** is an uncommon kind of file system in that you do not use the `Mount` command to mount it. In fact, **smbfs** is a program which can be launched from the shell, using command line parameters to tell it which resources should be used. But you can also start it from Workbench: in this case you would have to put the program's command line options into icon tool types.
+**smbfs** is an uncommon kind of file system in that you do not use the `Mount` command to mount it. In fact, **smbfs** is a program which can be launched from the shell, using command line parameters to tell it which disk should be used. But you can also start it from Workbench: in this case you would have to put the program's command line options into icon tool types.
+
+Please note that if you start **smbfs** from Workbench, you will not be able to stop **smbfs** using the `Status` and `Break` shell commands.
 
 ### 4.1. Starting the file system
 
 By now you should have prepared the following information:
 
 * Name of the computer to connect to; this would be the file server
-* Name of the shared *SMB* resource to connect to
+* Name of the shared disk to connect to
 * Login name and password (optional)
 
 That's basically everything you need to know to continue -- unless something goes wrong, but more on that later on.
 
-Now you can start the file system. For example, to connect to the file server called *sourcery* and the shared *all* resource it provides, using the login name *PCGuest* and not providing any password, you would enter the following:
+Now you can start the file system. For example, to connect to the file server called *sourcery* and the shared *all* disk it provides, using the login name *PCGuest* and not providing any password, you would enter the following:
 
 `smbfs user=PCGuest service=//sourcery/all`
 
@@ -160,6 +162,7 @@ PASSWORD/K
 PROTOCOL/K
 QUIET/S
 RAISEPRIORITY/S
+READTHRESHOLD/N/K
 SERVER=SERVERNAME/K
 SERVICE/A
 SESSIONSETUP/K
@@ -171,6 +174,7 @@ UNICODE/K
 USER=USERNAME/K
 VOLUME=VOLUMENAME/K
 WRITEBEHIND/S
+WRITETHRESHOLD/N/K
 </pre>
 
 ### 5.1. Server and authentication options
@@ -360,6 +364,22 @@ The **smbfs** program can try to improve write performance by not waiting for th
 
 Please note that the `WRITEBEHIND` switch has no effect if `PROTOCOL=nt1` is used because the **smbfs** program will then be using a different server write command which does not support the "write behind" functionality.
 
+#### 5.3.5. `READTHRESHOLD/N/K` and `WRITETHRESHOLD/N/K`
+
+The purpose of **smbfs** is chiefly to enable you to read and write files stored on a networked computer. To this end **smbfs** tries its best to squeeze as much performance out of the data transmission as possible.
+
+Generally, each data transmission consists of two distinct parts. The first part contains information about the data that is being transmitted, such as its size and which file it belongs to. The second part is the data being transmitted.
+
+**smbfs** can either send/receive both parts in a single step, or it can send/receive each part separately. If the data is received/sent in a single step, **smbfs** must spend extra time picking the data apart after it has received it (splitting it up into the information section and the data section), or combine the information and data section prior to sending them as single block of data.
+
+This picking apart/combining comes with a cost because memory contents will have to be copied around. This cost can result in lower performance, which is why **smbfs** defaults to breaking up the transmission into two steps.
+
+However, it is not a given that breaking up the transmission into two steps will always be faster than using a single step, which is where the `READTHRESHOLD` and `WRITETHRESHOLD` options come in.
+
+Transmissions which move large amounts of data tend to benefit significantly from sending/receiving each part of the transmission separately. The same may not be true for small amounts of data being transmitted.
+
+Through the `READTHRESHOLD` and `WRITETHRESHOLD` options you can control the minimum transmission size at which **smbfs** will always send/receive each part of the transmission separately. In order to make sending small amounts of data more efficient, `WRITETHRESHOLD=1500` may be a good choice.
+
 ### 5.4. Compatibility
 
 Both the file server and the software running on your Amiga may suffer from compatibility issues. For example, Amiga programs may be unable to deal with file names longer than 30 characters and then crash as a result. For some of these issues workarounds may be available.
@@ -452,7 +472,7 @@ Note that **smbfs** does not know when daylight savings time begins and ends. It
 
 By default the **smbfs** program will pick a unique file system device name such as `smbfs0:` and a volume name which is identical to the share name. For example, for `//192.168.0.1/pictures` the volume name would be `pictures` and a disk icon named **pictures** will appear in the Workbench window.
 
-You may override the device name which **smbfs** will use, e.g. the `DEVICE=nas:` option will try to use `nas:` if possible. Please note that device names have to be unique and **smbfs** may refuse to use it if there is already a file system device of that name.
+You may override the device name which **smbfs** will use, e.g. the `DEVICE=nas:` option will try to use `nas:` if possible. Please note that a device name has to be unique and **smbfs** may refuse to use it if there is already a file system device of that name.
 
 You can tell **smbfs** not to add a volume, which may be useful because the native Amiga Samba port can hang as soon as the file system is started. In such cases, use the `ADDVOLUME=NO` option. Please note that the `ADDVOLUME=NO` option will keep **smbfs** from showing the file system's disk icon in the Workbench window. If you omit the `ADDVOLUME` option, **smbfs** will pretend that `ADDVOLUME=YES` was in effect.
 
@@ -552,7 +572,7 @@ Subsequent work went into modifying the code, allowing it to be used as a file s
 
 Because **smbfs** is based upon reverse-engineered code, it was always difficult to maintain it, even for minor changes needed to fix small bugs or to improve overall compatibility. How **smbfs** went about when communicating with a remote file server, and why, would remain unclear because the documentation which could shed some light on these matters was unavailable until around 2009/2012.
 
-When I picked up development of **smbfs** again in 2016 I decided that I needed to know more about how the file system is supposed to work if I were ever going to be able make robust changes to the code.
+When I picked up development of **smbfs** again in 2016 I decided that I needed to know more about how the file system is supposed to work if I were ever going to be able to make robust changes to the code.
 
 This is what led me to collecting more than 30 MB of documentation on **SMBv1**/**CIFS**, **NetBIOS** and the way in which Microsoft operating systems implemented these over the years.
 
@@ -573,7 +593,7 @@ The great majority of changes and bug fixes which found their way into version 2
 
 Renaud Schweingruber kicked off the last stretch of the version 2.1 development work during 2018, encouraging me to complete the work I had begun.
 
-Much of the testing and feedback during the development of version 2.1 in Summer 2018 was performed by and came from the www.a1k.org forum members, who put each test version through its paces, on hardware which I would have never been able to test it. The rapid testing and feedback finally allowed version 2.1 to be released in 2018.
+Much of the testing and feedback during the development of version 2.1 in Summer 2018 was performed by and came from the www.a1k.org forum members, who put each test version through its paces, on hardware which I would have never been able to test it with. The rapid testing and feedback finally allowed version 2.1 to be released in 2018.
 
 Robert Kidd provided detailed information on how to make the **smbfs** client/server authentication work with **OpenSolaris**/**OpenIndiana**. The changes made allow **smbfs** not just to work better with **OpenSolaris**, but with other **SMBv1**/**CIFS** server software, too.
 
