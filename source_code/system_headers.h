@@ -42,9 +42,9 @@
 
 /*****************************************************************************/
 
-/* The network header files (e.g. AmiTCP, Miami) define this type,
- * which clashes with how AmigaOS uses it. This moves it out of the
- * way.
+/* The <smb/smb.h> header file declares this, and it may be redefined
+ * in the TCP/IP stack header files. We try to avoid trouble by moving
+ * the type declaration out of the way...
  */
 #define byte IGNORE_THIS
 

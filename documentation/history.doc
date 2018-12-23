@@ -2725,3 +2725,50 @@ smbfs 2.5 (16.12.2018)
 
 - This version fixes the instant crash in the fully optimized 68k/020+
   builds, which was cased by a missing __saveds keyword.
+
+
+smbfs 2.6 (16.12.2018)
+
+- Added the WRITETHRESHOLD parameter which can be used to disable the
+  separate transmission of the SMB message header and its payload if
+  the combined sizes of both are smaller than or equal to the
+  threshold value. This is intended to improve write performance for
+  small amounts of data which would otherwise linger in the
+  transmission queue.
+
+
+smbfs 2.7 (17.12.2018)
+
+- Added the READTHRESHOLD counterpart to WRITETHRESHOLD which affects
+  the read operations.
+
+- The smb_receive_raw() function in "sock.c" no longer copies the NetBIOS
+  header into the receive buffer separately, but makes sure that the
+  initial receive operation takes care of it.
+
+- The allocate_path_name() function in "smb_abstraction.c" failed to put
+  the path separator character where it should be, resulting in the path
+  name and the file/directory name to get lumped together. This affected
+  creation of files and directories both.
+
+
+smbfs 2.8 (19.12.2018)
+
+- The default values for READTHRESHOLD and WRITETHRESHOLD now have the
+  effect of transmitting the SMB header and the payload separately,
+  just like it was introduces in version 2.1.
+
+  Use something like READTHRESHOLD=1500 and WRITETHRESHOLD=1500 to
+  send packets smaller than or equal to 1500 bytes as a combined
+  lump of data, and data larger than 1500 bytes as separate SMB
+  header and payload.
+
+- When processing the share name the limitations on the individual
+  components (server name, share, port number/IP service name) are
+  no longer verified using hard-coded lengths, but use the respective
+  buffer limits instead. The port number/IP service name length
+  check is new.
+
+- Added more debug log output to the code which now performs the
+  file and lock name/address lookups instead of walking through
+  the entire file/lock lists.

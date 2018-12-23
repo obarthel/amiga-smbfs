@@ -95,6 +95,8 @@ smba_connect (
 	int							opt_case_sensitive,
 	int							opt_session_setup_delay_unicode,
 	int							opt_write_behind,
+	int							opt_smb_request_write_threshold,
+	int							opt_smb_request_read_threshold,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
 	int *						smb_error_ptr,
@@ -152,6 +154,22 @@ smba_connect (
 
 	LOG(("delay use of unicode during session setup = %s\n",opt_session_setup_delay_unicode ? "yes" : "no"));
 
+	/* Do not send SMB header and payload for write operations separately,
+	 * but in a single chunk if their combined size is smaller than
+	 * or equal to this threshold value.
+	 */
+	res->server.smb_write_threshold = opt_smb_request_write_threshold;
+
+	LOG(("SMB write request threshold size = %ld bytes\n", res->server.smb_write_threshold));
+
+	/* Do not receive SMB header and payload for read operations separately,
+	 * but in a single chunk if their combined size is smaller than
+	 * or equal to this threshold value.
+	 */
+	res->server.smb_read_threshold = opt_smb_request_read_threshold;
+
+	LOG(("SMB read request threshold size = %ld bytes\n", res->server.smb_read_threshold));
+
 	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
 	res->server.write_behind = opt_write_behind;
 
@@ -198,6 +216,8 @@ smba_connect (
 		if(servent != NULL)
 		{
 			data.addr.sin_port = servent->s_port;
+
+			LOG(("using port number %ld\n",ntohs(data.addr.sin_port)));
 		}
 		else
 		{
@@ -214,6 +234,8 @@ smba_connect (
 				if(0 < n && n < 65536)
 				{
 					data.addr.sin_port = htons (n);
+
+					LOG(("using port number %ld\n",n));
 				}
 				else
 				{
@@ -234,19 +256,31 @@ smba_connect (
 	}
 	else if (res->server.raw_smb)
 	{
+		int port;
+
 		servent = getservbyname("microsoft-ds","tcp");
 		if(servent != NULL)
-			data.addr.sin_port = servent->s_port;
+			port = servent->s_port;
 		else
-			data.addr.sin_port = htons (445);
+			port = htons (445);
+
+		LOG(("using port number %ld\n",ntohs(port)));
+
+		data.addr.sin_port = port;
 	}
 	else
 	{
+		int port;
+
 		servent = getservbyname("netbios-ssn","tcp");
 		if(servent != NULL)
-			data.addr.sin_port = servent->s_port;
+			port = servent->s_port;
 		else
-			data.addr.sin_port = htons (139);
+			port = htons (139);
+
+		LOG(("using port number %ld\n",ntohs(port)));
+
+		data.addr.sin_port = port;
 	}
 
 	data.fd = socket (AF_INET, SOCK_STREAM, 0);
@@ -592,7 +626,7 @@ write_attr (smba_file_t * f, int * error_ptr)
 		f->dirent.mtime = mtime;
 		f->dirent.attr = attr;
 
-		/* If the attributes need to be updated, we cannot used smb_proc_setattrE(),
+		/* If the attributes need to be updated, we cannot use smb_proc_setattrE(),
 		 * because that only updates the "time of last write access", but not the
 		 * attributes.
 		 */
@@ -1376,7 +1410,8 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 			f->dircache->len = 0;
 			f->dircache->base = cache_index;
 
-			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size, f->dircache->cache, error_ptr);
+			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size,
+				f->dircache->cache, error_ptr);
 
 			/* We stop on error, or if the directory is empty. */
 			if (num_entries <= 0)
@@ -1475,12 +1510,12 @@ allocate_path_name(const smba_file_t * dir, const char *name, size_t * path_name
 	if(path != NULL)
 	{
 		memcpy (path, dir->dirent.complete_path, dir_len);
-		path[dir_len] = DOS_PATHSEP;
+		path[dir_len++] = DOS_PATHSEP;
 		memcpy(&path[dir_len], name, len+1); /* length includes terminating NUL character */
 
 		ASSERT( path_name_len_ptr != NULL );
 
-		(*path_name_len_ptr) = dir_len + 1 + len;
+		(*path_name_len_ptr) = dir_len + len;
 	}
 
 	return(path);
@@ -1846,9 +1881,27 @@ extract_service (
 	char * share_start;
 	char * root_start;
 	char * complete_service;
-	char * service_copy;
+	char * service_copy = NULL;
 	char * service_name;
 	int result = -1;
+
+	if (strlen (service) < 4)
+	{
+		report_error("Service name '%s' is too short.",service);
+
+		(*error_ptr) = EINVAL;
+
+		goto out;
+	}
+
+	if (service[0] != '/')
+	{
+		report_error("Service name '%s' must begin with '/'.",service);
+
+		(*error_ptr) = EINVAL;
+
+		goto out;
+	}
 
 	service_copy = malloc(strlen(service)+1);
 	if(service_copy == NULL)
@@ -1861,28 +1914,11 @@ extract_service (
 	}
 
 	strcpy (service_copy, service);
+
 	complete_service = service_copy;
 
-	if (strlen (complete_service) < 4)
-	{
-		report_error("Service name '%s' is too short.",complete_service);
-
-		(*error_ptr) = EINVAL;
-
-		goto out;
-	}
-
-	if (complete_service[0] != '/')
-	{
-		report_error("Service name '%s' must begin with '/'.",complete_service);
-
-		(*error_ptr) = EINVAL;
-
-		goto out;
-	}
-
 	while (complete_service[0] == '/')
-		complete_service += 1;
+		complete_service++;
 
 	share_start = strchr (complete_service, '/');
 	if (share_start == NULL)
@@ -1920,20 +1956,29 @@ extract_service (
 			len--;
 
 		service_name[len] = '\0';
+
+		if(len > tcp_service_name_size)
+		{
+			report_error("TCP service name/port number is too long in '%s' (%ld characters are possible).",service_name,tcp_service_name_size);
+
+			(*error_ptr) = EINVAL;
+
+			goto out;
+		}
 	}
 
-	if (strlen (complete_service) > 63)
+	if (strlen (complete_service) > server_size)
 	{
-		report_error("Server name is too long in '%s' (%ld characters are possible).",service,63);
+		report_error("Server name is too long in '%s' (%ld characters are possible).",service,server_size);
 
 		(*error_ptr) = ENAMETOOLONG;
 
 		goto out;
 	}
 
-	if (strlen (share_start) > 255)
+	if (strlen (share_start) > share_size)
 	{
-		report_error("Share name is too long in '%s' (%ld characters are possible).",service,255);
+		report_error("Share name is too long in '%s' (%ld characters are possible).",service,share_size);
 
 		(*error_ptr) = ENAMETOOLONG;
 
@@ -1971,6 +2016,8 @@ smba_start(
 	int					opt_case_sensitive,
 	int					opt_session_setup_delay_unicode,
 	int					opt_write_behind,
+	int					opt_smb_request_write_threshold,
+	int					opt_smb_request_read_threshold,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,
@@ -2133,7 +2180,7 @@ smba_start(
 			/* Make sure the hostname is 16 characters or less (for NetBIOS) */
 			if (!opt_raw_smb && strlen (host_name) > 16)
 			{
-				report_error("Server name '%s' is too long (max %ld characters).", host_name, 16);
+				report_error("Server name '%s' is too long (%ld characters are possible).", host_name, 16);
 
 				(*error_ptr) = ENAMETOOLONG;
 				goto out;
@@ -2222,6 +2269,8 @@ smba_start(
 		opt_case_sensitive,
 		opt_session_setup_delay_unicode,
 		opt_write_behind,
+		opt_smb_request_write_threshold,
+		opt_smb_request_read_threshold,
 		error_ptr,
 		smb_error_class_ptr,
 		smb_error_ptr,

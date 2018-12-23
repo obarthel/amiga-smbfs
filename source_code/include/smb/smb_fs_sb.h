@@ -28,6 +28,11 @@ struct smb_server
 									   data blocks */
 	dword max_raw_size;				/* Maximum SMB_COM_WRITE_RAW and
 									   SMB_COM_READ_RAW data. */
+	dword smb_write_threshold;		/* If SMB header + payload size is smaller
+									   than or equal to this threshold, send
+									   both in a single combined send() operation
+									   rather than separately. */
+	dword smb_read_threshold;		/* Same as above, but for recv() operations. */
 	int max_recv;					/* added by CS */
 	word server_uid;
 	word tid;
