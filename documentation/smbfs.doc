@@ -171,6 +171,10 @@ until it can access the network again. For this to work, you need to start the
 smbfs program in the shell and use the VOLUMENAME option, which will make a
 disk icon appear in the Workbench window.
 
+Please note that smbfs needs to have been started as a shell command rather
+than from Workbench to allow it to be temporarily disabled and then enabled
+again.
+
 To disable the file system, hit the [Ctrl]+D keys or use the "Break" command
 (e.g. "Break 10 D" if smbfs is running as process number 10).
 
@@ -543,12 +547,14 @@ smbfs can either send/receive both parts in a single step, or it can
 send/receive each part separately. If the data is received/sent in a single
 step, smbfs must spend extra time picking the data apart after it has
 received it (splitting it up into the information section and the data
-section), or combine the information and data section prior to sending them
-as single block of data.
+section), or combine the information and data sections prior to sending them
+as a single block of data.
 
 This picking apart/combining comes with a cost because memory contents will
 have to be copied around. This cost can result in lower performance, which is
-why smbfs defaults to breaking up the transmission into two steps.
+why smbfs defaults to breaking up the transmission into two steps. Avoiding
+unnecessary memory copying operations is key to improving network performance
+on the Amiga.
 
 However, it is not a given that breaking up the transmission into two steps
 will always be faster than using a single step, which is where the

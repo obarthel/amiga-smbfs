@@ -34,7 +34,9 @@ You need to know which service you want to connect to on the target computer. Yo
 
 For example, if you were to query the services offered by a machine called *sourcery* you could enter the following:
 
-`samba:bin/smbclient -L sourcery`
+<pre>
+samba:bin/smbclient -L sourcery
+</pre>
 
 And you might get the following information:
 
@@ -82,13 +84,19 @@ That's basically everything you need to know to continue -- unless something goe
 
 Now you can start the file system. For example, to connect to the file server called *sourcery* and the shared *all* disk it provides, using the login name *PCGuest* and not providing any password, you would enter the following:
 
-`smbfs user=PCGuest service=//sourcery/all`
+<pre>
+smbfs user=PCGuest service=//sourcery/all
+</pre>
 
 This would cause a new device by the name of `SMBFS:` to be mounted, showing all files and drawers the *sourcery* server makes available for sharing.
 
-You can also run the **smbfs** program in the background, like so: `Run >NIL: smbfs user=PCGuest service=//sourcery/all`.
+You can also run the **smbfs** program in the background, like so:
 
-This is not recommended, though, because it becomes much harder to tell why the **smbfs** program did not work correctly (as it invariably will at some point). Any error messages which could help in figuring out what the problem may have been will be lost.
+<pre>
+Run >NIL: smbfs user=PCGuest service=//sourcery/all`
+</pre>
+
+**Note that this is not recommended**, though, because it becomes much harder to tell why the **smbfs** program did not work correctly (as it invariably will at some point). Any error messages which could help in figuring out what the problem may have been will be lost.
 
 If you have trouble setting up the **smbfs** program, first make sure that it works correctly without the `Run >NIL:` instructions and have a look at any error messages it may produce.
 
@@ -124,6 +132,8 @@ You may have to send more than one `Break` command to stop the **smbfs** program
 If, for example, you need to temporarily shut down the network, **smbfs** will be unable to do its job, at least until the network becomes operational again. In the mean time *Workbench* and other programs will keep accessing the file system and may get stuck.
 
 You can avoid most of these problems by temporarily disabling the file system until it can access the network again. For this to work, you need to start the **smbfs** program in the shell and use the `VOLUMENAME` option, which will make a disk icon appear in the *Workbench* window.
+
+Please note that **smbfs** needs to have been started as a shell command rather than from Workbench to allow it to be temporarily disabled and then enabled again.
 
 To disable the file system, hit the `[Ctrl]+D` keys or use the `Break` command (e.g. `Break 10 D` if **smbfs** is running as process number 10).
 
@@ -370,9 +380,9 @@ The purpose of **smbfs** is chiefly to enable you to read and write files stored
 
 Generally, each data transmission consists of two distinct parts. The first part contains information about the data that is being transmitted, such as its size and which file it belongs to. The second part is the data being transmitted.
 
-**smbfs** can either send/receive both parts in a single step, or it can send/receive each part separately. If the data is received/sent in a single step, **smbfs** must spend extra time picking the data apart after it has received it (splitting it up into the information section and the data section), or combine the information and data section prior to sending them as single block of data.
+**smbfs** can either send/receive both parts in a single step, or it can send/receive each part separately. If the data is received/sent in a single step, **smbfs** must spend extra time picking the data apart after it has received it (splitting it up into the information section and the data section), or combine the information and data sections prior to sending them as a single block of data.
 
-This picking apart/combining comes with a cost because memory contents will have to be copied around. This cost can result in lower performance, which is why **smbfs** defaults to breaking up the transmission into two steps.
+This picking apart/combining comes with a cost because memory contents will have to be copied around. This cost can result in lower performance, which is why **smbfs** defaults to breaking up the transmission into two steps. Avoiding unnecessary memory copying operations is key to improving network performance on the Amiga.
 
 However, it is not a given that breaking up the transmission into two steps will always be faster than using a single step, which is where the `READTHRESHOLD` and `WRITETHRESHOLD` options come in.
 
