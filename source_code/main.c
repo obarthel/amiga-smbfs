@@ -261,7 +261,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static int LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, BOOL tcp_no_delay, int socket_receive_buffer_size, int socket_send_buffer_size, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -760,6 +760,9 @@ main(void)
 		SWITCH	WriteBehind;
 		NUMBER	WriteThreshold;
 		NUMBER	ReadThreshold;
+		SWITCH	TCPNoDelay;
+		NUMBER	SocketReceiveBuf;
+		NUMBER	SocketSendBuf;
 		KEY		SessionSetup;
 		KEY		Unicode;
 		SWITCH	CP437;
@@ -802,6 +805,9 @@ main(void)
 		"WRITEBEHIND/S,"
 		"WRITETHRESHOLD/N/K,"
 		"READTHRESHOLD/N/K,"
+		"TCP_NODELAY=TCPNODELAY/S,"
+		"SO_RCVBUF=SOCKETRECEIVEBUFFER/N/K,"
+		"SO_SNDBUF=SOCKETSENDBUFER/N/K,"
 		"SESSIONSETUP/K,"
 		"UNICODE/K,"
 		"CP437/S,"
@@ -824,6 +830,8 @@ main(void)
 	LONG smb_write_threshold = 0;
 	LONG smb_read_threshold = 0;
 	LONG timeout = 0;
+	LONG socket_receive_buffer = 0;
+	LONG socket_send_buffer = 0;
 	TEXT env_protocol[8];
 	TEXT env_workgroup_name[17];
 	TEXT env_user_name[64];
@@ -1000,6 +1008,7 @@ main(void)
 		args.CaseSensitive = get_icon_tool_type_value("CASE", "CASESENSITIVE") != NULL;
 		args.NetBIOSTransport = get_icon_tool_type_value("NETBIOS", NULL) != NULL;
 		args.WriteBehind = get_icon_tool_type_value("WRITEBEHIND", NULL) != NULL;
+		args.TCPNoDelay = get_icon_tool_type_value("TCPNODELAY", "TCP_NODELAY") != NULL;
 
 		args.ClientName = get_icon_tool_type_value("CLIENT", "CLIENTNAME");
 		args.ServerName = get_icon_tool_type_value("SERVER", "SERVERNAME");
@@ -1111,6 +1120,30 @@ main(void)
 			}
 
 			args.Timeout = &timeout;
+		}
+
+		str = get_icon_tool_type_value("SOCKETRECEIVEBUFFER", "SO_RCVBUF");
+		if(str != NULL)
+		{
+			if(StrToLong(str,&socket_receive_buffer) == -1)
+			{
+				report_error("Invalid number '%s' for 'SOCKETRECEIVEBUFFER' parameter.",str);
+				goto out;
+			}
+
+			args.SocketReceiveBuf = &socket_receive_buffer;
+		}
+
+		str = get_icon_tool_type_value("SOCKETSENDBUFFER", "SO_SENDBUF");
+		if(str != NULL)
+		{
+			if(StrToLong(str,&socket_send_buffer) == -1)
+			{
+				report_error("Invalid number '%s' for 'SOCKETSENDBUFFER' parameter.",str);
+				goto out;
+			}
+
+			args.SocketSendBuf = &socket_send_buffer;
 		}
 	}
 	else
@@ -1421,6 +1454,18 @@ main(void)
 
 	D(("read threshold = %ld", (*args.ReadThreshold)));
 
+	D(("tcp no delay = %s", args.TCPNoDelay ? "requested" : "not requested"));
+
+	if(args.SocketReceiveBuf == NULL)
+		args.SocketReceiveBuf = &socket_receive_buffer;
+
+	D(("socket receive buffer size = %ld", (*args.SocketReceiveBuf)));
+
+	if(args.SocketSendBuf == NULL)
+		args.SocketSendBuf = &socket_send_buffer;
+
+	D(("socket send buffer size = %ld", (*args.SocketSendBuf)));
+
 	DisableExAll = (BOOL)(args.DisableExAll != 0);
 	CaseSensitive = (BOOL)(args.CaseSensitive != 0);
 	OmitHidden = (BOOL)(args.OmitHidden != 0);
@@ -1534,6 +1579,9 @@ main(void)
 		args.WriteBehind,
 		(*args.WriteThreshold),
 		(*args.ReadThreshold),
+		args.TCPNoDelay,
+		(*args.SocketReceiveBuf),
+		(*args.SocketSendBuf),
 		args.DeviceName,
 		args.VolumeName,
 		get_switch_status(args.AddVolume, TRUE),
@@ -3761,6 +3809,9 @@ setup(
 	BOOL			opt_write_behind,
 	int				opt_smb_request_write_threshold,
 	int				opt_smb_request_read_threshold,
+	BOOL			opt_tcp_no_delay,
+	int				opt_socket_receive_buffer_size,
+	int				opt_socket_send_buffer_size,
 	const TEXT *	device_name,
 	const TEXT *	volume_name,
 	BOOL			opt_add_volume,
@@ -4002,6 +4053,9 @@ setup(
 		opt_write_behind,
 		opt_smb_request_write_threshold,
 		opt_smb_request_read_threshold,
+		opt_tcp_no_delay,
+		opt_socket_receive_buffer_size,
+		opt_socket_send_buffer_size,
 		&error,
 		&smb_error_class,
 		&smb_error,

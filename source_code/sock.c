@@ -1229,6 +1229,23 @@ smb_connect (struct smb_server *server, int * error_ptr)
 	/* Enable socket keepalives, for good measure. */
 	setsockopt(server->mount_data.fd, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled));
 
+	/* Disable the Nagle algorithm for send() operations, causing the
+	 * data to be sent as soon as possible, rather than being subjected
+	 * to traffic control/smoothing?
+	 */
+	if(server->tcp_no_delay)
+		setsockopt(server->mount_data.fd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
+
+	/* Request specific socket receive/transmit buffer sizes? Note that
+	 * this is a request, not a figure which the TCP/IP stack has to
+	 * honour.
+	 */
+	if(server->socket_receive_buffer_size > 0)
+		setsockopt(server->mount_data.fd, SOL_SOCKET, SO_RCVBUF, &server->socket_receive_buffer_size, sizeof(server->socket_receive_buffer_size));
+
+	if(server->socket_send_buffer_size > 0)
+		setsockopt(server->mount_data.fd, SOL_SOCKET, SO_SNDBUF, &server->socket_send_buffer_size, sizeof(server->socket_send_buffer_size));
+
 	/* Configure the send/receive timeout (in seconds)? */
 	if(server->timeout > 0)
 	{

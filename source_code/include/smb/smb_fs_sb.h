@@ -33,6 +33,9 @@ struct smb_server
 									   both in a single combined send() operation
 									   rather than separately. */
 	dword smb_read_threshold;		/* Same as above, but for recv() operations. */
+	int tcp_no_delay;				/* Disable the Nagle algorithm for send()? */
+	int socket_receive_buffer_size;	/* Desired socket receive buffer size, if > 0. */
+	int socket_send_buffer_size;	/* Desired socket transmit buffer size, if > 0. */
 	int max_recv;					/* added by CS */
 	word server_uid;
 	word tid;

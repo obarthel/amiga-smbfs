@@ -97,6 +97,9 @@ smba_connect (
 	int							opt_write_behind,
 	int							opt_smb_request_write_threshold,
 	int							opt_smb_request_read_threshold,
+	int							opt_tcp_no_delay,
+	int							opt_socket_receive_buffer_size,
+	int							opt_socket_send_buffer_size,
 	int *						error_ptr,
 	int *						smb_error_class_ptr,
 	int *						smb_error_ptr,
@@ -169,6 +172,17 @@ smba_connect (
 	res->server.smb_read_threshold = opt_smb_request_read_threshold;
 
 	LOG(("SMB read request threshold size = %ld bytes\n", res->server.smb_read_threshold));
+
+	/* Disable the Nagle algorithm, causing send() to immediately
+	 * result in the data being transmitted?
+	 */
+	res->server.tcp_no_delay = opt_tcp_no_delay;
+
+	/* Try to get the TCP/IP stack to use a specific
+	 * receive/transmit buffer size?
+	 */
+	res->server.socket_receive_buffer_size = opt_socket_receive_buffer_size;
+	res->server.socket_send_buffer_size = opt_socket_send_buffer_size;
 
 	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
 	res->server.write_behind = opt_write_behind;
@@ -2018,6 +2032,9 @@ smba_start(
 	int					opt_write_behind,
 	int					opt_smb_request_write_threshold,
 	int					opt_smb_request_read_threshold,
+	int					opt_tcp_no_delay,
+	int					opt_socket_receive_buffer_size,
+	int					opt_socket_send_buffer_size,
 	int *				error_ptr,
 	int *				smb_error_class_ptr,
 	int *				smb_error_ptr,
@@ -2271,6 +2288,9 @@ smba_start(
 		opt_write_behind,
 		opt_smb_request_write_threshold,
 		opt_smb_request_read_threshold,
+		opt_tcp_no_delay,
+		opt_socket_receive_buffer_size,
+		opt_socket_send_buffer_size,
 		error_ptr,
 		smb_error_class_ptr,
 		smb_error_ptr,

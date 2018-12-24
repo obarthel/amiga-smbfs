@@ -2772,3 +2772,10 @@ smbfs 2.8 (19.12.2018)
 - Added more debug log output to the code which now performs the
   file and lock name/address lookups instead of walking through
   the entire file/lock lists.
+
+
+smbfs 2.9 (24.12.2018)
+
+- Added the TCP_NODELAY, SO_RCVBUF and SO_SNDBUF tuning options
+  which serve the same purposes as their Samba configuration option
+  counterparts.
