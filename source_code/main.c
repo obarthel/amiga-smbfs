@@ -261,7 +261,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static int LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, BOOL tcp_no_delay, int socket_receive_buffer_size, int socket_send_buffer_size, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, BOOL scatter_gather, BOOL tcp_no_delay, int socket_receive_buffer_size, int socket_send_buffer_size, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -760,7 +760,9 @@ main(void)
 		SWITCH	WriteBehind;
 		NUMBER	WriteThreshold;
 		NUMBER	ReadThreshold;
+		KEY		ScatterGather;
 		SWITCH	TCPNoDelay;
+		KEY		TCPDelay;
 		NUMBER	SocketReceiveBuf;
 		NUMBER	SocketSendBuf;
 		KEY		SessionSetup;
@@ -805,9 +807,11 @@ main(void)
 		"WRITEBEHIND/S,"
 		"WRITETHRESHOLD/N/K,"
 		"READTHRESHOLD/N/K,"
+		"SCATTERGATHER/K,"
 		"TCP_NODELAY=TCPNODELAY/S,"
+		"TCPDELAY/K,"
 		"SO_RCVBUF=SOCKETRECEIVEBUFFER/N/K,"
-		"SO_SNDBUF=SOCKETSENDBUFER/N/K,"
+		"SO_SNDBUF=SOCKETSENDBUFFER/N/K,"
 		"SESSIONSETUP/K,"
 		"UNICODE/K,"
 		"CP437/S,"
@@ -1001,6 +1005,10 @@ main(void)
 		if(args.ChangePasswordCase == NULL && get_icon_tool_type_value("CHANGECASE", NULL) != NULL)
 			args.ChangePasswordCase = "yes";
 
+		args.TCPDelay = get_icon_tool_type_value("TCPDELAY", NULL);
+		if(args.TCPDelay == NULL && get_icon_tool_type_value("TCPNODELAY", "TCP_NODELAY") != NULL)
+			args.TCPDelay = "no";
+
 		args.DisableExAll = get_icon_tool_type_value("DISABLEEXALL", NULL) != NULL;
 		args.OmitHidden = get_icon_tool_type_value("OMITHIDDEN", NULL) != NULL;
 		args.Quiet = get_icon_tool_type_value("QUIET", NULL) != NULL;
@@ -1008,7 +1016,6 @@ main(void)
 		args.CaseSensitive = get_icon_tool_type_value("CASE", "CASESENSITIVE") != NULL;
 		args.NetBIOSTransport = get_icon_tool_type_value("NETBIOS", NULL) != NULL;
 		args.WriteBehind = get_icon_tool_type_value("WRITEBEHIND", NULL) != NULL;
-		args.TCPNoDelay = get_icon_tool_type_value("TCPNODELAY", "TCP_NODELAY") != NULL;
 
 		args.ClientName = get_icon_tool_type_value("CLIENT", "CLIENTNAME");
 		args.ServerName = get_icon_tool_type_value("SERVER", "SERVERNAME");
@@ -1053,6 +1060,8 @@ main(void)
 
 			args.ReadThreshold = &smb_read_threshold;
 		}
+
+		args.ScatterGather = get_icon_tool_type_value("SCATTERGATHER", NULL);
 
 		str = get_icon_tool_type_value("TZ","TIMEZONEOFFSET");
 		if(str != NULL)
@@ -1306,6 +1315,10 @@ main(void)
 	if(args.ChangePasswordCase == NULL && args.ChangeCase)
 		args.ChangePasswordCase = "yes";
 
+	/* Disable the TCP delay? */
+	if(args.TCPDelay == NULL && args.TCPNoDelay)
+		args.TCPDelay = "no";
+
 	/* Use the default if no device or volume name is given. */
 	if(args.DeviceName == NULL && args.VolumeName == NULL)
 	{
@@ -1454,7 +1467,9 @@ main(void)
 
 	D(("read threshold = %ld", (*args.ReadThreshold)));
 
-	D(("tcp no delay = %s", args.TCPNoDelay ? "requested" : "not requested"));
+	D(("scatter gather = %s", get_switch_status(args.ScatterGather, FALSE) ? "enabled" : "disabled"));
+
+	D(("tcp delay = %s", get_switch_status(args.TCPDelay, FALSE) ? "enabled" : "disabled"));
 
 	if(args.SocketReceiveBuf == NULL)
 		args.SocketReceiveBuf = &socket_receive_buffer;
@@ -1579,7 +1594,8 @@ main(void)
 		args.WriteBehind,
 		(*args.WriteThreshold),
 		(*args.ReadThreshold),
-		args.TCPNoDelay,
+		get_switch_status(args.ScatterGather, FALSE),
+		get_switch_status(args.TCPDelay, FALSE),
 		(*args.SocketReceiveBuf),
 		(*args.SocketSendBuf),
 		args.DeviceName,
@@ -3221,21 +3237,40 @@ name_already_in_use(const TEXT * name)
 	return(error);
 }
 
-/* Check whether an Amiga file name uses special characters which
- * should be avoided when used with the SMB file sharing protocol.
+/* Check whether an AmigaDOS path name uses special characters which should be
+ * avoided when used with the SMB file sharing protocol. This test accepts '/'
+ * and ':' as valid characters that may appear in an AmigaDOS path name.
+ *
+ * Reserved characters are control codes in the range 0..31, as well as
+ * '<' (less than), '>' (greater than), ':' (colon), '"' (double quote),
+ * '/' (forward slash), '\' (backslash), '|' (vertical bar or pipe),
+ * '?' (question mark) and '*' (asterisk). The '?' and '*' are the MS-DOS
+ * wildcard pattern characters which the SMB delete and rename commands
+ * would process if they were part of the "file name".
+ *
+ * This list can be found (2018-12-28) here:
+ *    https://docs.microsoft.com/en-us/windows/desktop/fileio/naming-a-file
+ *
+ * We also reject the use of "." and ".." as path names.
  */
 static BOOL
-name_contains_reserved_smb_characters(const TEXT * name)
+path_name_is_invalid(const TEXT * name, int name_len)
 {
 	BOOL result = TRUE;
+	TEXT c;
+	int i;
 
 	/* Disallow "." and "..". */
-	if(name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0')))
+	if((name_len == 1 && name[0] == '.') || (name_len == 1 && name[0] == '.' && name[1] == '.'))
 		goto out;
 
-	/* Disallow the use of the backslash in file names. */
-	if(strchr(name,SMB_PATH_SEPARATOR) != NULL)
-		goto out;
+	for(i = 0 ; i < name_len ; i++)
+	{
+		c = name[i];
+		
+		if(c < ' ' || strchr("<>\"\\|?*", c) != NULL)
+			goto out;
+	}
 
 	result = FALSE;
 
@@ -3427,7 +3462,7 @@ is_valid_device_name(const TEXT * name, int len)
 /****************************************************************************/
 
 /* Check if a file name is right and proper for AmigaDOS use,
- * which excludes the use unprintable characters, the path
+ * which excludes the use of unprintable characters, the path
  * delimiters ':' and '/', but also the SMB path delimeter
  * character '\'.
  *
@@ -3809,6 +3844,7 @@ setup(
 	BOOL			opt_write_behind,
 	int				opt_smb_request_write_threshold,
 	int				opt_smb_request_read_threshold,
+	BOOL			opt_scatter_gather,
 	BOOL			opt_tcp_no_delay,
 	int				opt_socket_receive_buffer_size,
 	int				opt_socket_send_buffer_size,
@@ -4053,6 +4089,7 @@ setup(
 		opt_write_behind,
 		opt_smb_request_write_threshold,
 		opt_smb_request_read_threshold,
+		opt_scatter_gather,
 		opt_tcp_no_delay,
 		opt_socket_receive_buffer_size,
 		opt_socket_send_buffer_size,
@@ -4360,8 +4397,8 @@ truncate_64_bit_position(const QUAD * position_quad)
  * characters through the use of 'C' style escape sequences. Returns a
  * pointer to a local static buffer which contains the escaped string.
  * If the escape form of the name is too long to fit into the buffer,
- * the text " [...]" will be appended to contents of the buffer, to indicate
- * that the name was truncated.
+ * the text " [...]" will be appended to the contents of the buffer, to
+ * indicate that the name was truncated.
  */
 TEXT *
 escape_name(const TEXT * name)
@@ -5485,46 +5522,6 @@ file_is_invalid(const struct FileNode * fn,int * error_ptr)
 
 /****************************************************************************/
 
-/* Check if the name of a file or drawer contains MS-DOS
- * wildcard characters ("?" and "*") which may not be
- * suitable for some file system operations, e.g. rename
- * or delete.
- */
-static BOOL
-name_contains_wildcard_characters(const TEXT * name)
-{
-	const TEXT * file_name;
-	BOOL result = FALSE;
-	int len;
-	TEXT c;
-	int i;
-
-	ENTER();
-
-	SHOWSTRING(name);
-
-	file_name = FilePart(name);
-	len = strlen(file_name);
-
-	for(i = 0 ; i < len ; i++)
-	{
-		c = file_name[i];
-
-		if(c == '?' || c == '*')
-		{
-			D(("found a wildcard in '%s'",name));
-
-			result = TRUE;
-			break;
-		}
-	}
-
-	RETURN(result);
-	return(result);
-}
-
-/****************************************************************************/
-
 /* Try to obtain the path name stored in a FileLock which
  * a file or directory name is associated with. The parent
  * FileLock can be NULL, which is interpreted as being a
@@ -5725,19 +5722,10 @@ Action_DeleteObject(
 	 */
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* The SMB_COM_DELETE command supports deleting sets
-	 * of matching files/drawers through wildcards. Only
-	 * the last part of the path (the name of the file
-	 * or directory) may contain the wildcard.
-	 */
-	if(name_contains_wildcard_characters(name))
+	if(path_name_is_invalid(name, name_len))
 	{
-		D(("name '%s' is not safe to use with delete operation", name));
-
-		/* Do not try to delete sets of matching files
-		 * and drawers. We only came to delete a single
-		 * directory entry.
-		 */
+		D(("'%s' is not a valid path name", name));
+		
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
@@ -5917,14 +5905,10 @@ Action_CreateDir(
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Do not allow for a directory to be created whose
-	 * name contains MS-DOS wildcard characters. This will
-	 * only end in tears later...
-	 */
-	if(name_contains_wildcard_characters(name))
+	if(path_name_is_invalid(name, name_len))
 	{
-		D(("will not create a directory '%s' which contains wildcard characters", name));
-
+		D(("'%s' is not a valid path name", name));
+		
 		error = ERROR_INVALID_COMPONENT_NAME;
 		goto out;
 	}
@@ -6049,17 +6033,19 @@ Action_LocateObject(
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	if(path_name_is_invalid(name, name_len))
+	{
+		D(("'%s' is not a valid path name", name));
+		
+		error = ERROR_OBJECT_NOT_FOUND;
+		goto out;
+	}
+
 	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
-	}
-
-	if(name_contains_reserved_smb_characters(FilePart(name)))
-	{
-		error = ERROR_OBJECT_NOT_FOUND;
-		goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,name_len,&full_name);
@@ -6438,6 +6424,14 @@ Action_SetProtect(
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
+	if(path_name_is_invalid(name, name_len))
+	{
+		D(("'%s' is not a valid path name", name));
+		
+		error = ERROR_OBJECT_NOT_FOUND;
+		goto out;
+	}
+
 	if(NOT ServerData->server.unicode_enabled)
 	{
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
@@ -6595,18 +6589,10 @@ Action_RenameObject(
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),source_bcpl_name);
 
-	/* The SMB_COM_RENAME command supports renaming through
-	 * wildcards. Only the last part of the path (the name
-	 * of the file or directory) may contain the wildcard.
-	 */
-	if(name_contains_wildcard_characters(name))
+	if(path_name_is_invalid(name, name_len))
 	{
-		D(("found a wildcard in the source path '%s'; this is unsafe to use with the rename operation",name));
-
-		/* Do not rename/move sets of matching files and
-		 * directories. We only came to rename/move a
-		 * single directory entry.
-		 */
+		D(("'%s' is not a valid path name", name));
+		
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
@@ -6638,14 +6624,10 @@ Action_RenameObject(
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),destination_bcpl_name);
 
-	if(name_contains_wildcard_characters(name))
+	if(path_name_is_invalid(name, name_len))
 	{
-		D(("found a wildcard in the destination path '%s'; this is unsafe to use with the rename operation",name));
-
-		/* Do not allow the destination name to contain
-		 * MS-DOS wildcard characters. This will only end
-		 * in tears later...
-		 */
+		D(("'%s' is not a valid path name", name));
+		
 		error = ERROR_INVALID_COMPONENT_NAME;
 		goto out;
 	}
@@ -8138,7 +8120,6 @@ Action_Find(
 	struct FileNode * fn = NULL;
 	STRPTR parent_name;
 	TEXT name[MAX_FILENAME_LEN+1];
-	BOOL wildcard_characters_found_in_name = FALSE;
 	int name_len;
 	BOOL create_new_file = FALSE;
 	STRPTR temp = NULL;
@@ -8178,28 +8159,16 @@ Action_Find(
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
 
-	/* Do not allow MS-DOS wildcard characters to be used
-	 * when creating a new file.
-	 */
-	if(action != ACTION_FINDINPUT)
+	if(path_name_is_invalid(name, name_len))
 	{
-		if(name_contains_wildcard_characters(name))
-		{
-			if(action == ACTION_FINDOUTPUT)
-			{
-				D(("will not create a file with wildcard characters in its name"));
+		D(("'%s' is not a valid path name", name));
 
-				error = ERROR_INVALID_COMPONENT_NAME;
-				goto out;
-			}
+		if(action == ACTION_FINDINPUT)
+			error = ERROR_OBJECT_NOT_FOUND;
+		else
+			error = ERROR_INVALID_COMPONENT_NAME;
 
-			/* We don't know yet if MODE_READWRITE will
-			 * succeed in opening the file whose name
-			 * contains wildcard characters. This will
-			 * be checked later, if needed.
-			 */
-			wildcard_characters_found_in_name = TRUE;
-		}
+		goto out;
 	}
 
 	if(NOT ServerData->server.unicode_enabled)
@@ -8207,12 +8176,6 @@ Action_Find(
 		error = translate_amiga_name_to_smb_name(name,name_len,sizeof(name));
 		if(error != OK)
 			goto out;
-	}
-
-	if(name_contains_reserved_smb_characters(FilePart(name)))
-	{
-		error = ERROR_OBJECT_NOT_FOUND;
-		goto out;
 	}
 
 	error = build_full_path_name(parent_name,name,name_len,&full_name);
@@ -8276,16 +8239,6 @@ Action_Find(
 		if(WriteProtected)
 		{
 			error = ERROR_DISK_WRITE_PROTECTED;
-			goto out;
-		}
-
-		/* Do not create a file whose name would contain
-		 * MS-DOS wildcard characters. This will only
-		 * end in tears later...
-		 */
-		if(wildcard_characters_found_in_name)
-		{
-			error = ERROR_INVALID_COMPONENT_NAME;
 			goto out;
 		}
 
@@ -8646,9 +8599,37 @@ Action_Seek(
 
 		default:
 
+			D(("seek mode %ld not known", mode));
+
 			error = ERROR_ACTION_NOT_KNOWN;
 			goto out;
 	}
+
+	#if DEBUG
+	{
+		const TEXT * mode_name;
+
+		switch(mode)
+		{
+			case OFFSET_BEGINNING:
+
+				mode_name = "OFFSET_BEGINNING";
+				break;
+
+			case OFFSET_CURRENT:
+
+				mode_name = "OFFSET_CURRENT";
+				break;
+
+			default:
+
+				mode_name = "OFFSET_END";
+				break;
+		}
+
+		D(("Seek(..., %ld, %s); current position = %s", position, mode_name, convert_quad_to_string(&reference_position_quad)));
+	}
+	#endif /* DEBUG */
 
 	if(position < 0)
 	{
@@ -8660,6 +8641,8 @@ Action_Seek(
 		/* We cannot seek back beyond the beginning of the file. */
 		if(compare_64_to_64(&reference_position_quad,&position_quad) < 0)
 		{
+			D(("cannot seek back beyond the beginning of the file."));
+
 			error = ERROR_SEEK_ERROR;
 			goto out;
 		}
@@ -8671,6 +8654,8 @@ Action_Seek(
 		/* Careful, we need to check for overflow, too. */
 		if(add_64_plus_32_to_64(&reference_position_quad,position,&new_position_quad) > 0)
 		{
+			D(("position is too large"));
+
 			error = ERROR_SEEK_ERROR;
 			goto out;
 		}
@@ -8681,6 +8666,8 @@ Action_Seek(
 	fn->fn_OffsetQuad = new_position_quad;
 
 	result = truncate_64_bit_position(&previous_position_quad);
+
+	D(("new position = %s; returning %ld", convert_quad_to_string(&new_position_quad), result));
 
  out:
 
@@ -8851,6 +8838,14 @@ Action_SetDate(
 		goto out;
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+
+	if(path_name_is_invalid(name, name_len))
+	{
+		D(("'%s' is not a valid path name", name));
+		
+		error = ERROR_OBJECT_NOT_FOUND;
+		goto out;
+	}
 
 	if(NOT ServerData->server.unicode_enabled)
 	{
@@ -9711,6 +9706,14 @@ Action_SetComment(
 		goto out;
 
 	name_len = convert_from_bcpl_to_c_string(name,sizeof(name),bcpl_name);
+
+	if(path_name_is_invalid(name, name_len))
+	{
+		D(("'%s' is not a valid path name", name));
+
+		error = ERROR_OBJECT_NOT_FOUND;
+		goto out;
+	}
 
 	if(NOT ServerData->server.unicode_enabled)
 	{

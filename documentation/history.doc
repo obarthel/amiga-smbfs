@@ -2779,3 +2779,20 @@ smbfs 2.9 (24.12.2018)
 - Added the TCP_NODELAY, SO_RCVBUF and SO_SNDBUF tuning options
   which serve the same purposes as their Samba configuration option
   counterparts.
+
+
+smbfs 2.10 (29.12.2018)
+
+- The smb_receive_raw() function in "sock.c" again copies the NetBIOS
+  header into the receive buffer separately, rolling back an earlier
+  change which did not seem to be sound, and also served to make
+  complicated code even more complicated :-/
+
+- Added the SCATTERGATHER tuning option which defaults to "no". Instead
+  of breaking down write operations into two separate send() calls (one
+  short, one very large), setting SCATTERGATHER=yes can call sendmsg()
+  instead which allows the entire operation to be completed in one
+  single step. This approach was suggested by Patrik Axelsson. Currently,
+  I am uncertain if all AmiTCP V3/V4 TCP/IP stacks implement sendmsg()
+  for TCP sockets in the same consistent manner, which is why this
+  feature is not enabled by default.

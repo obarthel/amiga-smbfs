@@ -68,12 +68,12 @@ init_open_file_list(smba_server_t *res)
 	NewList((struct List *)&res->open_files);
 
 	#ifdef USE_SPLAY_TREE
+	{
+		splay_tree_init(&res->open_file_address_tree, (splay_key_compare_t)compare_files_by_address);
 
-	splay_tree_init(&res->open_file_address_tree, (splay_key_compare_t)compare_files_by_address);
-
-	splay_tree_init(&res->open_file_name_tree, (splay_key_compare_t)compare_names);
-	res->open_file_name_tree.st_allow_duplicates = TRUE;
-
+		splay_tree_init(&res->open_file_name_tree, (splay_key_compare_t)compare_names);
+		res->open_file_name_tree.st_allow_duplicates = TRUE;
+	}
 	#endif /* USE_SPLAY_TREE */
 }
 
@@ -97,6 +97,7 @@ smba_connect (
 	int							opt_write_behind,
 	int							opt_smb_request_write_threshold,
 	int							opt_smb_request_read_threshold,
+	int							opt_scatter_gather,
 	int							opt_tcp_no_delay,
 	int							opt_socket_receive_buffer_size,
 	int							opt_socket_send_buffer_size,
@@ -172,6 +173,11 @@ smba_connect (
 	res->server.smb_read_threshold = opt_smb_request_read_threshold;
 
 	LOG(("SMB read request threshold size = %ld bytes\n", res->server.smb_read_threshold));
+
+	/* Use sendmsg() instead of send() where useful? */
+	res->server.scatter_gather = opt_scatter_gather;
+
+	LOG(("use sendmsg() instead of send() where useful = %s\n",opt_scatter_gather ? "yes" : "no"));
 
 	/* Disable the Nagle algorithm, causing send() to immediately
 	 * result in the data being transmitted?
@@ -506,15 +512,15 @@ add_smba_file(smba_server_t * s, smba_file_t *f)
 	AddTail ((struct List *)&s->open_files, (struct Node *)f);
 
 	#ifdef USE_SPLAY_TREE
+	{
+		f->splay_address_node.sn_key = f;
+		f->splay_address_node.sn_userdata = f;
+		splay_tree_add(&s->open_file_address_tree, &f->splay_address_node);
 
-	f->splay_address_node.sn_key = f;
-	f->splay_address_node.sn_userdata = f;
-	splay_tree_add(&s->open_file_address_tree, &f->splay_address_node);
-
-	f->splay_name_node.sn_key = f->dirent.complete_path;
-	f->splay_name_node.sn_userdata = f;
-	splay_tree_add(&s->open_file_name_tree, &f->splay_name_node);
-
+		f->splay_name_node.sn_key = f->dirent.complete_path;
+		f->splay_name_node.sn_userdata = f;
+		splay_tree_add(&s->open_file_name_tree, &f->splay_name_node);
+	}
 	#endif /* USE_SPLAY_TREE */
 }
 
@@ -526,10 +532,10 @@ remove_smba_file(smba_server_t * s, smba_file_t *f)
 	Remove((struct Node *)f);
 
 	#ifdef USE_SPLAY_TREE
-
-	splay_tree_remove(&s->open_file_address_tree, NULL, (splay_key_t)f);
-	splay_tree_remove(&s->open_file_name_tree, &f->splay_name_node, f->splay_name_node.sn_key);
-
+	{
+		splay_tree_remove(&s->open_file_address_tree, NULL, (splay_key_t)f);
+		splay_tree_remove(&s->open_file_name_tree, &f->splay_name_node, f->splay_name_node.sn_key);
+	}
 	#endif /* USE_SPLAY_TREE */
 }
 
@@ -687,26 +693,26 @@ file_is_valid(smba_server_t * s, const smba_file_t * f)
 	int is_valid;
 
 	#ifndef USE_SPLAY_TREE
-
-	const smba_file_t * file;
-
-	is_valid = FALSE;
-
-	for (file = (smba_file_t *)s->open_files.mlh_Head ;
-	    file->node.mln_Succ != NULL ;
-	    file = (smba_file_t *)file->node.mln_Succ)
 	{
-		if (file == f)
+		const smba_file_t * file;
+
+		is_valid = FALSE;
+
+		for (file = (smba_file_t *)s->open_files.mlh_Head ;
+			file->node.mln_Succ != NULL ;
+			file = (smba_file_t *)file->node.mln_Succ)
 		{
-			is_valid = TRUE;
-			break;
+			if (file == f)
+			{
+				is_valid = TRUE;
+				break;
+			}
 		}
 	}
-
 	#else
-
-	is_valid = (splay_tree_find(&s->open_file_address_tree, (splay_key_t)f) != NULL);
-
+	{
+		is_valid = (splay_tree_find(&s->open_file_address_tree, (splay_key_t)f) != NULL);
+	}
 	#endif /* USE_SPLAY_TREE */
 
 	return(is_valid);
@@ -1660,37 +1666,12 @@ close_path (smba_server_t * s, const char *path, int * error_ptr)
 	smba_file_t *p;
 
 	#ifndef USE_SPLAY_TREE
-
-	for (p = (smba_file_t *)s->open_files.mlh_Head;
-	     p->node.mln_Succ != NULL;
-	     p = (smba_file_t *)p->node.mln_Succ)
 	{
-		if (p->is_valid && compare_names(p->dirent.complete_path, path) == SAME)
+		for (p = (smba_file_t *)s->open_files.mlh_Head;
+			p->node.mln_Succ != NULL;
+			p = (smba_file_t *)p->node.mln_Succ)
 		{
-			result = invalidate_smba_file(s, p, path, error_ptr);
-			if(result < 0)
-				break;
-		}
-	}
-
-	#else
-
-	struct splay_node * sn;
-
-	/* Find all files which match the same path name. */
-	sn = splay_tree_find(&s->open_file_name_tree, (splay_key_t)path);
-	if(sn != NULL)
-	{
-		/* Walk through all the files, marking them as no longer
-		 * valid and closing them, if necessary. Note that we
-		 * do not remove them from the list of open files, we just
-		 * mark them for reopening later, if needed.
-		 */
-		for((void)NULL ; sn != NULL ; sn = sn->sn_next)
-		{
-			p = sn->sn_userdata;
-
-			if (p->is_valid)
+			if (p->is_valid && compare_names(p->dirent.complete_path, path) == SAME)
 			{
 				result = invalidate_smba_file(s, p, path, error_ptr);
 				if(result < 0)
@@ -1698,7 +1679,32 @@ close_path (smba_server_t * s, const char *path, int * error_ptr)
 			}
 		}
 	}
+	#else
+	{
+		struct splay_node * sn;
 
+		/* Find all files which match the same path name. */
+		sn = splay_tree_find(&s->open_file_name_tree, (splay_key_t)path);
+		if(sn != NULL)
+		{
+			/* Walk through all the files, marking them as no longer
+			* valid and closing them, if necessary. Note that we
+			* do not remove them from the list of open files, we just
+			* mark them for reopening later, if needed.
+			*/
+			for((void)NULL ; sn != NULL ; sn = sn->sn_next)
+			{
+				p = sn->sn_userdata;
+
+				if (p->is_valid)
+				{
+					result = invalidate_smba_file(s, p, path, error_ptr);
+					if(result < 0)
+						break;
+				}
+			}
+		}
+	}
 	#endif /* USE_SPLAY_TREE */
 
 	return(result);
@@ -2032,6 +2038,7 @@ smba_start(
 	int					opt_write_behind,
 	int					opt_smb_request_write_threshold,
 	int					opt_smb_request_read_threshold,
+	int					opt_scatter_gather,
 	int					opt_tcp_no_delay,
 	int					opt_socket_receive_buffer_size,
 	int					opt_socket_send_buffer_size,
@@ -2288,6 +2295,7 @@ smba_start(
 		opt_write_behind,
 		opt_smb_request_write_threshold,
 		opt_smb_request_read_threshold,
+		opt_scatter_gather,
 		opt_tcp_no_delay,
 		opt_socket_receive_buffer_size,
 		opt_socket_send_buffer_size,

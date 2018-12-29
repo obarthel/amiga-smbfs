@@ -202,131 +202,138 @@ smb_receive_raw (
 	int					want_header,
 	int *				error_ptr)
 {
-	unsigned char netbios_session_buf[256];
-	unsigned char * netbios_session_data;
+	unsigned char netbios_session_buf[NETBIOS_HEADER_SIZE];
 	int netbios_session_payload_size;
 	int len, result;
 
 	ASSERT( error_ptr != NULL );
 
-	server->rcls	= 0;
-	server->err		= 0;
-
-	/* If the NetBIOS header needs to be returned, receive it along
-	 * with the SMB message and whatever follows.
+	/* We need to read the NetBIOS session header before we can move
+	 * on and read the SMB data. Because the NetBIOS session header
+	 * may be a keepalive message or something else we can safely
+	 * ignore, we will retry reading the header until we get to the
+	 * point where it is safe to read the SMB data.
 	 */
-	if (want_header)
+	while(TRUE)
 	{
-		LOG(("NetBIOS header will be returned as part of the buffer\n"));
+		server->rcls	= 0;
+		server->err		= 0;
 
-		netbios_session_data = target;
-	}
-	/* Otherwise store the NetBIOS header in a separate buffer. */
-	else
-	{
-		LOG(("NetBIOS header will be processed separately\n"));
-
-		netbios_session_data = netbios_session_buf;
-	}
-
- re_recv:
-
-	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
-	result = receive_all (sock_fd, netbios_session_data, NETBIOS_HEADER_SIZE, error_ptr);
-	if (result < 0)
-	{
-		LOG (("recv error = %ld\n", (*error_ptr)));
-		goto out;
-	}
-
-	if (result < NETBIOS_HEADER_SIZE)
-	{
-		LOG (("expected %ld bytes, got %ld\n", NETBIOS_HEADER_SIZE, result));
-
-		(*error_ptr) = error_end_of_file;
-
-		result = -1;
-		goto out;
-	}
-
-	netbios_session_payload_size = (int)smb_len(netbios_session_data);
-	SHOWVALUE(netbios_session_payload_size);
-
-	#if defined(DUMP_SMB)
-	{
-		if(command != 0 && netbios_session_data[0] != 0x00 && netbios_session_payload_size > 0)
+		/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
+		result = receive_all (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE, error_ptr);
+		if (result < 0)
 		{
-			/* We only want to show what's in the first few
-			 * bytes of a session packet. Since we only support
-			 * two session packet types (session message and
-			 * session keep alive) we will abort processing
-			 * anyway so it doesn't matter if we ignore any
-			 * data beyond the first 256 bytes.
-			 */
-			if(netbios_session_payload_size > 256 - NETBIOS_HEADER_SIZE)
-				netbios_session_payload_size = 256 - NETBIOS_HEADER_SIZE;
-
-			result = receive_all (sock_fd, &netbios_session_data[NETBIOS_HEADER_SIZE], netbios_session_payload_size - NETBIOS_HEADER_SIZE, error_ptr);
-			if (result < 0)
-			{
-				LOG (("recv error = %ld\n", (*error_ptr)));
-				goto out;
-			}
-
-			if(result < netbios_session_payload_size - NETBIOS_HEADER_SIZE)
-			{
-				LOG (("result (%ld) < %ld\n", result, netbios_session_payload_size - NETBIOS_HEADER_SIZE));
-
-				(*error_ptr) = error_end_of_file;
-
-				result = -1;
-				goto out;
-			}
-
-			dump_netbios_header(__FILE__,__LINE__,netbios_session_data,&netbios_session_data[NETBIOS_HEADER_SIZE],netbios_session_payload_size);
+			LOG (("recv error = %ld\n", (*error_ptr)));
+			goto out;
 		}
-		else
+
+		if (result < NETBIOS_HEADER_SIZE)
 		{
-			dump_netbios_header(__FILE__,__LINE__,netbios_session_data,NULL,0);
+			LOG (("expected %ld bytes, got %ld\n", NETBIOS_HEADER_SIZE, result));
+
+			(*error_ptr) = error_end_of_file;
+
+			result = -1;
+			goto out;
 		}
-	}
-	#endif /* defined(DUMP_SMB) */
 
-	/* Check the session type. */
-	switch (netbios_session_data[0])
-	{
-		/* 0x00 == session message */
-		case 0x00:
+		netbios_session_payload_size = (int)smb_len(netbios_session_buf);
+		SHOWVALUE(netbios_session_payload_size);
 
-			break;
+		#if defined(DUMP_SMB)
+		{
+			if(command != 0 && netbios_session_buf[0] != 0x00 && netbios_session_payload_size > 0)
+			{
+				unsigned char netbios_session_payload[256];
 
-		/* 0x85 == session keepalive */
-		case 0x85:
+				/* We only want to show what's in the first few
+				 * bytes of a session packet. Since we only support
+				 * two session packet types (session message and
+				 * session keep alive) we will abort processing
+				 * anyway so it doesn't matter if we ignore any
+				 * data beyond the first 256 bytes.
+				 */
+				if(netbios_session_payload_size > 256)
+					netbios_session_payload_size = 256;
 
+				result = receive_all (sock_fd, netbios_session_payload, netbios_session_payload_size, error_ptr);
+				if (result < 0)
+				{
+					LOG (("recv error = %ld\n", (*error_ptr)));
+					goto out;
+				}
+
+				if(result < netbios_session_payload_size)
+				{
+					LOG (("result (%ld) < %ld\n", result, netbios_session_payload_size));
+
+					(*error_ptr) = error_end_of_file;
+
+					result = -1;
+					goto out;
+				}
+
+				dump_netbios_header(__FILE__,__LINE__,netbios_session_buf,netbios_session_payload,netbios_session_payload_size);
+			}
+			else
+			{
+				dump_netbios_header(__FILE__,__LINE__,netbios_session_buf,NULL,0);
+			}
+		}
+		#endif /* defined(DUMP_SMB) */
+
+		/* Is this a session keepalive message? If so,
+		 * read the next frame.
+		 */
+		if (netbios_session_buf[0] == 0x85)
+		{
 			LOG (("Got SESSION KEEP ALIVE\n"));
-			goto re_recv;
-
-		/* 0x81 == session request */
-		/* 0x82 == positive session response */
-		/* 0x83 == negative session response */
-		/* 0x84 == retarget session response */
-		default:
-
-			/* The session setup may need to know about the
-			 * NetBIOS session response, but for any command
-			 * these message types are invalid.
-			 */
-			if(command != 0)
-			{
-				LOG (("Invalid session header type 0x%02lx\n", netbios_session_data[0]));
-
-				(*error_ptr) = error_invalid_netbios_session;
-
-				result = -1;
-				goto out;
-			}
-
+			continue;
+		}
+		/* Is this a regular session message? This is what
+		 * we came for.
+		 */
+		else if (netbios_session_buf[0] == 0x00)
+		{
 			break;
+		}
+
+		/* Check the session type again, looking for
+		 * anything peculiar.
+		 */
+		switch (netbios_session_buf[0])
+		{
+			/* 0x00 == session message */
+			case 0x00:
+
+				/* This is what we came for. */
+				break;
+
+			/* 0x81 == session request */
+			/* 0x82 == positive session response */
+			/* 0x83 == negative session response */
+			/* 0x84 == retarget session response */
+			default:
+
+				/* The session setup may need to know about the
+				 * NetBIOS session response, but for any command
+				 * these message types are invalid.
+				 */
+				if(command != 0)
+				{
+					LOG (("Invalid session header type 0x%02lx\n", netbios_session_buf[0]));
+
+					(*error_ptr) = error_invalid_netbios_session;
+
+					result = -1;
+					goto out;
+				}
+
+				/* Ignore this message type. */
+				break;
+		}
+
+		break;
 	}
 
 	/* The length in the NetBIOS header is the raw data length (17 bits) */
@@ -341,11 +348,12 @@ smb_receive_raw (
 		goto out;
 	}
 
-	/* Did we read the NetBIOS header already? Make sure that
-	 * the data to follow goes into the right receive buffer.
-	 */
+	/* Prepend the NetBIOS header to what is read? */
 	if (want_header)
+	{
+		memcpy (target, netbios_session_buf, NETBIOS_HEADER_SIZE);
 		target += NETBIOS_HEADER_SIZE;
+	}
 
 	/* This is an optimization for the SMB_COM_READ and SMB_COM_READ_ANDX
 	 * commands, which tries to avoid copying the received data twice. To
@@ -414,7 +422,7 @@ smb_receive_raw (
 					LOG (("EOF\n"));
 
 					(*error_ptr) = error_end_of_file;
-			
+
 					result = -1;
 					goto out;
 				}
@@ -442,7 +450,7 @@ smb_receive_raw (
 						LOG (("EOF\n"));
 
 						(*error_ptr) = error_end_of_file;
-			
+
 						result = -1;
 						goto out;
 					}
@@ -543,7 +551,7 @@ smb_receive_raw (
 					LOG (("EOF\n"));
 
 					(*error_ptr) = error_end_of_file;
-			
+
 					result = -1;
 					goto out;
 				}
@@ -612,7 +620,7 @@ smb_receive_raw (
 
 				if(count_of_bytes_to_read < count_of_bytes_returned)
 				{
-					LOG(("fewer data available than should be delivered; setting the remainder (%ld bytes) to 0.\n", count_of_bytes_returned - count_of_bytes_to_read)); 
+					LOG(("fewer data available than should be delivered; setting the remainder (%ld bytes) to 0.\n", count_of_bytes_returned - count_of_bytes_to_read));
 
 					memset(&input_payload[count_of_bytes_to_read],0,count_of_bytes_returned - count_of_bytes_to_read);
 				}
@@ -760,7 +768,7 @@ smb_receive_raw (
 
 				if(count_of_bytes_to_read < count_of_bytes_returned)
 				{
-					LOG(("fewer data available than should be delivered; setting the remainder (%ld bytes) to 0.\n", count_of_bytes_returned - count_of_bytes_to_read)); 
+					LOG(("fewer data available than should be delivered; setting the remainder (%ld bytes) to 0.\n", count_of_bytes_returned - count_of_bytes_to_read));
 
 					memset(&input_payload[count_of_bytes_to_read],0,count_of_bytes_returned - count_of_bytes_to_read);
 				}
@@ -1405,22 +1413,71 @@ smb_request (
 	dump_smb(__FILE__,__LINE__,0,buffer+NETBIOS_HEADER_SIZE,len-NETBIOS_HEADER_SIZE,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
-	result = send (sock_fd, (void *) buffer, len, 0);
-	if (result < 0)
-	{
-		LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
-
-		(*error_ptr) = errno;
-
-		goto out;
-	}
-
 	if(output_payload != NULL && payload_size > 0)
 	{
-		result = send (sock_fd, (void *)output_payload, payload_size, 0);
+		/* Use two send() calls for header and payload? */
+		if(!server->scatter_gather)
+		{
+			LOG(("using two send() calls\n"));
+
+			result = send (sock_fd, (void *) buffer, len, 0);
+			if (result < 0)
+			{
+				LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
+
+				(*error_ptr) = errno;
+
+				goto out;
+			}
+
+			result = send (sock_fd, (void *)output_payload, payload_size, 0);
+			if (result < 0)
+			{
+				LOG(("payload send() for %ld bytes failed (errno=%ld)\n", payload_size, errno));
+
+				(*error_ptr) = errno;
+
+				goto out;
+			}
+		}
+		/* No, use sendmsg() to transmit both header and payload
+		 * in one single step.
+		 */
+		else
+		{
+			struct msghdr msg;
+			struct iovec iov[2];
+
+			LOG(("using sendmsg() for %ld+%ld = %ld bytes\n", len, payload_size, len+payload_size));
+
+			memset(&msg,0,sizeof(msg));
+
+			msg.msg_iov		= iov;
+			msg.msg_iovlen	= 2;
+
+			iov[0].iov_base	= buffer;
+			iov[0].iov_len	= len;
+
+			iov[1].iov_base	= (void *)output_payload;
+			iov[1].iov_len	= payload_size;
+
+			result = sendmsg (sock_fd, &msg, 0);
+			if (result < 0)
+			{
+				LOG(("sendmsg() for %ld+%ld bytes failed (errno=%ld)\n", len, payload_size, errno));
+
+				(*error_ptr) = errno;
+
+				goto out;
+			}
+		}
+	}
+	else
+	{
+		result = send (sock_fd, (void *) buffer, len, 0);
 		if (result < 0)
 		{
-			LOG(("payload send() for %ld bytes failed (errno=%ld)\n", payload_size, errno));
+			LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
 
 			(*error_ptr) = errno;
 
@@ -1581,36 +1638,73 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 
 	ASSERT( length <= 65535 );
 
-	/* Send the NetBIOS header. */
+	/* Prepare the NetBIOS header, which in this case is
+	 * providing the length of the data to follow it.
+	 */
 	smb_encode_smb_length (nb_header, length);
 
 	#if defined(DUMP_SMB)
 	dump_netbios_header(__FILE__,__LINE__,nb_header,NULL,0);
-	#endif /* defined(DUMP_SMB) */
-
-	result = send (sock_fd, nb_header, NETBIOS_HEADER_SIZE, 0);
-	if(result < 0)
-	{
-		LOG(("send() for %ld bytes failed (errno=%ld)\n", NETBIOS_HEADER_SIZE, errno));
-
-		(*error_ptr) = errno;
-
-		goto out;
-	}
-
-	#if defined(DUMP_SMB)
 	dump_smb(__FILE__,__LINE__,0,source,length,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
-	/* Now send the data to be written. */
-	result = send (sock_fd, (void *)source, length, 0);
-	if(result < 0)
+	/* Use two send() calls to transmit header and data? */
+	if(!server->scatter_gather)
 	{
-		LOG(("send() for %ld bytes failed (errno=%ld)\n", length, errno));
+		LOG(("using two send() calls\n"));
 
-		(*error_ptr) = errno;
+		/* Send the NetBIOS header. */
+		result = send (sock_fd, nb_header, NETBIOS_HEADER_SIZE, 0);
+		if(result < 0)
+		{
+			LOG(("send() for %ld bytes failed (errno=%ld)\n", NETBIOS_HEADER_SIZE, errno));
 
-		goto out;
+			(*error_ptr) = errno;
+
+			goto out;
+		}
+
+		/* Now send the data to be written. */
+		result = send (sock_fd, (void *)source, length, 0);
+		if(result < 0)
+		{
+			LOG(("send() for %ld bytes failed (errno=%ld)\n", length, errno));
+
+			(*error_ptr) = errno;
+
+			goto out;
+		}
+	}
+	/* No, use sendmsg() to transmit header and data in
+	 * one single step.
+	 */
+	else
+	{
+		struct msghdr msg;
+		struct iovec iov[2];
+
+		LOG(("using sendmsg() for %ld+%ld = %ld bytes\n", NETBIOS_HEADER_SIZE, length, NETBIOS_HEADER_SIZE+length));
+
+		memset(&msg,0,sizeof(msg));
+
+		msg.msg_iov		= iov;
+		msg.msg_iovlen	= 2;
+
+		iov[0].iov_base	= nb_header;
+		iov[0].iov_len	= NETBIOS_HEADER_SIZE;
+
+		iov[1].iov_base	= (void *)source;
+		iov[1].iov_len	= length;
+
+		result = sendmsg (sock_fd, &msg, 0);
+		if (result < 0)
+		{
+			LOG(("sendmsg() for %ld+%ld bytes failed (errno=%ld)\n", NETBIOS_HEADER_SIZE, length, errno));
+
+			(*error_ptr) = errno;
+
+			goto out;
+		}
 	}
 
 	/* Wait for the server to respond. */
