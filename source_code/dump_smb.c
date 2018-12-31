@@ -900,7 +900,7 @@ print_smb_transaction2_subcommand(int command,enum smb_packet_source_t smb_packe
 				FPrintf(dump_smb_file,"\t                   %s\n",convert_filetime_to_string(last_access_time));
 				FPrintf(dump_smb_file,"\tlast change time = 0x%08lx%08lx\n",last_change_time[0],last_change_time[1]);
 				FPrintf(dump_smb_file,"\t                   %s\n",convert_filetime_to_string(last_change_time));
-				FPrintf(dump_smb_file,"\tend of file = %ls (0x%08lx%08lx)\n",convert_qword_to_string(end_of_file),end_of_file[0],end_of_file[1]);
+				FPrintf(dump_smb_file,"\tend of file = %s (0x%08lx%08lx)\n",convert_qword_to_string(end_of_file),end_of_file[0],end_of_file[1]);
 				FPrintf(dump_smb_file,"\tallocation size = %s (0x%08lx%08lx)\n",convert_qword_to_string(allocation_size),allocation_size[0],allocation_size[1]);
 
 				FPrintf(dump_smb_file,"\text file attributes = 0x%08lx\n",ext_file_attributes);

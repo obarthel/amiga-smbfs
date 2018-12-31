@@ -106,6 +106,9 @@ smb_discard_netbios_frames(struct smb_server *server, int sock_fd, int * error_p
 
 	ENTER();
 
+	ASSERT( server != NULL );
+	ASSERT( error_ptr != NULL );
+
 	/* Read the NetBIOS session header (rfc-1002, section 4.3.1) */
 	result = receive_all (sock_fd, netbios_session_buf, NETBIOS_HEADER_SIZE, error_ptr);
 	if (result < 0)
@@ -203,9 +206,10 @@ smb_receive_raw (
 	int *				error_ptr)
 {
 	unsigned char netbios_session_buf[NETBIOS_HEADER_SIZE];
-	int netbios_session_payload_size;
+	int netbios_session_payload_size = 0;
 	int len, result;
 
+	ASSERT( server != NULL );
 	ASSERT( error_ptr != NULL );
 
 	/* We need to read the NetBIOS session header before we can move
@@ -229,7 +233,7 @@ smb_receive_raw (
 
 		if (result < NETBIOS_HEADER_SIZE)
 		{
-			LOG (("expected %ld bytes, got %ld\n", NETBIOS_HEADER_SIZE, result));
+			LOG (("expected %ld bytes, got %ld for the NetBIOS header\n", NETBIOS_HEADER_SIZE, result));
 
 			(*error_ptr) = error_end_of_file;
 
@@ -253,8 +257,8 @@ smb_receive_raw (
 				 * anyway so it doesn't matter if we ignore any
 				 * data beyond the first 256 bytes.
 				 */
-				if(netbios_session_payload_size > 256)
-					netbios_session_payload_size = 256;
+				if(netbios_session_payload_size > (int)sizeof(netbios_session_payload))
+					netbios_session_payload_size = sizeof(netbios_session_payload);
 
 				result = receive_all (sock_fd, netbios_session_payload, netbios_session_payload_size, error_ptr);
 				if (result < 0)
@@ -351,6 +355,8 @@ smb_receive_raw (
 	/* Prepend the NetBIOS header to what is read? */
 	if (want_header)
 	{
+		ASSERT( target != NULL );
+
 		memcpy (target, netbios_session_buf, NETBIOS_HEADER_SIZE);
 		target += NETBIOS_HEADER_SIZE;
 	}
@@ -403,6 +409,8 @@ smb_receive_raw (
 				 */
 
 				LOG(("SMBreadX: reading the first %ld bytes\n", 59));
+
+				ASSERT( target != NULL );
 
 				result = receive_all (sock_fd, target, 59, error_ptr);
 				if (result < 0)
@@ -532,6 +540,8 @@ smb_receive_raw (
 				 */
 
 				LOG(("SMBread: reading the first %ld bytes\n", 48));
+
+				ASSERT( target != NULL );
 
 				result = receive_all (sock_fd, target, 48, error_ptr);
 				if (result < 0)
@@ -677,6 +687,8 @@ smb_receive_raw (
 		{
 			LOG(("receiving SMB message and payload in one chunk\n"));
 
+			ASSERT( target != NULL );
+
 			result = receive_all (sock_fd, target, len, error_ptr);
 			if (result < 0)
 			{
@@ -777,6 +789,8 @@ smb_receive_raw (
 	}
 	else
 	{
+		ASSERT( target != NULL );
+
 		result = receive_all (sock_fd, target, len, error_ptr);
 		if (result < 0)
 		{
@@ -1108,7 +1122,10 @@ smb_connect (struct smb_server *server, int * error_ptr)
 		server->mount_data.fd = result;
 	}
 
-	LOG(("connecting to server %s:%ld with socket %ld\n", Inet_NtoA(server->mount_data.addr.sin_addr.s_addr), ntohs(server->mount_data.addr.sin_port), server->mount_data.fd));
+	LOG(("connecting to server %s:%ld with socket %ld\n",
+		Inet_NtoA(server->mount_data.addr.sin_addr.s_addr),
+		ntohs(server->mount_data.addr.sin_port),
+		server->mount_data.fd));
 
 	/* Wait a certain time period for the connection attempt to succeed? */
 	if(server->timeout > 0)
@@ -1406,7 +1423,12 @@ smb_request (
 		}
 	}
 
-	LOG (("len = %ld, cmd = 0x%lx, input_payload=0x%08lx, output_payload=0x%08lx, payload_size=%ld\n", len, buffer[8], input_payload, output_payload, payload_size));
+	LOG (("len = %ld, cmd = 0x%lx, input_payload=0x%08lx, output_payload=0x%08lx, payload_size=%ld\n",
+		len,
+		buffer[8],
+		input_payload,
+		output_payload,
+		payload_size));
 
 	#if defined(DUMP_SMB)
 	dump_netbios_header(__FILE__,__LINE__,buffer,&buffer[NETBIOS_HEADER_SIZE],len);
@@ -1559,6 +1581,10 @@ smb_trans2_request (
 	return result;
 }
 
+/* Perform the actual read operation for the SMBreadbraw command, for which
+ * the transmit buffer has already been set up, ready to be used. This
+ * function is called by smb_proc_read_raw().
+ */
 int
 smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_len, int * error_ptr)
 {

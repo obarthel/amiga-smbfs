@@ -300,11 +300,18 @@ _SHOWSTRING(
 
 		if(debug_file == (BPTR)NULL)
 		{
-			kprintf("%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+			if(string != NULL)
+				kprintf("%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+			else
+				kprintf("%s:%ld:%s = NULL \"\"\n",file,line,name);
 		}
 		else
 		{
-			FPrintf(debug_file,"%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+			if(string != NULL)
+				FPrintf(debug_file,"%s:%ld:%s = 0x%08lx \"%s\"\n",file,line,name,string,string);
+			else
+				FPrintf(debug_file,"%s:%ld:%s = NULL \"\"\n",file,line,name);
+
 			Flush(debug_file);
 		}
 	}
@@ -558,7 +565,7 @@ _ASSERT(
 		{
 			if(x == 0)
 			{
-				kprintf("%s:%ld:Expression `%s' failed assertion in %s().\n",
+				kprintf("%s:%ld:Expression '%s' failed assertion in %s().\n",
 				        file,
 				        line,
 				        xs,
@@ -604,7 +611,7 @@ _ASSERT(
 
 			if(debug_file == (BPTR)NULL)
 			{
-				kprintf("%s:%ld:Expression `%s' failed assertion in %s().\n",
+				kprintf("%s:%ld:Expression '%s' failed assertion in %s().\n",
 				        file,
 				        line,
 				        xs,
@@ -612,7 +619,7 @@ _ASSERT(
 			}
 			else
 			{
-				FPrintf(debug_file,"%s:%ld:Expression `%s' failed assertion in %s().\n",
+				FPrintf(debug_file,"%s:%ld:Expression '%s' failed assertion in %s().\n",
 				        file,
 				        line,
 				        xs,

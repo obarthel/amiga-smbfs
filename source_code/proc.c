@@ -1656,7 +1656,7 @@ smb_proc_read_raw (
 	struct smb_dirent *finfo,
 	const QUAD * const offset_quad,
 	long count,
-	char *data,
+	char * data,
 	int * error_ptr)
 {
 	char *buf = server->transmit_buffer;
@@ -4381,7 +4381,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		dword server_sesskey;
 
 		/*
-		LOG (("password = %s\n",server->mount_data.password*));
+		LOG (("password = %s\n",server->mount_data.password));
 		*/
 		LOG (("usernam = %s\n",server->mount_data.username));
 		LOG (("blkmode = %ld\n",WVAL (packet, smb_vwv5)));
@@ -4984,7 +4984,7 @@ smb_printerr (int class, int num)
 
 			report_error ("%s - %s (%s).", err_classes[i].class, err[j].name, err[j].message);
 
-			LOG (("%s - %s (%s)\n",err_classes[i].class, err[j].name,err[j].message));
+			LOG (("%s - %s (%s)\n", err_classes[i].class, err[j].name, err[j].message));
 			return;
 		}
 	}

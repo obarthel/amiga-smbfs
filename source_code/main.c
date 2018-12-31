@@ -31,6 +31,8 @@
  * Samba 4.6.7: smbfs debuglevel=2 debugfile=ram:ubuntu-17.log volume=ubuntu-test //ubuntu-17-olaf/test
  * Samba 4.7.6: smbfs debuglevel=2 debugfile=ram:ubuntu-18.log volume=ubuntu-test //ubuntu-18-olaf/test
  * Samba 3.0.25: smbfs debuglevel=2 debugfile=ram:samba-3.0.25.log user=olsen password=... volume=olsen //192.168.1.118/olsen
+ *
+ * diskspeed drive olsen:Documents dir seek fast byte nocpu
  */
 
 #include "smbfs.h"
@@ -971,6 +973,14 @@ main(void)
 				}
 			}
 		}
+		#else
+		{
+			if(get_icon_tool_type_value("DEBUG","DEBUGLEVEL") != NULL || get_icon_tool_type_value("DEBUGFILE",NULL) != NULL)
+			{
+				report_error("This version of the smbfs program has no built-in debug support.");
+				goto out;
+			}
+		}
 		#endif /* DEBUG */
 
 		/* Examine the icon's tool types and use the
@@ -1210,6 +1220,14 @@ main(void)
 			}
 
 			SETDEBUGFILE(debug_file);
+		}
+		#else
+		{
+			if(args.DebugLevel != NULL || args.DebugFile != NULL)
+			{
+				report_error("This version of the smbfs program has no built-in debug support.");
+				goto out;
+			}
 		}
 		#endif /* DEBUG */
 
@@ -4521,6 +4539,8 @@ escape_name(const TEXT * name)
 		len += sizeof(truncated_suffix)-1;
 	}
 
+	ASSERT( len < (int)sizeof(buffer) );
+
 	buffer[len] = '\0';
 
 	return(buffer);
@@ -7058,7 +7078,7 @@ Action_ExamineObject(
 	#if DEBUG
 	{
 		struct DateTime dat;
-		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+		TEXT date[2 * LEN_DATSTRING],time[2 * LEN_DATSTRING];
 
 		memset(&dat,0,sizeof(dat));
 
@@ -7066,7 +7086,7 @@ Action_ExamineObject(
 		memset(time,0,sizeof(time));
 
 		dat.dat_Stamp	= fib->fib_Date;
-		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_Format	= FORMAT_DOS;
 		dat.dat_StrDate	= date;
 		dat.dat_StrTime	= time;
 
@@ -7078,6 +7098,9 @@ Action_ExamineObject(
 		{
 			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
 		}
+
+		ASSERT( strlen(date) < sizeof(date) );
+		ASSERT( strlen(time) < sizeof(time) );
 	}
 	#endif /* DEBUG */
 
@@ -7260,7 +7283,7 @@ dir_scan_callback_func_exnext(
 	#if DEBUG
 	{
 		struct DateTime dat;
-		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+		TEXT date[2 * LEN_DATSTRING],time[2 * LEN_DATSTRING];
 
 		memset(&dat,0,sizeof(dat));
 
@@ -7268,7 +7291,7 @@ dir_scan_callback_func_exnext(
 		memset(time,0,sizeof(time));
 
 		dat.dat_Stamp	= fib->fib_Date;
-		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_Format	= FORMAT_DOS;
 		dat.dat_StrDate	= date;
 		dat.dat_StrTime	= time;
 
@@ -7280,6 +7303,9 @@ dir_scan_callback_func_exnext(
 		{
 			D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
 		}
+
+		ASSERT( strlen(date) < sizeof(date) );
+		ASSERT( strlen(time) < sizeof(time) );
 	}
 	#endif /* DEBUG */
 
@@ -7481,7 +7507,7 @@ dir_scan_callback_func_exall(
 		st_size_quad.High	= st->size_high;
 
 		D((" '%s'",escape_name(name)));
-		D(("   is directory=%s, is read-only=%ls, is hidden=%s, size=%s", st->is_dir ? "yes" : "no",st->is_read_only ? "yes" : "no",st->is_hidden ? "yes" : "no",convert_quad_to_string(&st_size_quad)));
+		D(("   is directory=%s, is read-only=%s, is hidden=%s, size=%s", st->is_dir ? "yes" : "no",st->is_read_only ? "yes" : "no",st->is_hidden ? "yes" : "no",convert_quad_to_string(&st_size_quad)));
 		D(("   next_pos=%ld eof=%ld",next_pos,eof));
 	}
 	#endif /* DEBUG */
@@ -7639,7 +7665,7 @@ dir_scan_callback_func_exall(
 		/* Careful: the 'archive' attribute has exactly the opposite
 		 *          meaning in the Amiga and the SMB worlds.
 		 */
-		D(("   was changed since last_archive = %s",st->was_changed_since_last_archive ? "yes" : "no"));
+		D(("   was changed since last archive = %s",st->was_changed_since_last_archive ? "yes" : "no"));
 
 		if(NOT st->was_changed_since_last_archive)
 			ed->ed_Prot |= FIBF_ARCHIVE;
@@ -7665,7 +7691,7 @@ dir_scan_callback_func_exall(
 		#if DEBUG
 		{
 			struct DateTime dat;
-			TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+			TEXT date[2 * LEN_DATSTRING],time[2 * LEN_DATSTRING];
 
 			memset(&dat,0,sizeof(dat));
 
@@ -7675,7 +7701,7 @@ dir_scan_callback_func_exall(
 			dat.dat_Stamp.ds_Days	= ed->ed_Days;
 			dat.dat_Stamp.ds_Minute	= ed->ed_Mins;
 			dat.dat_Stamp.ds_Tick	= ed->ed_Ticks;
-			dat.dat_Format			= FORMAT_DEF;
+			dat.dat_Format			= FORMAT_DOS;
 			dat.dat_StrDate			= date;
 			dat.dat_StrTime			= time;
 
@@ -7687,6 +7713,9 @@ dir_scan_callback_func_exall(
 			{
 				D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks));
 			}
+
+			ASSERT( strlen(date) < sizeof(date) );
+			ASSERT( strlen(time) < sizeof(time) );
 		}
 		#endif /* DEBUG */
 	}
@@ -8884,7 +8913,7 @@ Action_SetDate(
 	#if DEBUG
 	{
 		struct DateTime dat;
-		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+		TEXT date[2 * LEN_DATSTRING],time[2 * LEN_DATSTRING];
 
 		memset(&dat,0,sizeof(dat));
 
@@ -8892,7 +8921,7 @@ Action_SetDate(
 		memset(time,0,sizeof(time));
 
 		dat.dat_Stamp	= (*ds);
-		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_Format	= FORMAT_DOS;
 		dat.dat_StrDate	= date;
 		dat.dat_StrTime	= time;
 
@@ -8904,16 +8933,28 @@ Action_SetDate(
 		{
 			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", ds->ds_Days, ds->ds_Minute, ds->ds_Tick));
 		}
+
+		ASSERT( strlen(date) < sizeof(date) );
+		ASSERT( strlen(time) < sizeof(time) );
 	}
 	#endif /* DEBUG */
 
 	seconds = (ds->ds_Days * 24 * 60 + ds->ds_Minute) * 60 + (ds->ds_Tick / TICKS_PER_SECOND);
 
-	st.ctime = 0;
+	/* We change both the creation date/time and the last modification
+	 * date/time because the SMB server may not initialize all four
+	 * date/time records for ACTION_EXAMINE/ACTION_EXNEXT/ACTION_EXAMINE_ALL
+	 * to use. The modification date/time may be missing, so the
+	 * creation date/time is used in its stead.
+	 *
+	 * Unless we initialize it here, the ACTION_EXAMINE/ACTION_EXNEXT/ACTION_EXAMINE_ALL
+	 * 'Date file last changed' may always end up using the creation time.
+	 */
+	st.ctime = seconds + UNIX_TIME_OFFSET + get_time_zone_delta();
+	st.mtime = st.ctime;
 	st.atime = 0;
-	st.mtime = seconds + UNIX_TIME_OFFSET + get_time_zone_delta();
 
-	D(("mtime = %lu",st.mtime));
+	D(("ctime = mtime = %lu",st.ctime));
 
 	if(smba_setattr(file,&st,NULL,&error) < 0)
 	{
@@ -9067,7 +9108,7 @@ Action_ExamineFH(
 	#if DEBUG
 	{
 		struct DateTime dat;
-		TEXT date[LEN_DATSTRING],time[LEN_DATSTRING];
+		TEXT date[2 * LEN_DATSTRING],time[2 * LEN_DATSTRING];
 
 		memset(&dat,0,sizeof(dat));
 
@@ -9075,7 +9116,7 @@ Action_ExamineFH(
 		memset(time,0,sizeof(time));
 
 		dat.dat_Stamp	= fib->fib_Date;
-		dat.dat_Format	= FORMAT_DEF;
+		dat.dat_Format	= FORMAT_DOS;
 		dat.dat_StrDate	= date;
 		dat.dat_StrTime	= time;
 
@@ -9087,6 +9128,9 @@ Action_ExamineFH(
 		{
 			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
 		}
+
+		ASSERT( strlen(date) < sizeof(date) );
+		ASSERT( strlen(time) < sizeof(time) );
 	}
 	#endif /* DEBUG */
 
@@ -10830,6 +10874,8 @@ convert_quad_to_string(const QUAD * const number)
 		if(m.High == 0 && m.Low == 0)
 			break;
 	}
+
+	ASSERT( len+1 >= 0 );
 
 	return(&string[len+1]);
 }

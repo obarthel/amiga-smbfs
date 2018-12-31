@@ -315,7 +315,7 @@ main(int argc,char *argv[])
 				dat.dat_Stamp.ds_Days	= ead->ed_Days;
 				dat.dat_Stamp.ds_Minute	= ead->ed_Mins;
 				dat.dat_Stamp.ds_Tick	= ead->ed_Ticks;
-				dat.dat_Format			= FORMAT_DEF;
+				dat.dat_Format			= FORMAT_DOS;
 				dat.dat_StrDate			= date;
 				dat.dat_StrTime			= time;
 

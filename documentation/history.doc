@@ -2796,3 +2796,43 @@ smbfs 2.10 (29.12.2018)
   I am uncertain if all AmiTCP V3/V4 TCP/IP stacks implement sendmsg()
   for TCP sockets in the same consistent manner, which is why this
   feature is not enabled by default.
+
+
+smbfs 2.11 (31.12.2018)
+
+- The ACTION_SETDATE operation again changes both the file/directory
+  creation date/time and the last modification date/time. Because some
+  SMB servers will not return a valid modification date/time, the
+  creation date/time will be substituted when directory entry information
+  is converted into the appropriate AmigaDOS data structures. This is
+  problematic if only the modification time/dated is updated by the
+  ACTION_SETDATE operation because the change may appear not to "stick".
+
+- The SMB function which would be used to update both the modification
+  and the creation time stamps did not take care to preserve the
+  creation time stamp. This might have contributed to the ACTION_SETDATE
+  operation not having a noticeable effect.
+
+- The debug code no longer uses FORMAT_DEF for converting AmigaDOS
+  time stamp information into readable text, but uses FORMAT_DOS
+  instead. This is an attempt to track down a hard to detect
+  bug in the debug code which might be related to locale.library
+  date conversion. Because the buffer size for the date and time
+  information is limited, the locale settings might just produce
+  too much text to fit into the buffers. But that's only a theory
+  so far...
+
+- The functions which the debug code uses to prepare 64 bit integers
+  and strings for display are now a bit more paranoid in watching
+  the lengths of the resulting strings, reporting possible
+  buffer overflows.
+
+- Went over all the debug output text format strings with a
+  fine-toothed comb and actually found a few instances of
+  the formatting parameters not being entirely correct.
+
+- The assert.c code makes a bit more of an effort to handle NULL
+  strings for display.
+
+- The non-debug builds of smbfs now complain again if any of the
+  debug parameters are being used.
