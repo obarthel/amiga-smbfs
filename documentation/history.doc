@@ -2836,3 +2836,30 @@ smbfs 2.11 (31.12.2018)
 
 - The non-debug builds of smbfs now complain again if any of the
   debug parameters are being used.
+
+
+smbfs 2.12 (5.1.2019)
+
+- Found a couple more cases in which debug output did not use the
+  correct parameter information. This happened, for example, in the
+  SMB write operation (which did not correctly report the 64 bit
+  seek offset) and the ACTION_SET_COMMENT implementation which
+  did not print the comment string correctly.
+
+- Added a proper string length limit check for the text buffers
+  used by the DateToStr() function.
+
+- Enabled profiling support for SAS/C to learn more about the
+  most frequently-used functions and their respective running
+  times. Added inline qualifiers to these functions, or copied
+  the respective function to where it was called, allowing it
+  to be inlined.
+
+- The main file system processing loop no longer calls WaitSelect()
+  every time it needs to wait for a new packet to arrive, or for
+  a NetBIOS "keep alive" message to come along. It now defaults to
+  calling Wait(), which has a much lower overhead than WaitSelect().
+  However, periodic calls to WaitSelect() and the associated NetBIOS
+  "keep alive" handling are scheduled regularly every 10 seconds.
+  That way the "keep alive" messages are dealt with without spending
+  too much time with WaitSelect().

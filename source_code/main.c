@@ -298,7 +298,9 @@ struct IconIFace *		IIcon;
 
 /****************************************************************************/
 
-struct timerequest TimerRequest;
+struct timerequest * TimerRequest;
+struct MsgPort * TimerPort;
+BOOL TimerTicking;
 
 /****************************************************************************/
 
@@ -308,6 +310,10 @@ struct Locale * Locale;
 
 int errno;
 int h_errno;
+
+/****************************************************************************/
+
+int profile_nest_count;
 
 /****************************************************************************/
 
@@ -504,6 +510,14 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 	 */
 	#else
 	{
+		#if defined(__SASC) && defined(_PROFILE) && _PROFILE
+		{
+			extern int __stdargs _STI_150_Sprof(void);
+
+			_STI_150_Sprof();
+		}
+		#endif
+
 		/* Not enough stack size available? */
 		if(get_stack_size() < minimum_stack_size)
 		{
@@ -543,6 +557,14 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 		{
 			result = main();
 		}
+
+		#if defined(__SASC) && defined(_PROFILE) && _PROFILE
+		{
+			extern void __stdargs _STD_150_Sprof(void);
+
+			_STD_150_Sprof();
+		}
+		#endif
 	}
 	#endif /* __amigaos4__ */
 
@@ -1300,7 +1322,7 @@ main(void)
 	{
 		if(GetVar("smbfs_password",env_password,sizeof(env_password),0) > 0)
 		{
-			D(("using PASSWORD=... stored in 'smbfs_password' environment variable."));
+			SHOWMSG("using PASSWORD=... stored in 'smbfs_password' environment variable.");
 
 			args.Password = env_password;
 		}
@@ -1532,9 +1554,9 @@ main(void)
 	D(("change user name case = %s", get_switch_status(args.ChangeUserNameCase, TRUE) ? "yes" : "no"));
 
 	if(args.Password != NULL)
-		D(("password = ..."));
+		SHOWMSG("password = ...");
 	else
-		D(("password = empty"));
+		SHOWMSG("password = empty");
 
 	D(("change password case = %s", get_switch_status(args.ChangePasswordCase, FALSE) ? "yes" : "no"));
 	D(("unicode = '%s'", args.Unicode));
@@ -1810,7 +1832,11 @@ posix_strerror(int error)
 		tags[0].ti_Data	= error;
 		tags[1].ti_Tag	= TAG_END;
 
+		PROFILE_OFF();
+
 		SocketBaseTagList(tags);
+
+		PROFILE_ON();
 
 		result = (STRPTR)tags[0].ti_Data;
 	}
@@ -1831,7 +1857,11 @@ host_strerror(int error)
 	tags[0].ti_Data	= error;
 	tags[1].ti_Tag	= TAG_END;
 
+	PROFILE_OFF();
+
 	SocketBaseTagList(tags);
+
+	PROFILE_ON();
 
 	result = (STRPTR)tags[0].ti_Data;
 
@@ -2143,7 +2173,7 @@ allocate_memory(LONG size)
 	{
 		ULONG * mem;
 
-		size = (sizeof(*mem) + size + 7) & ~7UL;
+		size = sizeof(*mem) + ((size + 7) & ~7UL);
 
 		mem = AllocPooled(MemoryPool,size);
 		if(mem != NULL)
@@ -2543,6 +2573,8 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 
 	ENTER();
 
+	PROFILE_OFF();
+
 	sock_fd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if(sock_fd < 0)
 	{
@@ -2676,6 +2708,8 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 	if(sock_fd >= 0)
 		CloseSocket(sock_fd);
 
+	PROFILE_ON();
+
 	RETURN(result);
 	return(result);
 }
@@ -2732,6 +2766,8 @@ SendNetBIOSStatusQuery(
 	struct servent * s;
 
 	ENTER();
+
+	PROFILE_OFF();
 
 	if(server_name != NULL && server_name_size > 0)
 	{
@@ -2965,6 +3001,8 @@ SendNetBIOSStatusQuery(
 	if(sock_fd >= 0)
 		CloseSocket(sock_fd);
 
+	PROFILE_ON();
+
 	RETURN(result);
 	return(result);
 }
@@ -2983,6 +3021,8 @@ send_disk_change_notification(ULONG class)
 	struct InputEvent ie;
 
 	ENTER();
+
+	PROFILE_OFF();
 
 	input_port = CreateMsgPort();
 	if(input_port == NULL)
@@ -3020,6 +3060,8 @@ send_disk_change_notification(ULONG class)
 
 	DeleteMsgPort(input_port);
 
+	PROFILE_ON();
+
 	LEAVE();
 }
 
@@ -3054,7 +3096,7 @@ find_file_node_by_name(const TEXT * name,const struct FileNode * skip)
 		if(result != NULL)
 			D(("found it (= 0x%08lx)", result));
 		else
-			D(("didn't find it"));
+			SHOWMSG("didn't find it");
 	}
 	#else
 	{
@@ -3077,26 +3119,26 @@ find_file_node_by_name(const TEXT * name,const struct FileNode * skip)
 			{
 				result = fn;
 
-				D(("found it (= 0x%08lx)", result));
+				D(("found it (= 0x%08lx)", (ULONG)result));
 			}
 			/* Use the next entry in the list, if possible. */
 			else if (sn->sn_next != NULL)
 			{
 				result = (struct FileNode *)sn->sn_next->sn_userdata;
 
-				D(("found it, but can't use it, so using the next best entry (= 0x%08lx)", result));
+				D(("found it, but can't use it, so using the next best entry (= 0x%08lx)", (ULONG)result));
 
 				if(result == NULL)
-					D(("...but didn't actually find it"));
+					SHOWMSG("...but didn't actually find it");
 			}
 			else
 			{
-				D(("didn't find it"));
+				SHOWMSG("didn't find it");
 			}
 		}
 		else
 		{
-			D(("didn't find it"));
+			SHOWMSG("didn't find it");
 		}
 	}
 	#endif /* USE_SPLAY_TREE */
@@ -3131,7 +3173,7 @@ find_lock_node_by_name(const TEXT * name,const struct LockNode * skip)
 		if(result != NULL)
 			D(("found it (= 0x%08lx)", result));
 		else
-			D(("didn't find it"));
+			SHOWMSG("didn't find it");
 	}
 	#else
 	{
@@ -3150,25 +3192,25 @@ find_lock_node_by_name(const TEXT * name,const struct LockNode * skip)
 			{
 				result = ln;
 
-				D(("found it (= 0x%08lx)", result));
+				D(("found it (= 0x%08lx)", (ULONG)result));
 			}
 			else if (sn->sn_next != NULL)
 			{
 				result = (struct LockNode *)sn->sn_next->sn_userdata;
 
-				D(("found it, but can't use it, so using the next best entry (= 0x%08lx)", result));
+				D(("found it, but can't use it, so using the next best entry (= 0x%08lx)", (ULONG)result));
 
 				if(result == NULL)
-					D(("...but didn't actually find it"));
+					SHOWMSG("...but didn't actually find it");
 			}
 			else
 			{
-				D(("didn't find it"));
+				SHOWMSG("didn't find it");
 			}
 		}
 		else
 		{
-			D(("didn't find it"));
+			SHOWMSG("didn't find it");
 		}
 	}
 	#endif /* USE_SPLAY_TREE */
@@ -3285,7 +3327,7 @@ path_name_is_invalid(const TEXT * name, int name_len)
 	for(i = 0 ; i < name_len ; i++)
 	{
 		c = name[i];
-		
+
 		if(c < ' ' || strchr("<>\"\\|?*", c) != NULL)
 			goto out;
 	}
@@ -3613,7 +3655,11 @@ really_remove_dosentry(struct DosList * entry)
 
 		reject_all_pending_packets(port);
 
+		PROFILE_OFF();
+
 		Delay(TICKS_PER_SECOND / 10);
+
+		PROFILE_ON();
 	}
 
 	if(NO success)
@@ -3632,6 +3678,8 @@ cleanup(void)
 	BOOL send_disk_change = FALSE;
 
 	ENTER();
+
+	PROFILE_OFF();
 
 	/* If any errors have cropped up, display them now before
 	 * we call it quits.
@@ -3743,11 +3791,26 @@ cleanup(void)
 	}
 	#endif /* __amigaos4__ */
 
-	if(TimerBase != NULL)
+	if(TimerRequest != NULL)
 	{
-		CloseDevice((struct IORequest *)&TimerRequest);
-		TimerBase = NULL;
+		if(TimerTicking)
+		{
+			if(CheckIO((struct IORequest *)TimerRequest) == NULL)
+				AbortIO((struct IORequest *)TimerRequest);
+
+			WaitIO((struct IORequest *)TimerRequest);
+			TimerTicking = FALSE;
+		}
+
+		if(TimerRequest->tr_node.io_Device != NULL)
+			CloseDevice((struct IORequest *)TimerRequest);
+
+		DeleteIORequest((struct IORequest *)TimerRequest);
+		TimerRequest = NULL;
 	}
+
+	if(TimerPort != NULL)
+		DeleteMsgPort(TimerPort);
 
 	#if defined(__amigaos4__)
 	{
@@ -3808,6 +3871,8 @@ cleanup(void)
 		DeletePool(MemoryPool);
 		MemoryPool = NULL;
 	}
+
+	PROFILE_ON();
 
 	LEAVE();
 }
@@ -3884,6 +3949,8 @@ setup(
 
 	ENTER();
 
+	PROFILE_OFF();
+
 	NewList((struct List *)&FileList);
 	NewList((struct List *)&LockList);
 
@@ -3950,26 +4017,27 @@ setup(
 		SHOWVALUE(DSTOffset);
 	}
 
-	memset(&TimerRequest,0,sizeof(TimerRequest));
+	TimerPort = CreateMsgPort();
+	if(TimerPort != NULL)
+		TimerRequest = (struct timerequest *)CreateIORequest(TimerPort, sizeof(*TimerRequest));
 
-	if(OpenDevice(TIMERNAME,UNIT_VBLANK,(struct IORequest *)&TimerRequest,0) != OK)
+	if(TimerRequest == NULL || OpenDevice(TIMERNAME,UNIT_VBLANK,(struct IORequest *)TimerRequest,0) != OK)
 	{
 		report_error("Could not open 'timer.device'.");
 		goto out;
 	}
 
-	TimerBase = (struct Library *)TimerRequest.tr_node.io_Device;
+	TimerBase = (struct Library *)TimerRequest->tr_node.io_Device;
 
 	#if defined(__amigaos4__)
 	{
-		if(TimerBase != NULL)
+		ASSERT(TimerBase != NULL);
+
+		ITimer = (struct TimerIFace *)GetInterface(TimerBase, "main", 1, 0);
+		if(ITimer == NULL)
 		{
-			ITimer = (struct TimerIFace *)GetInterface(TimerBase, "main", 1, 0);
-			if(ITimer == NULL)
-			{
-				report_error("Could not open 'timer.device'.");
-				goto out;
-			}
+			report_error("Could not open 'timer.device'.");
+			goto out;
 		}
 	}
 	#endif /* __amigaos4__ */
@@ -4002,6 +4070,7 @@ setup(
 		SBTM_SETVAL(SBTC_LOGTAGPTR),				program_name,
 		SBTM_SETVAL(SBTC_BREAKMASK),				SIGBREAKF_CTRL_C,
 	TAG_END);
+
 	if(error != OK)
 	{
 		report_error("Could not initialize 'bsdsocket.library' (%ld, %s).",error,posix_strerror(error));
@@ -4280,6 +4349,8 @@ setup(
 	result = TRUE;
 
  out:
+
+	PROFILE_ON();
 
 	RETURN(result);
 	return(result);
@@ -4771,12 +4842,12 @@ build_full_path_name(
 	ENTER();
 
 	if(parent_name == NULL)
-		D(("parent name = NULL"));
+		SHOWMSG("parent name = NULL");
 	else
 		D(("parent name = '%s'",escape_name(parent_name)));
 
 	if(name == NULL)
-		D(("name = NULL"));
+		SHOWMSG("name = NULL");
 	else
 		D(("name = '%s'",escape_name(name)));
 
@@ -4873,11 +4944,14 @@ build_full_path_name(
 			if(name_changed)
 			{
 				TEXT printable_name[MAX_FILENAME_LEN+1];
+				int l;
 
-				ASSERT( name_len < (int)sizeof(printable_name) );
+				l = name_len;
+				if(l >= (int)sizeof(printable_name))
+					l = sizeof(printable_name)-1;
 
-				memmove(printable_name, name, name_len);
-				printable_name[name_len] = '\0';
+				memmove(printable_name, name, l);
+				printable_name[l] = '\0';
 
 				D(("name changed to '%s'",escape_name(printable_name)));
 			}
@@ -4979,7 +5053,7 @@ build_full_path_name(
 				/* Can't go any further. */
 				else
 				{
-					D(("can't go any further up in the path"));
+					SHOWMSG("can't go any further up in the path");
 
 					error = ERROR_OBJECT_NOT_FOUND;
 					goto out;
@@ -5560,7 +5634,7 @@ get_parent_name(
 
 	ASSERT( error_ptr != NULL );
 
-	SHOWVALUE(parent);
+	SHOWPOINTER(parent);
 
 	if(parent != NULL)
 	{
@@ -5579,7 +5653,7 @@ get_parent_name(
 	}
 	else
 	{
-		D(("parent lock on ':' (ZERO lock)"));
+		SHOWMSG("parent lock on ':' (ZERO lock)");
 
 		name = NULL;
 	}
@@ -5610,7 +5684,7 @@ Action_Parent(
 
 	ENTER();
 
-	SHOWVALUE(parent);
+	SHOWPOINTER(parent);
 
 	if(file_system_disabled)
 	{
@@ -5650,7 +5724,7 @@ Action_Parent(
 			if(error != ERROR_OBJECT_NOT_FOUND)
 				goto out;
 
-			D(("returning ZERO lock"));
+			SHOWMSG("returning ZERO lock");
 		}
 		else
 		{
@@ -5672,7 +5746,7 @@ Action_Parent(
 			add_lock_node(ln);
 
 			result = MKBADDR(&ln->ln_FileLock);
-			SHOWVALUE(&ln->ln_FileLock);
+			SHOWPOINTER(&ln->ln_FileLock);
 
 			full_name = NULL;
 			ln = NULL;
@@ -5680,7 +5754,7 @@ Action_Parent(
 	}
 	else
 	{
-		D(("parent lock on ':' (ZERO lock)"));
+		SHOWMSG("parent lock on ':' (ZERO lock)");
 
 		SHOWMSG("returning ZERO lock");
 	}
@@ -5745,7 +5819,7 @@ Action_DeleteObject(
 	if(path_name_is_invalid(name, name_len))
 	{
 		D(("'%s' is not a valid path name", name));
-		
+
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
@@ -5764,7 +5838,7 @@ Action_DeleteObject(
 	/* Trying to delete the root directory, are you kidding? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot delete the root directory"));
+		SHOWMSG("cannot delete the root directory");
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -5928,7 +6002,7 @@ Action_CreateDir(
 	if(path_name_is_invalid(name, name_len))
 	{
 		D(("'%s' is not a valid path name", name));
-		
+
 		error = ERROR_INVALID_COMPONENT_NAME;
 		goto out;
 	}
@@ -5947,7 +6021,7 @@ Action_CreateDir(
 	/* Trying to overwrite the root directory, are you kidding? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot overwrite the root directory"));
+		SHOWMSG("cannot overwrite the root directory");
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -5999,7 +6073,7 @@ Action_CreateDir(
 	add_lock_node(ln);
 
 	result = MKBADDR(&ln->ln_FileLock);
-	SHOWVALUE(&ln->ln_FileLock);
+	SHOWPOINTER(&ln->ln_FileLock);
 
 	full_name = NULL;
 	ln = NULL;
@@ -6056,7 +6130,7 @@ Action_LocateObject(
 	if(path_name_is_invalid(name, name_len))
 	{
 		D(("'%s' is not a valid path name", name));
-		
+
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
@@ -6092,7 +6166,7 @@ Action_LocateObject(
 	add_lock_node(ln);
 
 	result = MKBADDR(&ln->ln_FileLock);
-	SHOWVALUE(&ln->ln_FileLock);
+	SHOWPOINTER(&ln->ln_FileLock);
 
 	SHOWPOINTER(ln->ln_FullName);
 
@@ -6129,7 +6203,7 @@ Action_CopyDir(
 
 	ENTER();
 
-	SHOWVALUE(lock);
+	SHOWPOINTER(lock);
 
 	if(file_system_disabled)
 	{
@@ -6149,7 +6223,7 @@ Action_CopyDir(
 	}
 	else
 	{
-		D(("lock on ':' (ZERO lock)"));
+		SHOWMSG("lock on ':' (ZERO lock)");
 	}
 
 	/* If a specific lock is to be duplicated, then that
@@ -6207,7 +6281,7 @@ Action_CopyDir(
 	add_lock_node(ln);
 
 	result = MKBADDR(&ln->ln_FileLock);
-	SHOWVALUE(&ln->ln_FileLock);
+	SHOWPOINTER(&ln->ln_FileLock);
 
 	full_name = NULL;
 	ln = NULL;
@@ -6236,7 +6310,7 @@ Action_FreeLock(
 
 	ENTER();
 
-	SHOWVALUE(lock);
+	SHOWPOINTER(lock);
 
 	/* Passing ZERO is harmless. But we have to have
 	 * a valid lock if we are to proceed with releasing
@@ -6279,18 +6353,18 @@ Action_FreeLock(
 		}
 		#else
 		{
-			D(("looking up the lock address (what happened to trust?)"));
+			SHOWMSG("looking up the lock address (what happened to trust?)");
 
 			sn = splay_tree_find(&LockAddressTree, (splay_key_t)key);
 			if(sn != NULL)
 			{
-				D(("found it"));
+				SHOWMSG("found it");
 
 				found = (struct LockNode *)sn->sn_userdata;
 			}
 			else
 			{
-				D(("didn't find it (this should never happen)"));
+				SHOWMSG("didn't find it (this should never happen)");
 			}
 		}
 		#endif /* USE_SPLAY_TREE */
@@ -6311,7 +6385,7 @@ Action_FreeLock(
 	}
 	else
 	{
-		D(("lock on ':' (ZERO lock)"));
+		SHOWMSG("lock on ':' (ZERO lock)");
 	}
 
 	result = DOSTRUE;
@@ -6341,8 +6415,8 @@ Action_SameLock(
 
 	ENTER();
 
-	SHOWVALUE(lock1);
-	SHOWVALUE(lock2);
+	SHOWPOINTER(lock1);
+	SHOWPOINTER(lock2);
 
 	if(file_system_disabled)
 	{
@@ -6447,7 +6521,7 @@ Action_SetProtect(
 	if(path_name_is_invalid(name, name_len))
 	{
 		D(("'%s' is not a valid path name", name));
-		
+
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
@@ -6468,7 +6542,7 @@ Action_SetProtect(
 	 */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot change protection bits of the root directory"));
+		SHOWMSG("cannot change protection bits of the root directory");
 
 		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
@@ -6592,8 +6666,8 @@ Action_RenameObject(
 	D(("source name = '%b'",MKBADDR(source_bcpl_name)));
 	D(("destination name = '%b'",MKBADDR(destination_bcpl_name)));
 
-	SHOWVALUE(source_lock);
-	SHOWVALUE(destination_lock);
+	SHOWPOINTER(source_lock);
+	SHOWPOINTER(destination_lock);
 
 	if(file_system_disabled)
 	{
@@ -6612,7 +6686,7 @@ Action_RenameObject(
 	if(path_name_is_invalid(name, name_len))
 	{
 		D(("'%s' is not a valid path name", name));
-		
+
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
@@ -6636,7 +6710,7 @@ Action_RenameObject(
 	/* Trying to rename the root directory, are you kidding? */
 	if(strcmp(full_source_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot rename the root directory"));
+		SHOWMSG("cannot rename the root directory");
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -6647,7 +6721,7 @@ Action_RenameObject(
 	if(path_name_is_invalid(name, name_len))
 	{
 		D(("'%s' is not a valid path name", name));
-		
+
 		error = ERROR_INVALID_COMPONENT_NAME;
 		goto out;
 	}
@@ -6671,7 +6745,7 @@ Action_RenameObject(
 	/* Trying to replace the root directory, are you kidding? */
 	if(strcmp(full_destination_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot replace the root directory"));
+		SHOWMSG("cannot replace the root directory");
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -6833,7 +6907,7 @@ Action_Info(
 
 	ENTER();
 
-	SHOWVALUE(lock);
+	SHOWPOINTER(lock);
 
 	if(file_system_disabled)
 	{
@@ -6874,7 +6948,7 @@ Action_ExamineObject(
 
 	ENTER();
 
-	SHOWVALUE(lock);
+	SHOWPOINTER(lock);
 
 	memset(fib,0,sizeof(*fib));
 
@@ -6947,7 +7021,7 @@ Action_ExamineObject(
 				error = translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name));
 				if(error != OK)
 				{
-					D(("name is not acceptable"));
+					SHOWMSG("name is not acceptable");
 					goto out;
 				}
 
@@ -6959,7 +7033,7 @@ Action_ExamineObject(
 			error = validate_amigados_file_name(name, name_len);
 			if(error != OK)
 			{
-				D(("name contains unacceptable characters"));
+				SHOWMSG("name contains unacceptable characters");
 				goto out;
 			}
 
@@ -7026,7 +7100,7 @@ Action_ExamineObject(
 	}
 	else
 	{
-		D(("lock on ':' (ZERO lock)"));
+		SHOWMSG("lock on ':' (ZERO lock)");
 	}
 
 	/* So this is actually the root directory? */
@@ -7099,8 +7173,8 @@ Action_ExamineObject(
 			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
 		}
 
-		ASSERT( strlen(date) < sizeof(date) );
-		ASSERT( strlen(time) < sizeof(time) );
+		ASSERT( strlen(date) < LEN_DATSTRING );
+		ASSERT( strlen(time) < LEN_DATSTRING );
 	}
 	#endif /* DEBUG */
 
@@ -7304,8 +7378,8 @@ dir_scan_callback_func_exnext(
 			D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
 		}
 
-		ASSERT( strlen(date) < sizeof(date) );
-		ASSERT( strlen(time) < sizeof(time) );
+		ASSERT( strlen(date) < LEN_DATSTRING );
+		ASSERT( strlen(time) < LEN_DATSTRING );
 	}
 	#endif /* DEBUG */
 
@@ -7334,7 +7408,7 @@ Action_ExamineNext(
 
 	ENTER();
 
-	SHOWVALUE(lock);
+	SHOWPOINTER(lock);
 
 	if(file_system_disabled)
 	{
@@ -7714,8 +7788,8 @@ dir_scan_callback_func_exall(
 				D(("   could not convert days=%ld/minutes=%ld/ticks=%ld", ed->ed_Days, ed->ed_Mins, ed->ed_Ticks));
 			}
 
-			ASSERT( strlen(date) < sizeof(date) );
-			ASSERT( strlen(time) < sizeof(time) );
+			ASSERT( strlen(date) < LEN_DATSTRING );
+			ASSERT( strlen(time) < LEN_DATSTRING );
 		}
 		#endif /* DEBUG */
 	}
@@ -7740,6 +7814,8 @@ dir_scan_callback_func_exall(
 
 	if(ec->ec_Control->eac_MatchFunc != NULL)
 	{
+		LONG match;
+
 		SHOWMSG("   checking if match function accepts the entry");
 
 		/* Note: The order of the parameters passed to the match hook
@@ -7758,7 +7834,13 @@ dir_scan_callback_func_exall(
 		 *       function is given below: 1. match function (hook),
 		 *       2. pointer to type, 3. pointer to ExAllData.
 		 */
-		if(NOT CallHookPkt(ec->ec_Control->eac_MatchFunc,&type,ed))
+		PROFILE_OFF();
+
+		match = CallHookPkt(ec->ec_Control->eac_MatchFunc,&type,ed);
+
+		PROFILE_ON();
+
+		if(NO match)
 		{
 			SHOWMSG("   match function rejected the entry");
 			goto out;
@@ -7821,7 +7903,7 @@ Action_ExamineAll(
 
 	ENTER();
 
-	SHOWVALUE(lock);
+	SHOWPOINTER(lock);
 	SHOWPOINTER(buffer);
 	SHOWVALUE(buffer_size);
 	SHOWVALUE(type);
@@ -8214,7 +8296,7 @@ Action_Find(
 	/* Trying to open the root directory? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot open the root directory"));
+		SHOWMSG("cannot open the root directory");
 
 		error = ERROR_OBJECT_WRONG_TYPE;
 		goto out;
@@ -8518,18 +8600,18 @@ Action_End(
 	}
 	#else
 	{
-		D(("looking up the file address (what happened to trust?)"));
+		SHOWMSG("looking up the file address (what happened to trust?)");
 
 		sn = splay_tree_find(&FileAddressTree, (splay_key_t)which_fn);
 		if(sn != NULL)
 		{
-			D(("found it"));
+			SHOWMSG("found it");
 
 			found = (struct FileNode *)sn->sn_userdata;
 		}
 		else
 		{
-			D(("didn't find it (this should never happen)"));
+			SHOWMSG("didn't find it (this should never happen)");
 		}
 	}
 	#endif /* USE_SPLAY_TREE */
@@ -8670,7 +8752,7 @@ Action_Seek(
 		/* We cannot seek back beyond the beginning of the file. */
 		if(compare_64_to_64(&reference_position_quad,&position_quad) < 0)
 		{
-			D(("cannot seek back beyond the beginning of the file."));
+			SHOWMSG("cannot seek back beyond the beginning of the file.");
 
 			error = ERROR_SEEK_ERROR;
 			goto out;
@@ -8683,7 +8765,7 @@ Action_Seek(
 		/* Careful, we need to check for overflow, too. */
 		if(add_64_plus_32_to_64(&reference_position_quad,position,&new_position_quad) > 0)
 		{
-			D(("position is too large"));
+			SHOWMSG("position is too large");
 
 			error = ERROR_SEEK_ERROR;
 			goto out;
@@ -8871,7 +8953,7 @@ Action_SetDate(
 	if(path_name_is_invalid(name, name_len))
 	{
 		D(("'%s' is not a valid path name", name));
-		
+
 		error = ERROR_OBJECT_NOT_FOUND;
 		goto out;
 	}
@@ -8890,7 +8972,7 @@ Action_SetDate(
 	/* Trying to change the date of the root directory? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot change the date of the root directory"));
+		SHOWMSG("cannot change the date of the root directory");
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -8934,8 +9016,8 @@ Action_SetDate(
 			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", ds->ds_Days, ds->ds_Minute, ds->ds_Tick));
 		}
 
-		ASSERT( strlen(date) < sizeof(date) );
-		ASSERT( strlen(time) < sizeof(time) );
+		ASSERT( strlen(date) < LEN_DATSTRING );
+		ASSERT( strlen(time) < LEN_DATSTRING );
 	}
 	#endif /* DEBUG */
 
@@ -9038,7 +9120,7 @@ Action_ExamineFH(
 		error = translate_smb_name_to_amiga_name(translated_name,name_len,sizeof(translated_name));
 		if(error != OK)
 		{
-			D(("name is not acceptable"));
+			SHOWMSG("name is not acceptable");
 			goto out;
 		}
 
@@ -9050,7 +9132,7 @@ Action_ExamineFH(
 	error = validate_amigados_file_name(name, name_len);
 	if(error != OK)
 	{
-		D(("name contains unacceptable characters"));
+		SHOWMSG("name contains unacceptable characters");
 		goto out;
 	}
 
@@ -9129,8 +9211,8 @@ Action_ExamineFH(
 			D(("could not convert days=%ld/minutes=%ld/ticks=%ld", fib->fib_Date.ds_Days, fib->fib_Date.ds_Minute, fib->fib_Date.ds_Tick));
 		}
 
-		ASSERT( strlen(date) < sizeof(date) );
-		ASSERT( strlen(time) < sizeof(time) );
+		ASSERT( strlen(date) < LEN_DATSTRING );
+		ASSERT( strlen(time) < LEN_DATSTRING );
 	}
 	#endif /* DEBUG */
 
@@ -9193,7 +9275,7 @@ Action_ParentFH(
 	add_lock_node(ln);
 
 	result = MKBADDR(&ln->ln_FileLock);
-	SHOWVALUE(&ln->ln_FileLock);
+	SHOWPOINTER(&ln->ln_FileLock);
 
 	parent_dir_name = NULL;
 	ln = NULL;
@@ -9267,7 +9349,7 @@ Action_CopyDirFH(
 	add_lock_node(ln);
 
 	result = MKBADDR(&ln->ln_FileLock);
-	SHOWVALUE(&ln->ln_FileLock);
+	SHOWPOINTER(&ln->ln_FileLock);
 
 	full_name = NULL;
 	ln = NULL;
@@ -9299,7 +9381,7 @@ Action_FHFromLock(
 
 	ENTER();
 
-	SHOWVALUE(fl);
+	SHOWPOINTER(fl);
 
 	if(file_system_disabled)
 	{
@@ -9732,7 +9814,7 @@ Action_SetComment(
 
 	ENTER();
 
-	D(("name = '%b', comment = '%s'",MKBADDR(bcpl_name),MKBADDR(bcpl_comment)));
+	D(("name = '%b', comment = '%b'",MKBADDR(bcpl_name),MKBADDR(bcpl_comment)));
 
 	if(file_system_disabled)
 	{
@@ -9773,7 +9855,7 @@ Action_SetComment(
 	/* Trying to change the comment of the root directory? */
 	if(strcmp(full_name, SMB_ROOT_DIR_NAME) == SAME)
 	{
-		D(("cannot change the comment of the root directory"));
+		SHOWMSG("cannot change the comment of the root directory");
 
 		error = ERROR_OBJECT_IN_USE;
 		goto out;
@@ -9991,7 +10073,7 @@ Action_FilesystemAttr(
 				if(length > 0)
 				{
 					strlcpy((char *)data,VERS " (" DATE ")",length);
-					D(("FSA_VersionStringR = \"%s\"", data));
+					D(("FSA_VersionStringR = \"%s\"", (char *)data));
 				}
 
 				break;
@@ -10037,6 +10119,7 @@ file_system_handler(
 	const TEXT *	service_name)
 {
 	struct Process * this_process = (struct Process *)FindTask(NULL);
+	BOOL check_for_netbios_keepalive = FALSE;
 	BOOL sign_off = FALSE;
 	int old_priority = 0;
 	fd_set read_fds;
@@ -10127,19 +10210,27 @@ file_system_handler(
 		Permit();
 	}
 
-	signal_mask = SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D | SIGBREAKF_CTRL_E | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit);
+	/* Check periodically for NetBIOS keep alive messages. */
+	TimerRequest->tr_node.io_Command	= TR_ADDREQUEST;
+	TimerRequest->tr_time.tv_secs		= 10;
+	TimerRequest->tr_time.tv_micro		= 0;
+
+	SendIO((struct IORequest *)TimerRequest);
+	TimerTicking = TRUE;
+
+	signal_mask = SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D | SIGBREAKF_CTRL_E | SIGBREAKF_CTRL_F | (1UL << FileSystemPort->mp_SigBit) | (1UL << TimerPort->mp_SigBit);
 
 	FD_ZERO(&read_fds);
 
 	do
 	{
-		server_fd = ServerData->server.mount_data.fd;
-
 		/* If the server is currently connected, check if it has sent
 		 * a NetBIOS "keep alive" message and deal with it.
 		 */
-		if(server_fd >= 0)
+		if(check_for_netbios_keepalive && (server_fd = ServerData->server.mount_data.fd) >= 0)
 		{
+			int n;
+
 			/* We want to know if this socket has readable data for us. */
 			FD_SET(server_fd, &read_fds);
 
@@ -10148,7 +10239,13 @@ file_system_handler(
 			/* Wait for the server to send something, a signal to be received
 			 * or the next file system packet to arrive.
 			 */
-			if(WaitSelect(server_fd+1,&read_fds,NULL,NULL,NULL,&signals) > 0)
+			PROFILE_OFF();
+
+			n = WaitSelect(server_fd+1,&read_fds,NULL,NULL,NULL,&signals);
+
+			PROFILE_ON();
+
+			if(n > 0)
 			{
 				int num_bytes;
 				UBYTE data[4];
@@ -10168,6 +10265,8 @@ file_system_handler(
 
 						SHOWMSG("checking for more data...");
 
+						PROFILE_OFF();
+
 						non_blocking_io = TRUE;
 						IoctlSocket(server_fd, FIONBIO, &non_blocking_io);
 
@@ -10180,6 +10279,8 @@ file_system_handler(
 
 						non_blocking_io = FALSE;
 						IoctlSocket(server_fd, FIONBIO, &non_blocking_io);
+
+						PROFILE_ON();
 
 						if(num_bytes > 0)
 						{
@@ -10215,13 +10316,37 @@ file_system_handler(
 			 * ServerData->server.mount_data.fd.
 			 */
 			FD_CLR(server_fd, &read_fds);
+
+			check_for_netbios_keepalive = FALSE;
+
+			TimerRequest->tr_node.io_Command	= TR_ADDREQUEST;
+			TimerRequest->tr_time.tv_secs		= 10;
+			TimerRequest->tr_time.tv_micro		= 0;
+
+			SendIO((struct IORequest *)TimerRequest);
+			TimerTicking = TRUE;
 		}
 		/* The server connection isn't ready yet, so we wait for
 		 * stop/debug signals and more file system packets.
 		 */
 		else
 		{
+			PROFILE_OFF();
+
 			signals = Wait(signal_mask);
+
+			PROFILE_ON();
+		}
+
+		/* Schedule an NetBIOS keep alive check? */
+		if(signals & (1UL << TimerPort->mp_SigBit))
+		{
+			SHOWMSG("scheduling a check for NetBIOS keep alive messages");
+
+			WaitIO((struct IORequest *)TimerRequest);
+			TimerTicking = FALSE;
+
+			check_for_netbios_keepalive = TRUE;
 		}
 
 		/* Stop the file system? */
@@ -10294,9 +10419,9 @@ file_system_handler(
 					if (num_packets_waiting > 1)
 						D(("%lu packets are waiting to be processed", num_packets_waiting));
 					else if (num_packets_waiting == 1)
-						D(("1 packet is waiting to be processed"));
+						SHOWMSG("1 packet is waiting to be processed");
 					else
-						D(("no packet is waiting to be processed"));
+						SHOWMSG("no packet is waiting to be processed");
 				}
 				#endif /* DEBUG */
 
@@ -10318,7 +10443,7 @@ file_system_handler(
 						/* Is this even a valid address? */
 						if(sender == NULL || TypeOfMem((APTR)sender) == 0)
 						{
-							D(("got packet; sender 0x%08lx", sender));
+							D(("got packet; sender 0x%08lx", (ULONG)sender));
 						}
 						/* Is the sender a Task? */
 						else if (sender->pr_Task.tc_Node.ln_Type == NT_TASK)
@@ -10374,12 +10499,12 @@ file_system_handler(
 									if(cli_number > 0)
 										D(("got packet; sender '%s' (CLI #%ld)", command_name, cli_number));
 									else
-										D(("got packet; sender '%s' (CLI 0x%08lx)", command_name, cli));
+										D(("got packet; sender '%s' (CLI 0x%08lx)", command_name, (ULONG)cli));
 								}
 								/* No, it's just a shell. */
 								else
 								{
-									D(("got packet; sender '%s' (CLI 0x%08lx)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name, cli));
+									D(("got packet; sender '%s' (CLI 0x%08lx)",((struct Node *)dp->dp_Port->mp_SigTask)->ln_Name, (ULONG)cli));
 								}
 							}
 							/* Doesn't look like a valid CLI pointer. */
@@ -10401,7 +10526,7 @@ file_system_handler(
 					}
 					else
 					{
-						D(("got packet (MsgPort=0x%08lx)", dp->dp_Port));
+						D(("got packet (MsgPort=0x%08lx)", (ULONG)dp->dp_Port));
 					}
 				}
 				#endif /* DEBUG */
@@ -10789,7 +10914,7 @@ file_system_handler(
 				struct FileNode * fn;
 				struct LockNode * ln;
 
-				D(("list of open files:"));
+				SHOWMSG("list of open files:");
 
 				for(fn = (struct FileNode *)FileList.mlh_Head ;
 				    fn->fn_MinNode.mln_Succ != NULL ;
@@ -10800,7 +10925,7 @@ file_system_handler(
 					D((""));
 				}
 
-				D(("list of allocated locks:"));
+				SHOWMSG("list of allocated locks:");
 
 				for(ln = (struct LockNode *)LockList.mlh_Head ;
 				    ln->ln_MinNode.mln_Succ != NULL ;
@@ -10855,7 +10980,7 @@ file_system_handler(
  * to the first digit of the string.
  */
 const char *
-convert_quad_to_string(const QUAD * const number)
+convert_quad_to_string(const QUAD * number)
 {
 	static char string[22]; /* 21 bytes should be sufficient. */
 

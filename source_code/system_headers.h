@@ -106,6 +106,17 @@
 #include <proto/timer.h>
 #include <proto/icon.h>
 
+/*
+#include <clib/exec_protos.h>
+#include <clib/dos_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/bsdsocket_protos.h>
+#include <clib/utility_protos.h>
+#include <clib/locale_protos.h>
+#include <clib/timer_protos.h>
+#include <clib/icon_protos.h>
+*/
+
 /*****************************************************************************/
 
 /* This is for backwards compatibility only. */
@@ -142,6 +153,44 @@
 /*****************************************************************************/
 
 #undef byte
+
+/*****************************************************************************/
+
+/* This is for use with the profiling support of the SAS/C compiler and
+ * its runtime library. The macros defined in the header file are replaced
+ * by no-ops for other compilers.
+ */
+#if defined(__SASC) && defined(_PROFILE)
+
+#include <sprof.h>
+
+#if _PROFILE
+
+/* The profiling disable/enable calls need to nest, which is
+ * why we use our own local counter and some corresponding
+ * macros instead of the SAS/C-supplied versions. See the
+ * <sprof.h> header file how they are supposed to work.
+ */
+extern int profile_nest_count;
+
+#undef PROFILE_ON
+#undef PROFILE_OFF
+
+extern void kprintf(const char *fmt, ...);
+
+#define PROFILE_OFF() { if(profile_nest_count++ == 0) _PROLOG(0L); }
+#define PROFILE_ON() { if(--profile_nest_count == 0) _EPILOG(0L); }
+#endif /* _PROFILE */
+
+#else
+
+#define PROFILE_OFF() {}
+#define PROFILE_ON() {}
+
+#define PROFILE_PUSH(x) {}
+#define PROFILE_POP(x) {}
+
+#endif /* __SASC */
 
 /*****************************************************************************/
 

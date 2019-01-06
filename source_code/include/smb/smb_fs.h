@@ -52,8 +52,6 @@ struct smb_lkrng
 /*****************************************************************************/
 
 /* proc.c */
-byte *smb_encode_smb_length(byte *p, int len);
-int smb_len(const byte *packet);
 void smb_translate_error_class_and_code(int errcls,int error,char ** class_ptr,char ** code_ptr);
 int smb_errno(int errcls, int error);
 int smb_payload_size(const struct smb_server *server, int wct, int bcc);

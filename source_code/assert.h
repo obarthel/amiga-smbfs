@@ -110,8 +110,8 @@
  void _LEAVE(const char *file,int line,const char *function);
  void _RETURN(const char *file,int line,const char *function,unsigned long result);
  void _DPRINTF_HEADER(const char *file,int line);
- void VARARGS68K _DPRINTF(const char *format,...);
- void VARARGS68K _DLOG(const char *format,...);
+ void VARARGS68K _DPRINTF(const char *format,...) __attribute__ ((format (printf, 1, 2)));
+ void VARARGS68K _DLOG(const char *format,...) __attribute__ ((format (printf, 1, 2)));
  void _SETDEBUGFILE(BPTR file);
  int  _SETDEBUGLEVEL(int level);
  void _PUSHDEBUGLEVEL(int level);

@@ -154,7 +154,7 @@ extern void VARARGS68K report_error(const TEXT * fmt,...);
 extern void string_toupper(STRPTR s);
 extern void VARARGS68K LocalSNPrintf(STRPTR buffer, int limit, const TEXT * formatString,...);
 extern TEXT * escape_name(const TEXT * name);
-extern const char * convert_quad_to_string(const QUAD * const number);
+extern const char * convert_quad_to_string(const QUAD * number);
 
 /****************************************************************************/
 

@@ -477,7 +477,7 @@ smb_decode_dword (const byte * p, dword * data)
 	return (byte *)&p[4];
 }
 
-byte *
+static INLINE byte *
 smb_encode_smb_length (byte * p, int len)
 {
 	/* 0x00 = NetBIOS session message */
@@ -689,7 +689,7 @@ date_unix2dos (int utc_seconds, unsigned short *time_value, unsigned short *date
  *  Support section.
  *
  ****************************************************************************/
-int
+static INLINE int
 smb_len (const byte * packet)
 {
 	/* This returns the payload length stored in the NetBIOS session header. */
@@ -956,13 +956,14 @@ smb_dump_packet (const byte * packet)
 	errcls = (int) packet[9];
 	error = (int) (int) (packet[11] | ((int)packet[12]) << 8);
 
-	LOG (("smb_len = %ld valid = %ld\n", len = smb_len (packet), smb_valid_packet (packet)));
+	LOG (("smb_len = %ld valid = %ld\n", smb_len (packet), smb_valid_packet (packet)));
 	LOG (("smb_cmd = %ld smb_wct = %ld smb_bcc = %ld\n", packet[8], SMB_WCT (packet), SMB_BCC (packet)));
 	LOG (("smb_rcls = %ld smb_err = %ld\n", errcls, error));
 
 	if (errcls)
 		smb_printerr (errcls, error);
 
+	len = smb_len (packet);
 	if (len > 100)
 		len = 100;
 
@@ -2461,7 +2462,14 @@ smb_decode_dirent (const char *p, struct smb_dirent *entry)
 		struct tm tm;
 
 		seconds_to_tm(entry->mtime,&tm);
-		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",tm.tm_year + 1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec));
+
+		LOG(("mtime = %ld-%02ld-%02ld %ld:%02ld:%02ld\n",
+			tm.tm_year + 1900,
+			tm.tm_mon+1,
+			tm.tm_mday,
+			tm.tm_hour,
+			tm.tm_min,
+			tm.tm_sec));
 	}
 	#endif /* DEBUG */
 
@@ -2605,6 +2613,8 @@ smb_proc_readdir_short (
 
 			goto out;
 		}
+
+		ASSERT (bcc == count * SMB_DIRINFO_SIZE + 3);
 
 		if (bcc != count * SMB_DIRINFO_SIZE + 3)
 		{
@@ -2812,7 +2822,7 @@ smb_decode_long_dirent (
 				/* Skip directory entries whose names we cannot store. */
 				if(name_len >= (int)finfo->complete_path_size)
 				{
-					LOG(("name length >= %ld (skipping it)\n", finfo->complete_path_size));
+					LOG(("name length >= %lu (skipping it)\n", (unsigned long)finfo->complete_path_size));
 
 					success = FALSE;
 					break;
@@ -2946,7 +2956,7 @@ smb_decode_long_dirent (
 				/* Skip directory entries whose names we cannot store. */
 				if(name_len >= (int)finfo->complete_path_size)
 				{
-					LOG(("name length >= %ld (skipping it)\n", finfo->complete_path_size));
+					LOG(("name length >= %lu (skipping it)\n", (unsigned long)finfo->complete_path_size));
 
 					success = FALSE;
 					break;
@@ -3194,7 +3204,11 @@ smb_proc_readdir_long (
 		{
 			SHOWMSG("ouch; delaying and retrying");
 
+			PROFILE_OFF();
+
 			Delay(TICKS_PER_SECOND / 5);
+
+			PROFILE_ON();
 
 			continue;
 		}

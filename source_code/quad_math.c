@@ -20,14 +20,14 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#ifndef _QUAD_MATH_H
-#include "quad_math.h"
-#endif /* _QUAD_MATH_H */
+#ifndef _SMBFS_H
+#include "smbfs.h"
+#endif /* _SMBFS_H */
 
 /****************************************************************************/
 
 /* This function comes from Harry S. Warren, Jr.'s book "Hacker's delight". */
-static int
+static INLINE int
 carry(ULONG x, ULONG y)
 {
 	int result;

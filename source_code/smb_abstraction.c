@@ -796,7 +796,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 	if (result < 0)
 		goto out;
 
-	LOG(("read %ld bytes from offset %ld\n",len,offset));
+	LOG(("read %ld bytes from offset %s\n",len,convert_quad_to_string(offset)));
 
 	/* SMB_COM_READ_ANDX supported? */
 	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_core_protocol)
@@ -1043,7 +1043,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 
 			ASSERT( n > 0 );
 
-			LOG(("writing %ld bytes; offset=%lu, len=%ld\n", n, offset, len));
+			LOG(("writing %ld bytes; offset=%s, len=%ld\n", n, convert_quad_to_string(&position_quad), len));
 
 			result = smb_proc_writex(&f->server->server, &f->dirent, &position_quad, n, data, error_ptr);
 			if(result < 0)
@@ -2136,6 +2136,7 @@ smba_start(
 		h_errno = 0;
 
 		h = gethostbyname (server);
+
 		lookup_error = h_errno;
 
 		if (h != NULL)

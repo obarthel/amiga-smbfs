@@ -69,17 +69,24 @@ VERSION = 2
 # 
 #DEBUG_OPTIONS = define=DEBUG define=DUMP_SMB code=far data=faronly
 
+###########################################################################
+
+# Enable profiling support; note that this requires linking
+# against "lib:scnb.lib" instead of "lib:sc.lib", just like
+# it is necessary for the debug build.
+#PROFILE_OPTIONS = profile code=far data=faronly
+
 ###############################################################################
 
-# Note: if DEBUG_OPTIONS are enabled you will need to link smbfs against
-#       "lib:scnb.lib" rather than "lib:sc.lib".
+# Note: if DEBUG_OPTIONS or PROFILE_OPTIONS are enabled you will need to link
+#       smbfs against "lib:scnb.lib" rather than "lib:sc.lib".
 LIBS = lib:sc.lib lib:amiga.lib lib:debug.lib
 
 ###############################################################################
 
 CFLAGS = \
 	idlen=64 comnest streq strmerge nostkchk \
-	$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) $(DEBUG_OPTIONS) \
+	$(OPTIMIZE) cpu=$(CPU) debug=$(DEBUG) $(DEBUG_OPTIONS) $(PROFILE_OPTIONS) \
 	params=register idir=netinclude idir=include \
 	ignore=306 gst=system_headers.gst
 
