@@ -3,7 +3,7 @@
  *
  * SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
  *
- * Copyright (C) 2000-2018 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
+ * Copyright (C) 2000-2019 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -324,6 +324,8 @@ static BOOL					VolumeNodeAdded;
 static struct MsgPort *		FileSystemPort;
 
 static smba_server_t *		ServerData;
+
+static const TEXT *			ErrorOutput;
 
 static BOOL					Quit;
 static BOOL					Quiet;
@@ -779,6 +781,7 @@ main(void)
 		NUMBER	Timeout;
 		NUMBER	TimeZoneOffset;
 		NUMBER	DSTOffset;
+		KEY		ErrorOutput;
 		KEY		Protocol;
 		SWITCH	NetBIOSTransport;
 		SWITCH	WriteBehind;
@@ -826,6 +829,7 @@ main(void)
 		"TIMEOUT/N/K,"
 		"TZ=TIMEZONEOFFSET/N/K,"
 		"DST=DSTOFFSET/N/K,"
+		"ERROROUTPUT/K,"
 		"PROTOCOL/K,"
 		"NETBIOS/S,"
 		"WRITEBEHIND/S,"
@@ -880,8 +884,8 @@ main(void)
 	memset(&args,0,sizeof(args));
 
 	/* If this program was launched from Workbench, the
-	 * command parameters will have to be from the icon
-	 * tool types.
+	 * command parameters will have to be read from the
+	 * icon tool types.
 	 */
 	if(WBStartup != NULL)
 	{
@@ -977,6 +981,8 @@ main(void)
 				if(debug_file != ZERO)
 				{
 					D_S(struct FileInfoBlock, fib);
+
+					SetVBuf(debug_file, NULL, BUF_LINE, 512);
 
 					Seek(debug_file,0,OFFSET_END);
 
@@ -1224,6 +1230,8 @@ main(void)
 				{
 					D_S(struct FileInfoBlock, fib);
 
+					SetVBuf(debug_file, NULL, BUF_LINE, 512);
+
 					Seek(debug_file,0,OFFSET_END);
 
 					close_debug_file = TRUE;
@@ -1369,6 +1377,23 @@ main(void)
 
 	if(args.VolumeName != NULL)
 		args.AddVolume = "yes";
+
+	/* Where do we send error messages to if started from shell? */
+	if(WBStartup == NULL)
+	{
+		if(args.Protocol != NULL && Stricmp(args.Protocol,"stderr") == SAME)
+			args.Protocol = NULL;
+
+		if(args.Protocol != NULL && Stricmp(args.Protocol,"stdout") != SAME)
+		{
+			report_error("'ERROROUTPUT' parameter must be either 'STDERR' or 'STDOUT'.");
+			goto out;
+		}
+
+		D(("using 'erroroutput=%s'.", (args.ErrorOutput != NULL) ? "stderr" : "stdout"));
+
+		ErrorOutput = args.ErrorOutput;
+	}
 
 	/* Restrict the command set which smbfs uses? */
 	if(args.Protocol == NULL)
@@ -2098,39 +2123,68 @@ report_error(const TEXT * fmt,...)
 
 			GetProgramName(program_name,sizeof(program_name));
 
-			if(this_process->pr_CES != ZERO)
+			/* Print the error message on the standard error output
+			 * stream?
+			 */
+			if(ErrorOutput == NULL)
 			{
-				output = this_process->pr_CES;
+				/* Do we have a valid error output stream? This
+				 * likely won't work with the V36-V40 shell, but
+				 * we check this anyway.
+				 */
+				if(this_process->pr_CES != ZERO)
+				{
+					output = this_process->pr_CES;
+				}
+				/* So we need to try to write straight to the
+				 * output window.
+				 */
+				else
+				{
+					/* Can we write straight to the output window? */
+					output = Open("CONSOLE:", MODE_NEWFILE);
+					if(output != ZERO)
+					{
+						SetVBuf(output, NULL, BUF_LINE, 512);
+
+						close_output = TRUE;
+					}
+					/* Fall back to using the standard output stream. */
+					else
+					{
+						output = Output();
+					}
+				}
 			}
+			/* No, we use the standard output stream. */
 			else
 			{
-				output = Open("CONSOLE:", MODE_NEWFILE);
-				if(output != ZERO)
-					close_output = TRUE;
-				else
-					output = Output();
+				output = Output();
 			}
 
-			LocalFPrintf(output, "%s: ",FilePart(program_name));
-
-			#if defined(__amigaos4__)
+			if(output != ZERO)
 			{
-				va_startlinear(args,fmt);
-				VFPrintf(output, fmt, va_getlinearva(args,APTR));
-				va_end(args);
-			}
-			#else
-			{
-				va_start(args,fmt);
-				VFPrintf(output,fmt,args);
-				va_end(args);
-			}
-			#endif /* __amigaos4__ */
+				LocalFPrintf(output, "%s: ",FilePart(program_name));
 
-			LocalFPrintf(output, "\n");
+				#if defined(__amigaos4__)
+				{
+					va_startlinear(args,fmt);
+					VFPrintf(output, fmt, va_getlinearva(args,APTR));
+					va_end(args);
+				}
+				#else
+				{
+					va_start(args,fmt);
+					VFPrintf(output,fmt,args);
+					va_end(args);
+				}
+				#endif /* __amigaos4__ */
 
-			if(close_output)
-				Close(output);
+				LocalFPrintf(output, "\n");
+
+				if(close_output)
+					Close(output);
+			}
 		}
 	}
 }
@@ -5953,6 +6007,10 @@ Action_DeleteObject(
 	free_memory(full_name);
 	free_memory(full_parent_name);
 
+	/* This can never be a read protection error (EACCES). */
+	if(error == ERROR_READ_PROTECTED)
+		error = ERROR_DELETE_PROTECTED;
+
 	(*error_ptr) = error;
 
 	RETURN(result);
@@ -6087,6 +6145,10 @@ Action_CreateDir(
 	free_memory(temp);
 	free_memory(full_name);
 	free_memory(ln);
+
+	/* This can never be a read protection error (EACCES). */
+	if(error == ERROR_READ_PROTECTED)
+		error = ERROR_WRITE_PROTECTED;
 
 	(*error_ptr) = error;
 
@@ -6634,6 +6696,10 @@ Action_SetProtect(
 
 	free_memory(full_name);
 
+	/* This can never be a read protection error (EACCES). */
+	if(error == ERROR_READ_PROTECTED)
+		error = ERROR_WRITE_PROTECTED;
+
 	(*error_ptr) = error;
 
 	RETURN(result);
@@ -6797,6 +6863,10 @@ Action_RenameObject(
 
 	free_memory(parent_source_name);
 	free_memory(parent_destination_name);
+
+	/* This can never be a read protection error (EACCES). */
+	if(error == ERROR_READ_PROTECTED)
+		error = ERROR_WRITE_PROTECTED;
 
 	(*error_ptr) = error;
 
@@ -8439,6 +8509,12 @@ Action_Find(
 	free_memory(fn);
 	free_memory(parent_path);
 
+	/* This can never be a read protection error (EACCES) for
+	 * ACTION_FINDOUTPUT.
+	 */
+	if(error == ERROR_READ_PROTECTED && action == ACTION_FINDOUTPUT)
+		error = ERROR_WRITE_PROTECTED;
+
 	(*error_ptr) = error;
 
 	RETURN(result);
@@ -8546,6 +8622,10 @@ Action_Write(
 	error = OK;
 
  out:
+
+	/* This can never be a read protection error (EACCES). */
+	if(error == ERROR_READ_PROTECTED)
+		error = ERROR_WRITE_PROTECTED;
 
 	(*error_ptr) = error;
 
@@ -8903,6 +8983,10 @@ Action_SetFileSize(
 
  out:
 
+	/* This can never be a read protection error (EACCES). */
+	if(error == ERROR_READ_PROTECTED)
+		error = ERROR_WRITE_PROTECTED;
+
 	(*error_ptr) = error;
 
 	RETURN(result);
@@ -9053,6 +9137,10 @@ Action_SetDate(
 		smba_close(ServerData,file);
 
 	free_memory(full_name);
+
+	/* This can never be a read protection error (EACCES). */
+	if(error == ERROR_READ_PROTECTED)
+		error = ERROR_WRITE_PROTECTED;
 
 	(*error_ptr) = error;
 

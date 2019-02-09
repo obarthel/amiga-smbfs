@@ -164,6 +164,7 @@ DEVICE=DEVICENAME/K
 DISABLEEXALL/S
 DOMAIN=WORKGROUP/K
 DST=DSTOFFSET/N/K
+ERROROUTPUT/K
 MAXNAMELEN/N/K
 MAXTRANSMIT/N/K
 NETBIOS/S
@@ -418,13 +419,19 @@ To avoid problems with such software, the **smbfs** program can be made to prete
 
 Please note that if the `DISABLEEXALL` switch is used, the **smbfs** program will make files and drawers appear to be "hidden" if their names are longer than 107 characters.
 
-#### 5.4.3. `MAXNAMELEN/N/K`
+#### 5.4.3. `ERROROUTPUT/K`
+
+The **smbfs** program will try to print error messages in the shell window in a manner which bypasses output redirection. This means that if you decide to discard all the output by sending it to `NIL:`, then smbfs will still be able to show you error messages.
+
+Where this is not a useful feature, you can tell the smbfs program to print both normal output and error messages in the same manner: use the `ERROROUTPUT=stdout` option.
+
+#### 5.4.4. `MAXNAMELEN/N/K`
 
 Some Amiga programs struggle with file and drawer names longer than 30 characters. They may malfunction and even crash when the **smbfs** program delivers them.
 
 You can tell the **smbfs** program not to deliver any file or drawer names which are longer than a certain number of characters using the `MAXNAMELEN` option. For example, `MAXNAMELEN=30` would make files and drawers appear to be "hidden" if their names are longer than 30 characters.
 
-#### 5.4.4. `MAXTRANSMIT/N/K`
+#### 5.4.5. `MAXTRANSMIT/N/K`
 
 You can fine-tune the size of the transmission buffer which the **smbfs** program uses when reading and writing files. The server may not have picked a buffer size which suits **smbfs** well. You can choose a smaller buffer size, if needed.
 
@@ -432,7 +439,7 @@ The minimum transmission buffer size is 8000 bytes (this is also the default buf
 
 Please note that the transmission buffer size you asked for need not be accepted by the file server, which may choose to use a much smaller buffer.
 
-#### 5.4.5. `PROTOCOL/K`
+#### 5.4.6. `PROTOCOL/K`
 
 The **smbfs** program talks to the file server using a protocol called **SMBv1**, using commands and data structures described by the **Common Internet File System** documentation.
 
@@ -444,7 +451,7 @@ The alternative is `PROTOCOL=nt1` which might provide better compatibility and p
 
 When in doubt, stick with `PROTOCOL=core`.
 
-#### 5.4.6. `SESSIONSETUP/K`
+#### 5.4.7. `SESSIONSETUP/K`
 
 If the `UNICODE=ON` option is in effect, the **smbfs** program may not be able to connect to the server because it expects Unicode text to be used only after the server session has been established.
 

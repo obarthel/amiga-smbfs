@@ -2863,3 +2863,25 @@ smbfs 2.12 (5.1.2019)
   "keep alive" handling are scheduled regularly every 10 seconds.
   That way the "keep alive" messages are dealt with without spending
   too much time with WaitSelect().
+
+
+smbfs 2.13 (9.2.2019)
+
+- The ACTION_CREATE_DIR, ACTION_DELETE_OBJECT, ACTION_FINDOUTPUT,
+  ACTION_RENAME_OBJECT, ACTION_SET_DATE, ACTION_SET_FILE_SIZE,
+  ACTION_SET_PROTECT and ACTION_WRITE operations now set use more
+  appropriate error codes instead of always translating an unspecific
+  "access denied" error into "ERROR_READ_PROTECTED". For example, for
+  ACTION_DELETE_OBJECT the new translation of "access denied" will be
+  "ERROR_DELETE_PROTECTED".
+
+- Added the ErrorOutput option, which can be either "stderr" (default)
+  or "stdout". Its purpose is to allow error messages written by
+  smbfs to be redirected to a file, which will not work for AmigaDOS
+  shell versions 36-40 if smbfs uses "stderr". Use ErrorOutput=stdout
+  to be able to redirect all smbfs output, including any error messages,
+  to a file.
+
+- Updated the copyright text.
+
+- Output to console or log files is now line-buffered.
