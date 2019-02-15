@@ -7474,6 +7474,7 @@ Action_ExamineNext(
 	struct LockNode * ln;
 	LONG result = DOSFALSE;
 	int error = OK;
+	int eof = FALSE;
 	LONG offset;
 
 	ENTER();
@@ -7528,7 +7529,7 @@ Action_ExamineNext(
 	SHOWMSG("calling 'smba_readdir'");
 	SHOWVALUE(offset);
 
-	smba_readdir(ln->ln_File,offset,fib,(smba_callback_t)dir_scan_callback_func_exnext,&error);
+	smba_readdir(ln->ln_File,offset,fib,(smba_callback_t)dir_scan_callback_func_exnext,&eof,&error);
 
 	if(error != OK)
 	{
@@ -7545,7 +7546,7 @@ Action_ExamineNext(
 	 * returned all the entries available. There are no
 	 * further entries to be delivered.
 	 */
-	if(fib->fib_FileName[0] == '\0')
+	if(eof || fib->fib_FileName[0] == '\0')
 	{
 		SHOWMSG("nothing to be read");
 		fib->fib_DiskKey = -1;
@@ -7969,6 +7970,7 @@ Action_ExamineAll(
 	struct LockNode * ln;
 	int record_size;
 	int error = OK;
+	int eof = FALSE;
 	LONG offset;
 
 	ENTER();
@@ -8159,7 +8161,7 @@ Action_ExamineAll(
 	SHOWMSG("calling 'smba_readdir'");
 	SHOWVALUE(offset);
 
-	smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&error);
+	smba_readdir(ln->ln_File,offset,&ec,(smba_callback_t)dir_scan_callback_func_exall,&eof,&error);
 
 	/* Did the smba_readdir() run into trouble? */
 	if (error != OK)

@@ -146,10 +146,10 @@ smbfs 1.28 (4.12.2000)
 smbfs 1.29 (6.12.2000)
 
 - Writes larger than 65535 bytes could stall and slow down the
-  file system. Fixed. [Thore Böckelmann]
+  file system. Fixed. [Thore Bï¿½ckelmann]
 
 - The ACTION_MORE_CACHE implementation never returned the total
-  number of cache entries allocated. Fixed. [Thore Böckelmann]
+  number of cache entries allocated. Fixed. [Thore Bï¿½ckelmann]
 
 - Plain text passwords didn't seem to work any more after I made
   the changes to allow for encrypted passwords to be used. Fixed.
@@ -316,7 +316,7 @@ smbfs 1.42 (19.12.2000)
 smbfs 1.43 (21.12.2000)
 
 - The integrated broadcase name query code would conflict with the
-  DNS lookup. Fixed. [Thore Böckelmann]
+  DNS lookup. Fixed. [Thore Bï¿½ckelmann]
 
 - The NetBIOS name query code now retries four times to get a response
   out of the network.
@@ -2885,3 +2885,36 @@ smbfs 2.13 (9.2.2019)
 - Updated the copyright text.
 
 - Output to console or log files is now line-buffered.
+
+
+smbfs 2.14 (15.2.2019)
+
+- Documented the directory cache a bit better, including the reason
+  why the cache may have been invalidated while the directory
+  contents were being read.
+
+- The directory read operation now verifies that it does not
+  run out of cache entries while it is processing new directory
+  records it received from the server.
+
+- The directory read operation now both detects whether or not the
+  last entry has been read, this information is now also provided
+  to the function which retrieved the directory entries. This
+  change is in support of improved directory entry caching.
+
+- The directory cache now keeps better track of what's actually
+  in it. If a directory entry could not be extracted and decoded,
+  the number of directory entries read would not match the number
+  of entries available from the cache, for example.
+
+- A flag now tracks if the directory cache is valid or not.
+  Previously, checking for a valid cache involved looking at
+  a NULL pointer.
+
+- If allocating memory for the directory cache failed partly, then
+  there may have been invalid string pointers in the cache table,
+  leading to a crash when trying to release the cache. Fixed.
+
+- Adding another entry to the cache, invalidating the cache or
+  resetting the cache now all use dedicated functions instead of
+  directly manipulating the assorted data structures.

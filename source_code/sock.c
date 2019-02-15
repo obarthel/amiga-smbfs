@@ -1515,7 +1515,7 @@ smb_check_server_connection(struct smb_server *server, int error)
 		if(error == EINTR)
 			server->dont_retry = TRUE;
 
-		smb_invalidate_all_inodes (server);
+		smba_invalidate_all_inodes (server->abstraction);
 
 		SHOWMSG("closing the server connection.");
 		smb_release(server);

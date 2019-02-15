@@ -2484,8 +2484,8 @@ smb_proc_readdir_short (
 	struct smb_server *server,
 	const char *path,
 	int fpos,
-	int cache_size,
-	struct smb_dirent *entry,
+	dircache_t * dircache,
+	int * end_of_search_ptr,
 	int * error_ptr)
 {
 	char *p;
@@ -2493,7 +2493,7 @@ smb_proc_readdir_short (
 	int result = 0;
 	int i;
 	int first, total_count;
-	struct smb_dirent *current_entry;
+	struct smb_dirent * entry;
 	word bcc;
 	word count;
 	char status[SMB_STATUS_SIZE];
@@ -2502,6 +2502,7 @@ smb_proc_readdir_short (
 	int mask_len;
 	int mask_size;
 	char * mask;
+	int end_of_search = 0;
 
 	mask = malloc(path_len + 4 + 1);
 	if (mask == NULL)
@@ -2522,7 +2523,7 @@ smb_proc_readdir_short (
 	else
 		mask_size = 1 + mask_len+1 + 3;
 
-	LOG (("SMB call readdir %ld @ %ld\n", cache_size, fpos));
+	LOG (("SMB call readdir @ %ld\n", fpos));
 	LOG (("                 mask = '%s'\n", escape_name(mask)));
 
 	buf = server->transmit_buffer;
@@ -2531,7 +2532,8 @@ smb_proc_readdir_short (
 
 	first = TRUE;
 	total_count = 0;
-	current_entry = entry;
+
+	entry = get_first_dircache_entry(dircache);
 
 	while (TRUE)
 	{
@@ -2588,6 +2590,8 @@ smb_proc_readdir_short (
 		{
 			if (server->rcls == ERRDOS && server->err == ERRnofiles)
 			{
+				end_of_search = 1;
+
 				result = total_count - fpos;
 				goto out;
 			}
@@ -2641,7 +2645,7 @@ smb_proc_readdir_short (
 
 				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 			}
-			else if (total_count >= fpos + cache_size)
+			else if (entry == NULL)
 			{
 				result = total_count - fpos;
 
@@ -2649,9 +2653,9 @@ smb_proc_readdir_short (
 			}
 			else
 			{
-				if(smb_decode_dirent (p, current_entry) == 0)
+				if(smb_decode_dirent (p, entry) == 0)
 				{
-					current_entry += 1;
+					entry = get_next_dircache_entry(dircache);
 				}
 				else
 				{
@@ -2669,6 +2673,8 @@ smb_proc_readdir_short (
 
 	if(mask != NULL)
 		free(mask);
+
+	(*end_of_search_ptr) = end_of_search;
 
 	return result;
 }
@@ -3022,8 +3028,8 @@ smb_proc_readdir_long (
 	struct smb_server *server,
 	const char *path,
 	int fpos,
-	int cache_size,
-	struct smb_dirent *entry,
+	dircache_t * dircache,
+	int * end_of_search_ptr,
 	int * error_ptr)
 {
 	int max_matches = 512; /* this should actually be based on the max_recv value */
@@ -3034,7 +3040,6 @@ smb_proc_readdir_long (
 	int i;
 	int is_first;
 	int total_count = 0;
-	struct smb_dirent *current_entry;
 
 	char *resp_data = NULL;
 	char *resp_param = NULL;
@@ -3051,6 +3056,8 @@ smb_proc_readdir_long (
 	int loop_count = 0;
 
 	unsigned char *outbuf = server->transmit_buffer;
+
+	struct smb_dirent * entry;
 
 	int path_len = strlen(path);
 	int mask_buffer_size = path_len + 2 + 1;
@@ -3089,7 +3096,7 @@ smb_proc_readdir_long (
 
 	mask_len = path_len + 2;
 
-	LOG (("SMB call lreaddir %ld @ %ld\n", cache_size, fpos));
+	LOG (("SMB call lreaddir @ %ld\n", fpos));
 	LOG (("                  mask = '%s'\n", escape_name(mask)));
 
 	resp_param = NULL;
@@ -3099,7 +3106,8 @@ smb_proc_readdir_long (
 
 	is_first = TRUE;
 	total_count = 0;
-	current_entry = entry;
+
+	entry = get_first_dircache_entry(dircache);
 
 	while (ff_end_of_search == 0)
 	{
@@ -3315,9 +3323,9 @@ smb_proc_readdir_long (
 					break;
 				}
 
-				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
+				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 			}
-			else if (total_count >= fpos + cache_size)
+			else if (entry == NULL)
 			{
 				smb_decode_long_dirent (server, p, NULL, info_level, &entry_length);
 				if(entry_length == 0)
@@ -3326,7 +3334,7 @@ smb_proc_readdir_long (
 					break;
 				}
 
-				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
+				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 
 				continue;
 			}
@@ -3335,7 +3343,7 @@ smb_proc_readdir_long (
 				/* Skip this entry if we cannot decode the name. This could happen
 				 * if the name will no fit into the buffer.
 				 */
-				if(!smb_decode_long_dirent (server, p, current_entry, info_level, &entry_length))
+				if(!smb_decode_long_dirent (server, p, entry, info_level, &entry_length))
 				{
 					if(entry_length == 0)
 					{
@@ -3343,12 +3351,12 @@ smb_proc_readdir_long (
 						break;
 					}
 
-					LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n",total_count, i, fpos));
+					LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 
 					continue;
 				}
 
-				current_entry += 1;
+				entry = get_next_dircache_entry(dircache);
 			}
 
 			total_count += 1;
@@ -3389,6 +3397,8 @@ smb_proc_readdir_long (
 	if (resp_param != NULL)
 		free (resp_param);
 
+	(*end_of_search_ptr) = ff_end_of_search;
+
 	if(result == 0)
 		result = total_count - fpos;
 
@@ -3401,16 +3411,16 @@ smb_proc_readdir (
 	struct smb_server *server,
 	const char *path,
 	int fpos,
-	int cache_size,
-	struct smb_dirent *entry,
+	dircache_t * dircache,
+	int * end_of_search_ptr,
 	int * error_ptr)
 {
 	int result;
 
 	if (server->protocol >= PROTOCOL_LANMAN2)
-		result = smb_proc_readdir_long (server, path, fpos, cache_size, entry, error_ptr);
+		result = smb_proc_readdir_long (server, path, fpos, dircache, end_of_search_ptr, error_ptr);
 	else
-		result = smb_proc_readdir_short (server, path, fpos, cache_size, entry, error_ptr);
+		result = smb_proc_readdir_short (server, path, fpos, dircache, end_of_search_ptr, error_ptr);
 
 	return result;
 }

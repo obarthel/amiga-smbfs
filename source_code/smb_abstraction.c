@@ -33,8 +33,10 @@
 
 /*****************************************************************************/
 
+static void reset_dircache (dircache_t * dircache);
+static void invalidate_dircache(dircache_t * dircache);
 static void smba_cleanup_dircache(struct smba_server * server);
-static int smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr);
+static int smba_setup_dircache (struct smba_server * server,int cache_size);
 
 /*****************************************************************************/
 
@@ -197,8 +199,10 @@ smba_connect (
 
 	LOG(("cache size = %ld entries\n", cache_size));
 
-	if(smba_setup_dircache (res,cache_size,error_ptr) < 0)
+	if(smba_setup_dircache (res, cache_size) < 0)
 	{
+		(*error_ptr) = ENOMEM;
+
 		report_error("Directory cache initialization failed (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
 		goto error_occured;
 	}
@@ -412,6 +416,8 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 	smba_server_t *s;
 	int result;
 
+	ENTER();
+
 	if (!f->is_valid || (need_fid && !f->dirent.opened))
 	{
 		ULONG now = get_current_time();
@@ -496,13 +502,8 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 		}
 		else
 		{
-			/* don't open directory, initialize directory cache */
 			if (f->dircache != NULL)
-			{
-				f->dircache->cache_for	= NULL;
-				f->dircache->len		= 0;
-				f->dircache				= NULL;
-			}
+				invalidate_dircache(f->dircache);
 		}
 
 		f->attr_time	= get_current_time();
@@ -513,7 +514,8 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 
  out:
 
-	return result;
+	RETURN(result);
+	return(result);
 }
 
 /*****************************************************************************/
@@ -747,6 +749,8 @@ file_is_valid(smba_server_t * s, const smba_file_t * f)
 void
 smba_close (smba_server_t * s, smba_file_t * f)
 {
+	ENTER();
+
 	if (file_is_valid(s, f))
 	{
 		int ignored_error;
@@ -764,12 +768,9 @@ smba_close (smba_server_t * s, smba_file_t * f)
 			smb_proc_close (&f->server->server, f->dirent.fileid, -1, &ignored_error);
 		}
 
+		/* release the directory cache */
 		if (f->dircache != NULL)
-		{
-			f->dircache->cache_for = NULL;
-			f->dircache->len = 0;
-			f->dircache = NULL;
-		}
+			invalidate_dircache(f->dircache);
 
 		f->server->num_open_files--;
 
@@ -781,6 +782,8 @@ smba_close (smba_server_t * s, smba_file_t * f)
 	{
 		LOG(("file seems to be invalid\n"));
 	}
+
+	LEAVE();
 }
 
 /*****************************************************************************/
@@ -1411,7 +1414,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 /*****************************************************************************/
 
 int
-smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t callback, int * error_ptr)
+smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t callback, int * eof_ptr, int * error_ptr)
 {
 	const struct smb_dirent * dirent;
 	int cache_index, o, eof, count = 0;
@@ -1420,52 +1423,74 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 	int result;
 	ULONG now;
 
+	(*eof_ptr) = 0;
+
 	result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
 	now = get_current_time();
 
-	if (f->dircache == NULL) /* get a cache */
+	/* get a cache for this directory unless we already have one */
+	if (f->dircache == NULL)
 	{
-		dircache_t * dircache = f->server->dircache;
+		dircache_t * dircache;
 
+		/* there is only one cache for the SMB session and only a
+		 * single directory may use it at a time
+		 */
+		dircache = f->server->dircache;
+
+		/* is the cache currently in use? */
 		if (dircache->cache_for != NULL)
-			dircache->cache_for->dircache = NULL; /* steal it */
+		{
+			LOG(("stealing cache from '%s'\n", escape_name(dircache->cache_for->dirent.complete_path)));
 
-		dircache->eof = dircache->len = dircache->base = 0;
+			/* steal the cache from the other directory */
+			dircache->cache_for->dircache = NULL;
+		}
+
+		reset_dircache(dircache);
+
 		dircache->cache_for = f;
-
 		f->dircache = dircache;
-
-		LOG (("stealing cache\n"));
 	}
 	else
 	{
+		/* has the cache already become stale? */
 		if (now > f->dircache->created_at && now - f->dircache->created_at >= DIR_CACHE_TIME)
 		{
-			f->dircache->eof = f->dircache->len = f->dircache->base = 0;
+			reset_dircache(f->dircache);
 
 			LOG (("cache outdated\n"));
 		}
 	}
 
+	/* read each single directory entry, drawing upon the
+	 * cache contents, if possible
+	 */
 	for (cache_index = offs ; ; cache_index++)
 	{
-		if (cache_index < f->dircache->base /* fill cache if necessary */
-		 || cache_index >= f->dircache->base + f->dircache->len)
+		/* nothing more to be read? */
+		if (cache_index >= f->dircache->base + f->dircache->cache_used && f->dircache->eof)
+			break;
+
+		/* is this entry not in the cache? */
+		if (cache_index < f->dircache->base || cache_index >= f->dircache->base + f->dircache->cache_used)
 		{
-			if (cache_index >= f->dircache->base + f->dircache->len && f->dircache->eof)
-				break; /* nothing more to read */
-
 			LOG (("cachefill for '%s'\n", escape_name(f->dirent.complete_path)));
-			LOG (("\tbase was: %ld, len was: %ld, newbase=%ld\n", f->dircache->base, f->dircache->len, cache_index));
+			LOG (("\tbase was: %ld, len was: %ld, newbase=%ld\n", f->dircache->base, f->dircache->cache_used, cache_index));
 
-			f->dircache->len = 0;
+			/* start over and read the next entries, beginning with
+			 * entry at offset 'cache_index'
+			 */
+			f->dircache->cache_used = 0;
 			f->dircache->base = cache_index;
 
-			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache->cache_size,
-				f->dircache->cache, error_ptr);
+			/* try to read up as many entries as will fit into
+			 * the cache (cache_size)
+			 */
+			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache, &eof, error_ptr);
 
 			/* We stop on error, or if the directory is empty. */
 			if (num_entries <= 0)
@@ -1474,33 +1499,40 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 				goto out;
 			}
 
-			/* Avoid some hits if restart/retry occured. Should fix the real root
-			 * of this problem really, but I am not bored enough atm. -Piru
+			/* the cache may have been invalidated because an error
+			 * occured (e.g. server connection was terminated), or if
+			 * the cache size was changed
 			 */
-			if (f->dircache == NULL)
+			if (f->dircache == NULL || !f->dircache->is_valid)
 			{
-				LOG (("lost dircache due to an error, bailing out!\n"));
+				LOG (("dircache was invalidated, bailing out!\n"));
 
-				(*error_ptr) = ENOMEM;
+				(*error_ptr) = ENOENT;
 
 				result = -1;
 				goto out;
 			}
 
-			f->dircache->len = num_entries;
-			f->dircache->eof = (num_entries < f->dircache->cache_size);
+			f->dircache->cache_used = num_entries;
+			f->dircache->eof = eof;
 			f->dircache->created_at = now;
 
 			LOG (("cachefill with %ld entries\n", num_entries));
 		}
 
 		o = cache_index - f->dircache->base;
-		eof = (o >= (f->dircache->len - 1) && f->dircache->eof);
+
+		/* is this the last directory entry to be delivered? */
+		eof = (o >= (f->dircache->cache_used - 1) && f->dircache->eof);
+
+		if(eof)
+			(*eof_ptr) = 1;
+
 		count++;
 
 		dirent = &f->dircache->cache[o];
 
-		LOG (("delivering '%s', cache_index=%ld, eof=%ld\n", escape_name(dirent->complete_path), cache_index, eof));
+		LOG (("delivering '%s', cache_index=%ld, last entry=%s\n", escape_name(dirent->complete_path), cache_index, eof ? "yes" : "no"));
 
 		data.is_dir							= (dirent->attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
 		data.is_read_only					= (dirent->attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
@@ -1527,21 +1559,82 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 /*****************************************************************************/
 
 static void
-invalidate_dircache (struct smba_server * server)
+reset_dircache (dircache_t * dircache)
 {
-	dircache_t * dircache = server->dircache;
+	ASSERT( dircache != NULL );
 
+	dircache->eof = FALSE;
+	dircache->cache_used = dircache->base = 0;
+	dircache->is_valid = TRUE;
+}
+
+/*****************************************************************************/
+
+struct smb_dirent *
+get_first_dircache_entry(dircache_t * dircache)
+{
+	struct smb_dirent * result;
+
+	ASSERT( dircache != NULL );
+
+	if(dircache->is_valid)
+	{
+		dircache->cache_used = 0;
+
+		result = &dircache->cache[dircache->cache_used];
+	}
+	else
+	{
+		result = NULL;
+	}
+
+	return(result);
+}
+
+/*****************************************************************************/
+
+struct smb_dirent *
+get_next_dircache_entry(dircache_t * dircache)
+{
+	struct smb_dirent * result = NULL;
+
+	ASSERT( dircache != NULL );
+
+	if(dircache->is_valid && dircache->cache_used < dircache->cache_size)
+	{
+		LOG(("read directory entry '%s', now %ld entries in cache (of %ld)\n",
+			escape_name(dircache->cache[dircache->cache_used].complete_path),
+			dircache->cache_used+1,
+			dircache->cache_size));
+
+		dircache->cache_used++;
+
+		if(dircache->cache_used < dircache->cache_size)
+			result = &dircache->cache[dircache->cache_used];
+		else
+			LOG(("directory cache is now full\n"));
+	}
+
+	return(result);
+}
+
+/*****************************************************************************/
+
+static void
+invalidate_dircache(dircache_t * dircache)
+{
 	ENTER();
 
-	if(dircache->cache_for != NULL)
-		LOG(("dircache->cache_for->dirent.complete_path = '%s'\n", escape_name(dircache->cache_for->dirent.complete_path)));
-	else
-		SHOWMSG("-- directory cache is empty --");
+	ASSERT( dircache != NULL );
 
-	dircache->eof = dircache->len = dircache->base = 0;
+	dircache->eof = TRUE;
+	dircache->cache_used = dircache->base = 0;
+	dircache->is_valid = FALSE;
 
 	if(dircache->cache_for != NULL)
 	{
+		LOG(("invalidating directory cache for '%s'\n", escape_name(dircache->cache_for->dirent.complete_path)));
+
 		dircache->cache_for->dircache = NULL;
 		dircache->cache_for = NULL;
 	}
@@ -1832,15 +1925,17 @@ smba_statfs (smba_server_t * s, long *bsize, long *blocks, long *bfree, int * er
 /*****************************************************************************/
 
 void
-smb_invalidate_all_inodes (struct smb_server *server)
+smba_invalidate_all_inodes (smba_server_t * server)
 {
 	smba_file_t *f;
 
 	ENTER();
 
-	invalidate_dircache (server->abstraction);
+	ASSERT( server != NULL );
 
-	for (f = (smba_file_t *)server->abstraction->open_files.mlh_Head;
+	invalidate_dircache(server->dircache);
+
+	for (f = (smba_file_t *)server->open_files.mlh_Head;
 	     f->node.mln_Succ != NULL;
 	     f = (smba_file_t *)f->node.mln_Succ)
 	{
@@ -1867,6 +1962,52 @@ free_dircache(dircache_t * the_dircache)
 	free(the_dircache);
 }
 
+static dircache_t *
+allocate_dircache(int cache_size)
+{
+	const int complete_path_size = SMB_MAXNAMELEN + 1;
+	dircache_t * result = NULL;
+	dircache_t * dircache;
+	int i;
+
+	ENTER();
+
+	dircache = malloc(sizeof(*dircache) + (cache_size-1) * sizeof(dircache->cache));
+	if(dircache == NULL)
+		goto out;
+
+	memset(dircache, 0, sizeof(*dircache));
+	dircache->cache_size = cache_size;
+
+	/* Make sure that free_dircache() will not end up
+	 * releasing invalid memory.
+	 */
+	for (i = 0; i < dircache->cache_size; i++)
+		dircache->cache[i].complete_path = NULL;
+
+	for (i = 0; i < dircache->cache_size; i++)
+	{
+		dircache->cache[i].complete_path = malloc (complete_path_size);
+		if(dircache->cache[i].complete_path == NULL)
+			goto out;
+
+		dircache->cache[i].complete_path_size = complete_path_size;
+	}
+
+	invalidate_dircache(dircache);
+
+	result = dircache;
+	dircache = NULL;
+
+ out:
+
+	if(dircache != NULL)
+		free_dircache(dircache);
+
+	RETURN(result);
+	return(result);
+}
+
 static void
 smba_cleanup_dircache(struct smba_server * server)
 {
@@ -1881,44 +2022,20 @@ smba_cleanup_dircache(struct smba_server * server)
 }
 
 static int
-smba_setup_dircache (struct smba_server * server,int cache_size, int * error_ptr)
+smba_setup_dircache (struct smba_server * server,int cache_size)
 {
-	const int complete_path_size = SMB_MAXNAMELEN + 1;
 	dircache_t * the_dircache;
 	int result = -1;
-	int i;
 
-	the_dircache = malloc(sizeof(*the_dircache) + (cache_size-1) * sizeof(the_dircache->cache));
+	the_dircache = allocate_dircache(cache_size);
 	if(the_dircache == NULL)
-	{
-		(*error_ptr) = ENOMEM;
 		goto out;
-	}
-
-	memset(the_dircache, 0, sizeof(*the_dircache));
-	the_dircache->cache_size = cache_size;
-
-	for (i = 0; i < the_dircache->cache_size; i++)
-	{
-		the_dircache->cache[i].complete_path = malloc (complete_path_size);
-		if(the_dircache->cache[i].complete_path == NULL)
-		{
-			(*error_ptr) = ENOMEM;
-			goto out;
-		}
-
-		the_dircache->cache[i].complete_path_size = complete_path_size;
-	}
 
 	server->dircache = the_dircache;
-	the_dircache = NULL;
 
 	result = 0;
 
  out:
-
-	if(the_dircache != NULL)
-		free_dircache(the_dircache);
 
 	return(result);
 }
@@ -2398,6 +2515,8 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 	int result;
 	int i;
 
+	ENTER();
+
 	result = old_dircache->cache_size;
 
 	/* We have to have a minimum cache size. */
@@ -2415,7 +2534,7 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 	if(new_cache == NULL)
 		goto out;
 
-	memset(new_cache,0,sizeof(*new_cache));
+	memset(new_cache, 0, sizeof(*new_cache));
 	new_cache->cache_size = cache_size;
 
 	/* If the new cache is to be larger than the old one, allocate additional file name slots. */
@@ -2461,7 +2580,7 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 		}
 	}
 
-	invalidate_dircache(server);
+	invalidate_dircache(server->dircache);
 
 	free_dircache(old_dircache);
 
@@ -2470,5 +2589,6 @@ smba_change_dircache_size(struct smba_server * server,int cache_size)
 
  out:
 
+	RETURN(result);
 	return(result);
 }
