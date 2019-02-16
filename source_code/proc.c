@@ -2645,24 +2645,24 @@ smb_proc_readdir_short (
 
 				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 			}
-			else if (entry == NULL)
+			/* Was the cache invalidated, or there are no further
+			 * cache entries to be filled?
+			 */
+			else if (entry == NULL || !dircache->is_valid)
 			{
 				result = total_count - fpos;
 
 				goto out;
 			}
+			else if (smb_decode_dirent (p, entry) == 0)
+			{
+				entry = get_next_dircache_entry(dircache);
+			}
 			else
 			{
-				if(smb_decode_dirent (p, entry) == 0)
-				{
-					entry = get_next_dircache_entry(dircache);
-				}
-				else
-				{
-					p += SMB_DIRINFO_SIZE;
+				p += SMB_DIRINFO_SIZE;
 
-					LOG (("skipped entry because name is too long; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
-				}
+				LOG (("skipped entry because name is too long; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 			}
 
 			total_count += 1;
@@ -3325,18 +3325,11 @@ smb_proc_readdir_long (
 
 				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
 			}
-			else if (entry == NULL)
+			/* Did we run out of cache, or the cache was invalidated? */
+			else if (entry == NULL || !dircache->is_valid)
 			{
-				smb_decode_long_dirent (server, p, NULL, info_level, &entry_length);
-				if(entry_length == 0)
-				{
-					LOG (("no more entries available; stopping.\n"));
-					break;
-				}
-
-				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
-
-				continue;
+				LOG (("no more entries available; stopping.\n"));
+				break;
 			}
 			else
 			{
@@ -3725,13 +3718,15 @@ smb_proc_getattrE (struct smb_server *server, struct smb_dirent *entry, int * er
 			goto out;
 	}
 
-	entry->ctime		= date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
-	entry->atime		= date_dos2unix (WVAL (buf, smb_vwv3), WVAL (buf, smb_vwv2));
-	entry->mtime		= date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
-	entry->wtime		= entry->mtime;
+	entry->ctime = date_dos2unix (WVAL (buf, smb_vwv1), WVAL (buf, smb_vwv0));
+	entry->atime = date_dos2unix (WVAL (buf, smb_vwv3), WVAL (buf, smb_vwv2));
+	entry->mtime = date_dos2unix (WVAL (buf, smb_vwv5), WVAL (buf, smb_vwv4));
+	entry->wtime = entry->mtime;
+
 	entry->size_low		= DVAL (buf, smb_vwv6);
 	entry->size_high	= 0;
-	entry->attr			= WVAL (buf, smb_vwv10);
+
+	entry->attr = WVAL (buf, smb_vwv10);
 
 	#if DEBUG
 	{

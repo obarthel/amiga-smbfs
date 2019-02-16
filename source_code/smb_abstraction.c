@@ -426,15 +426,20 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 
 		if (!f->is_valid || f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 		{
+			if (!f->is_valid || f->attr_time == 0)
+				LOG(("file attributes not yet known\n"));
+			else
+				LOG(("file attributes need to be updated\n"));
+
 			if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 			{
-				SHOWMSG("using the LAN Manager 2.0 getattr() variant");
+				LOG(("using the LAN Manager 2.0 getattr() variant\n"));
 
 				result = smb_query_path_information (&s->server, f->dirent.complete_path, f->dirent.len, 0, &f->dirent, error_ptr);
 			}
 			else
 			{
-				SHOWMSG("using the legacy getattr() variant");
+				LOG(("using the legacy getattr() variant\n"));
 
 				result = smb_proc_getattr_core (&s->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
 			}
@@ -453,7 +458,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 					{
 						LOG (("opening file '%s'\n", escape_name(f->dirent.complete_path)));
 
-						SHOWMSG("using the LAN Manager 2.0 open() variant");
+						LOG(("using the LAN Manager 2.0 open() variant\n"));
 
 						result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate_file, &f->dirent, error_ptr);
 						if (result < 0)
@@ -471,7 +476,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 				{
 					LOG (("opening file '%s'\n", escape_name(f->dirent.complete_path)));
 
-					SHOWMSG("using the legacy open() variant");
+					LOG(("using the legacy open() variant\n"));
 
 					result = smb_proc_open (&s->server, f->dirent.complete_path, f->dirent.len, writable, truncate_file, &f->dirent, error_ptr);
 					if (result < 0)
@@ -503,7 +508,11 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 		else
 		{
 			if (f->dircache != NULL)
+			{
+				LOG(("discarding the '%s' directory cache\n", escape_name(f->dirent.complete_path)));
+
 				invalidate_dircache(f->dircache);
+			}
 		}
 
 		f->attr_time	= get_current_time();
@@ -584,7 +593,10 @@ smba_open (
 	f->dirent.len = strlen (name);
 	f->server = s;
 
-	LOG(("open '%s' (writable=%s, truncate_file=%s)\n", escape_name(name), writable ? "yes" : "no", truncate_file ? "yes" : "no"));
+	LOG(("open '%s' (writable=%s, truncate_file=%s)\n",
+		escape_name(name),
+		writable ? "yes" : "no",
+		truncate_file ? "yes" : "no"));
 
 	result = make_open (f, open_dont_need_fid, writable, truncate_file, error_ptr);
 	if (result < 0)
@@ -630,7 +642,7 @@ write_attr (smba_file_t * f, int * error_ptr)
 		LOG(("mtime = %lu\n",f->dirent.mtime));
 		LOG(("ctime = %lu\n",f->dirent.ctime));
 
-		SHOWMSG("using the LAN Manager 2.0 open() variant");
+		LOG(("using the LAN Manager 2.0 open() variant\n"));
 
 		result = make_open (f, open_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
@@ -659,7 +671,7 @@ write_attr (smba_file_t * f, int * error_ptr)
 		LOG(("mtime = %lu\n",f->dirent.mtime));
 		LOG(("ctime = %lu\n",f->dirent.ctime));
 
-		SHOWMSG("using the legacy open() variant");
+		LOG(("using the legacy open() variant\n"));
 
 		result = make_open (f, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
@@ -995,7 +1007,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 	if (result < 0)
 		goto out;
 
-	SHOWVALUE(f->server->server.max_buffer_size);
+	D(("maximum buffer size = %ld\n", f->server->server.max_buffer_size));
 
 	max_buffer_size = f->server->server.max_buffer_size;
 
@@ -1264,11 +1276,14 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 
 	if (f->attr_time == 0 || (now > f->attr_time && now - f->attr_time > ATTR_CACHE_TIME))
 	{
-		LOG (("file '%s'\n", escape_name(f->dirent.complete_path)));
+		LOG (("file '%s' attributes %s\n",
+			escape_name(f->dirent.complete_path),
+			(f->attr_time == 0) ? "are not yet known" : "need to be updated"
+		));
 
 		if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 		{
-			SHOWMSG("using the LAN Manager 2.0 path query variant");
+			LOG(("using the LAN Manager 2.0 path query variant\n"));
 
 			if (f->dirent.opened)
 				result = smb_query_path_information (&f->server->server, NULL, 0, f->dirent.fileid, &f->dirent, error_ptr);
@@ -1277,7 +1292,7 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 		}
 		else
 		{
-			SHOWMSG("using the legacy path query variant");
+			LOG(("using the legacy path query variant\n"));
 
 			if (f->dirent.opened && f->server->supports_E)
 			{
@@ -1388,13 +1403,13 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 
 		if(!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 		{
-			SHOWMSG("using the LAN Manager 2.0 trunc variant");
+			LOG(("using the LAN Manager 2.0 trunc variant\n"));
 
 			result = smb_set_file_information (&f->server->server, &f->dirent, size, error_ptr);
 		}
 		else
 		{
-			SHOWMSG("using the legacy trunc variant (which cannot truncate files)");
+			LOG(("using the legacy trunc variant (which cannot truncate files)\n"));
 
 			result = smb_proc_trunc (&f->server->server, &f->dirent, size->Low, error_ptr);
 		}
@@ -1423,7 +1438,8 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 	int result;
 	ULONG now;
 
-	(*eof_ptr) = 0;
+	if(eof_ptr != NULL)
+		(*eof_ptr) = FALSE;
 
 	result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
@@ -1460,9 +1476,9 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 		/* has the cache already become stale? */
 		if (now > f->dircache->created_at && now - f->dircache->created_at >= DIR_CACHE_TIME)
 		{
-			reset_dircache(f->dircache);
+			LOG (("cache for '%s' has become stale\n", escape_name(f->dircache->cache_for->dirent.complete_path)));
 
-			LOG (("cache outdated\n"));
+			reset_dircache(f->dircache);
 		}
 	}
 
@@ -1495,6 +1511,9 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 			/* We stop on error, or if the directory is empty. */
 			if (num_entries <= 0)
 			{
+				if (num_entries == 0)
+					LOG(("no directory entries read\n"));
+
 				result = num_entries;
 				goto out;
 			}
@@ -1524,26 +1543,31 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 
 		/* is this the last directory entry to be delivered? */
 		eof = (o >= (f->dircache->cache_used - 1) && f->dircache->eof);
-
-		if(eof)
-			(*eof_ptr) = 1;
+		if(eof && eof_ptr != NULL)
+			(*eof_ptr) = TRUE;
 
 		count++;
 
 		dirent = &f->dircache->cache[o];
 
-		LOG (("delivering '%s', cache_index=%ld, last entry=%s\n", escape_name(dirent->complete_path), cache_index, eof ? "yes" : "no"));
+		LOG (("delivering '%s', cache_index=%ld, last entry=%s\n",
+			escape_name(dirent->complete_path),
+			cache_index,
+			eof ? "yes" : "no")
+		);
 
 		data.is_dir							= (dirent->attr & SMB_FILE_ATTRIBUTE_DIRECTORY) != 0;
 		data.is_read_only					= (dirent->attr & SMB_FILE_ATTRIBUTE_READONLY) != 0;
 		data.is_hidden						= (dirent->attr & SMB_FILE_ATTRIBUTE_HIDDEN) != 0;
 		data.is_system						= (dirent->attr & SMB_FILE_ATTRIBUTE_SYSTEM) != 0;
 		data.was_changed_since_last_archive	= (dirent->attr & SMB_FILE_ATTRIBUTE_ARCHIVE) != 0;
-		data.size_low						= dirent->size_low;
-		data.size_high						= dirent->size_high;
-		data.atime							= dirent->atime;
-		data.ctime							= dirent->ctime;
-		data.mtime							= dirent->mtime;
+
+		data.size_low	= dirent->size_low;
+		data.size_high	= dirent->size_high;
+
+		data.atime = dirent->atime;
+		data.ctime = dirent->ctime;
+		data.mtime = dirent->mtime;
 
 		if ((*callback) (callback_data, cache_index, cache_index + 1, dirent->complete_path, eof, &data))
 			break;
@@ -1570,6 +1594,9 @@ reset_dircache (dircache_t * dircache)
 
 /*****************************************************************************/
 
+/* Get the first directory cache entry, or return NULL
+ * if the cache has been invalidated.
+ */
 struct smb_dirent *
 get_first_dircache_entry(dircache_t * dircache)
 {
@@ -1593,6 +1620,9 @@ get_first_dircache_entry(dircache_t * dircache)
 
 /*****************************************************************************/
 
+/* Get the next available directory cache entry, or return
+ * NULL if the cache has been exhauste (or is no longer valid).
+ */
 struct smb_dirent *
 get_next_dircache_entry(dircache_t * dircache)
 {
@@ -1620,6 +1650,10 @@ get_next_dircache_entry(dircache_t * dircache)
 
 /*****************************************************************************/
 
+/* Invalidate the directory cache, which has the effect that adding
+ * new entries to it will fail until it has been reinitialized
+ * by reset_dircache().
+ */
 static void
 invalidate_dircache(dircache_t * dircache)
 {
@@ -1698,7 +1732,7 @@ smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 
 	if (!dir->server->server.prefer_core_protocol && dir->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
-		SHOWMSG("using the LAN Manager 2.0 creat variant");
+		LOG(("using the LAN Manager 2.0 creat variant\n"));
 
 		result = smb_proc_open (&dir->server->server, path, path_len, open_writable, truncate, &entry, error_ptr);
 		if(result < 0)
@@ -1706,7 +1740,7 @@ smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 	}
 	else
 	{
-		SHOWMSG("using the legacy creat variant");
+		LOG(("using the legacy creat variant\n"));
 
 		result = smb_proc_create (&dir->server->server, path, path_len, &entry, error_ptr);
 		if(result < 0)
@@ -1819,10 +1853,10 @@ close_path (smba_server_t * s, const char *path, int * error_ptr)
 		if(sn != NULL)
 		{
 			/* Walk through all the files, marking them as no longer
-			* valid and closing them, if necessary. Note that we
-			* do not remove them from the list of open files, we just
-			* mark them for reopening later, if needed.
-			*/
+			 * valid and closing them, if necessary. Note that we
+			 * do not remove them from the list of open files, we just
+			 * mark them for reopening later, if needed.
+			 */
 			for((void)NULL ; sn != NULL ; sn = sn->sn_next)
 			{
 				p = sn->sn_userdata;

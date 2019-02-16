@@ -146,10 +146,10 @@ smbfs 1.28 (4.12.2000)
 smbfs 1.29 (6.12.2000)
 
 - Writes larger than 65535 bytes could stall and slow down the
-  file system. Fixed. [Thore Bï¿½ckelmann]
+  file system. Fixed. [Thore Böckelmann]
 
 - The ACTION_MORE_CACHE implementation never returned the total
-  number of cache entries allocated. Fixed. [Thore Bï¿½ckelmann]
+  number of cache entries allocated. Fixed. [Thore Böckelmann]
 
 - Plain text passwords didn't seem to work any more after I made
   the changes to allow for encrypted passwords to be used. Fixed.
@@ -316,7 +316,7 @@ smbfs 1.42 (19.12.2000)
 smbfs 1.43 (21.12.2000)
 
 - The integrated broadcase name query code would conflict with the
-  DNS lookup. Fixed. [Thore Bï¿½ckelmann]
+  DNS lookup. Fixed. [Thore Böckelmann]
 
 - The NetBIOS name query code now retries four times to get a response
   out of the network.
@@ -2756,7 +2756,7 @@ smbfs 2.8 (19.12.2018)
 
 - The default values for READTHRESHOLD and WRITETHRESHOLD now have the
   effect of transmitting the SMB header and the payload separately,
-  just like it was introduces in version 2.1.
+  just like it was introduced in version 2.1.
 
   Use something like READTHRESHOLD=1500 and WRITETHRESHOLD=1500 to
   send packets smaller than or equal to 1500 bytes as a combined
@@ -2918,3 +2918,12 @@ smbfs 2.14 (15.2.2019)
 - Adding another entry to the cache, invalidating the cache or
   resetting the cache now all use dedicated functions instead of
   directly manipulating the assorted data structures.
+
+
+smbfs 2.15 (16.2.2019)
+
+- Added more debug output to the cache free/invalidate/fill
+  functionality.
+
+- The Action_ExamineNext() function could omit the last directory
+  entry. Oops.
