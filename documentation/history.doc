@@ -2927,3 +2927,29 @@ smbfs 2.15 (16.2.2019)
 
 - The Action_ExamineNext() function could omit the last directory
   entry. Oops.
+
+
+smbfs 2.16 (17.2.2019)
+
+- Simplified the directory cache size change functionality.
+
+- Added the CACHETABLES option, which tells smbfs how many individual
+  directory caches it should be using (default: 1). Each directory cache
+  can be used by one directory at a time.
+
+  If you are deleting a directory tree, including subdirectories, etc.
+  then smbfs will be limited in keeping track of what it deleted, and what
+  directory is next up for deletion.
+
+  With only a single directory cache, it will be limited to deleting a
+  subdirectory's contents, but forget about its parent directory, for
+  example, and thereby end up skipping entries which should have been
+  deleted.
+
+  This can be annoying because you will have to repeat the delete operation
+  several times over until everything has been deleted. Increasing the
+  number of cache tables can help, at the expense of extra memory.
+
+  Increasing the number of cache tables can also improve performance if
+  several programs are examining the contents of directories at the same
+  time.
