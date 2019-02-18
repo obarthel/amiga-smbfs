@@ -54,7 +54,7 @@ VERSION = 2
 ###############################################################################
 
  OPTIMIZE =	optimize opttime optinline optinlocal
- CPU =		any
+ CPU =		any utillib
 #CPU =		060 optschedule
  DEBUG =	line
 #DEBUG =	symbolflush noopt

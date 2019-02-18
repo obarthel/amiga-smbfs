@@ -2953,3 +2953,12 @@ smbfs 2.16 (17.2.2019)
   Increasing the number of cache tables can also improve performance if
   several programs are examining the contents of directories at the same
   time.
+
+
+smbfs 2.17 (18.2.2019)
+
+- Simplified the cache table "aging", removing duplicate code.
+
+- Verified that the CACHETABLE settings do have a positive effect on
+  the problematic "delete directory-name all" case which almost always
+  failed to delete the entire directory tree.

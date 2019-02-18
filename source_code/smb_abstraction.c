@@ -144,19 +144,19 @@ invalidate_dircache(dircache_t * dircache)
 /*****************************************************************************/
 
 static void
-free_dircache(dircache_t * the_dircache)
+free_dircache(dircache_t * dircache)
 {
 	int i;
 
 	ASSERT( dircache != NULL );
 
-	for (i = 0; i < the_dircache->cache_size; i++)
+	for (i = 0; i < dircache->cache_size; i++)
 	{
-		if(the_dircache->cache[i].complete_path != NULL)
-			free(the_dircache->cache[i].complete_path);
+		if(dircache->cache[i].complete_path != NULL)
+			free(dircache->cache[i].complete_path);
 	}
 
-	free(the_dircache);
+	free(dircache);
 }
 
 /*****************************************************************************/
@@ -1699,19 +1699,17 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 	{
 		dircache_t * dircache;
 
-		/* Grab the least recently used cache table entry and
-		 * move it to the front of the list. This is to make
-		 * sure it's not easily stolen.
+		/* Grab the least recently used cache table entry, which
+		 * should sit at the end of the list.
 		 */
-		dircache = (dircache_t *)RemTail((struct List *)&f->server->dircache_list);
-		AddHead((struct List *)&f->server->dircache_list, (struct Node *)dircache);
+		dircache = (dircache_t *)f->server->dircache_list.mlh_TailPred;
 
-		/* is the cache currently in use? */
+		/* Is the cache currently in use? */
 		if (dircache->cache_for != NULL)
 		{
 			LOG(("stealing cache from '%s'\n", escape_name(dircache->cache_for->dirent.complete_path)));
 
-			/* steal the cache from the other directory */
+			/* Steal the cache from the other directory? */
 			dircache->cache_for->dircache = NULL;
 		}
 
@@ -1729,13 +1727,13 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 
 			reset_dircache(f->dircache);
 		}
+	}
 
-		/* Make sure that the cache is not easily stolen. */
-		if (f->server->dircache_list.mlh_Head != &f->dircache->min_node)
-		{
-			Remove((struct Node *)f->dircache);
-			AddHead((struct List *)&f->server->dircache_list, (struct Node *)f->dircache);
-		}
+	/* Make sure that the cache is not easily stolen. */
+	if (f->server->dircache_list.mlh_Head != &f->dircache->min_node)
+	{
+		Remove((struct Node *)f->dircache);
+		AddHead((struct List *)&f->server->dircache_list, (struct Node *)f->dircache);
 	}
 
 	/* Read each single directory entry, drawing upon the
@@ -1778,7 +1776,7 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 			 * occured (e.g. server connection was terminated), or if
 			 * the cache size was changed.
 			 */
-			if (f->dircache == NULL || !f->dircache->is_valid)
+			if (f->dircache == NULL || !f->dircache->is_valid)
 			{
 				LOG (("dircache was invalidated, bailing out!\n"));
 
