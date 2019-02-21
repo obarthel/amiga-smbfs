@@ -55,6 +55,21 @@ reset_dircache (dircache_t * dircache)
 	dircache->eof = FALSE;
 	dircache->cache_used = dircache->base = 0;
 	dircache->is_valid = TRUE;
+	dircache->sid = -1;
+}
+
+/*****************************************************************************/
+
+/* Return the number of directory cache entries still
+ * available to be filled with data.
+ */
+int
+get_dircache_entries_available(const dircache_t * dircache)
+{
+	ASSERT( dircache != NULL );
+	ASSERT( dircache->cache_used <= dircache->cache_size );
+
+	return(dircache->cache_size - dircache->cache_used);
 }
 
 /*****************************************************************************/
@@ -129,6 +144,7 @@ invalidate_dircache(dircache_t * dircache)
 	dircache->eof = TRUE;
 	dircache->cache_used = dircache->base = 0;
 	dircache->is_valid = FALSE;
+	dircache->sid = -1;
 
 	if(dircache->cache_for != NULL)
 	{
@@ -1786,7 +1802,7 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 				goto out;
 			}
 
-			f->dircache->cache_used = num_entries;
+			/* f->dircache->cache_used = num_entries; */
 			f->dircache->eof = eof;
 			f->dircache->created_at = now;
 

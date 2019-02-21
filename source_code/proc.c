@@ -2413,7 +2413,7 @@ smb_proc_trunc (struct smb_server *server, struct smb_dirent *entry, dword lengt
 }
 
 static int
-smb_decode_dirent (const char *p, struct smb_dirent *entry)
+smb_decode_short_dirent (const char *p, struct smb_dirent *entry)
 {
 	int name_len;
 	int i;
@@ -2497,7 +2497,9 @@ smb_proc_readdir_short (
 	word bcc;
 	word count;
 	char status[SMB_STATUS_SIZE];
-	int entries_asked = (server->max_recv - 100) / SMB_DIRINFO_SIZE;
+
+	int entries_asked;
+	int dircache_entries_available;
 	int path_len = strlen (path);
 	int mask_len;
 	int mask_size;
@@ -2533,10 +2535,16 @@ smb_proc_readdir_short (
 	first = TRUE;
 	total_count = 0;
 
+	entries_asked = (server->max_recv - 100) / SMB_DIRINFO_SIZE;
+
 	entry = get_first_dircache_entry(dircache);
 
-	while (TRUE)
+	while (entry != NULL)
 	{
+		dircache_entries_available = get_dircache_entries_available(dircache);
+		if(entries_asked > dircache_entries_available)
+			entries_asked = dircache_entries_available;
+
 		if (first)
 		{
 			ASSERT( smb_payload_size(server, 2, mask_size) >= 0 );
@@ -2654,7 +2662,7 @@ smb_proc_readdir_short (
 
 				goto out;
 			}
-			else if (smb_decode_dirent (p, entry) == 0)
+			else if (smb_decode_short_dirent (p, entry) == 0)
 			{
 				entry = get_next_dircache_entry(dircache);
 			}
@@ -2755,31 +2763,6 @@ convert_time_t_to_long_date(time_t t, QUAD * long_date)
 }
 
 /*****************************************************************************/
-
-static void
-smb_get_dirent_name(char *p,int level,char ** name_ptr,int * len_ptr)
-{
-	switch (level)
-	{
-		case SMB_INFO_STANDARD:
-
-			(*len_ptr) = p[26];
-			(*name_ptr) = &p[27];
-			break;
-
-		case SMB_FILE_BOTH_DIRECTORY_INFO:
-
-			(*len_ptr) = DVAL (p, 60);
-			(*name_ptr) = &p[94];
-			break;
-
-		default:
-
-			(*name_ptr) = NULL;
-			(*len_ptr) = 0;
-			break;
-	}
-}
 
 /* interpret a long filename structure */
 static int
@@ -3032,7 +3015,7 @@ smb_proc_readdir_long (
 	int * end_of_search_ptr,
 	int * error_ptr)
 {
-	int max_matches = 512; /* this should actually be based on the max_recv value */
+	int max_matches;
 
 	int info_level = server->protocol < PROTOCOL_NT1 ? SMB_INFO_STANDARD : SMB_FILE_BOTH_DIRECTORY_INFO;
 
@@ -3059,29 +3042,17 @@ smb_proc_readdir_long (
 
 	struct smb_dirent * entry;
 
-	int path_len = strlen(path);
-	int mask_buffer_size = path_len + 2 + 1;
-	char *mask;
-	int mask_len;
-	int mask_size;
+	const int path_len = strlen(path);
+	const int pattern_len = path_len + 2;
+	const int pattern_size = (server->unicode_enabled) ? 2 * (pattern_len + 1) : pattern_len + 1;
+	char *pattern;
 
 	int entry_length;
 
 	ENTER();
 
-	/* ZZZ experimental 'max_matches' adjustment */
-	/*
-	if(info_level == SMB_FILE_BOTH_DIRECTORY_INFO)
-		max_matches = server->max_recv / 360;
-	else
-		max_matches = server->max_recv / 40;
-	*/
-
-	SHOWVALUE(server->max_recv);
-	SHOWVALUE(max_matches);
-
-	mask = malloc (mask_buffer_size);
-	if (mask == NULL)
+	pattern = malloc (pattern_len+1);
+	if (pattern == NULL)
 	{
 		LOG (("Memory allocation failed\n"));
 
@@ -3091,28 +3062,40 @@ smb_proc_readdir_long (
 		goto out;
 	}
 
-	memcpy(mask,path,path_len);
-	memcpy(&mask[path_len],"\\*",3); /* This includes the terminating NUL. */
-
-	mask_len = path_len + 2;
+	memcpy(pattern,path,path_len);
+	memcpy(&pattern[path_len],"\\*",3); /* This includes the terminating NUL. */
 
 	LOG (("SMB call lreaddir @ %ld\n", fpos));
-	LOG (("                  mask = '%s'\n", escape_name(mask)));
+	LOG (("                  pattern = '%s'\n", escape_name(pattern)));
 
 	resp_param = NULL;
 	resp_data = NULL;
 
  retry:
 
-	is_first = TRUE;
+	if(dircache->sid == -1)
+	{
+		is_first = TRUE;
+
+		LOG (("start scanning from the top (fpos=%ld)\n", fpos));
+	}
+	else
+	{
+		is_first = FALSE;
+
+		ff_dir_handle = dircache->sid;
+		ff_resume_key = dircache->resume_key;
+
+		LOG (("trying to resume scanning with sid=0x%04lx and resume_key=0x%08lx\n", ff_dir_handle, ff_resume_key));
+	}
+
 	total_count = 0;
 
 	entry = get_first_dircache_entry(dircache);
 
-	while (ff_end_of_search == 0)
+	while (entry != NULL && ff_end_of_search == 0)
 	{
-		loop_count++;
-		if (loop_count > 200)
+		if (++loop_count > 200)
 		{
 			LOG (("Looping in FIND_NEXT???\n"));
 
@@ -3124,16 +3107,11 @@ smb_proc_readdir_long (
 
 		memset (outbuf, 0, sizeof(word) * smb_setup1);
 
-		if(server->unicode_enabled)
-			mask_size = 2 * (mask_len + 1);
-		else
-			mask_size = mask_len + 1;
+		ASSERT( smb_payload_size(server, 15, 3 + 12 + pattern_size) >= 0 );
 
-		ASSERT( smb_payload_size(server, 15, 3 + 12 + mask_size) >= 0 );
+		smb_setup_header (server, SMBtrans2, 15, 3 + 12 + pattern_size);
 
-		smb_setup_header (server, SMBtrans2, 15, 3 + 12 + mask_size);
-
-		WSET (outbuf, smb_tpscnt, 12 + mask_size);							/* TotalParameterCount */
+		WSET (outbuf, smb_tpscnt, 12 + pattern_size);						/* TotalParameterCount */
 		WSET (outbuf, smb_tdscnt, 0);										/* TotalDataCount */
 		WSET (outbuf, smb_mprcnt, 10);										/* MaxParameterCount */
 		WSET (outbuf, smb_mdrcnt, server->max_recv);						/* MaxDataCount */
@@ -3155,7 +3133,11 @@ smb_proc_readdir_long (
 		(*p++) = '\0';
 		(*p++) = '\0';
 
-		if (is_first)
+		max_matches = get_dircache_entries_available(dircache);
+
+		LOG(("max_matches=%ld\n", max_matches));
+
+		if (is_first || ff_dir_handle == -1)
 		{
 			LOG (("first match\n"));
 
@@ -3167,7 +3149,7 @@ smb_proc_readdir_long (
 		}
 		else
 		{
-			LOG (("next match; ff_dir_handle=0x%lx ff_resume_key=%ld mask='%s'\n", ff_dir_handle, ff_resume_key, escape_name(mask)));
+			LOG (("next match; ff_dir_handle=0x%04lx ff_resume_key=0x%08lx pattern='%s'\n", ff_dir_handle, ff_resume_key, escape_name(pattern)));
 
 			WSET (p, 0, ff_dir_handle);
 			WSET (p, 2, max_matches); /* max count */
@@ -3180,19 +3162,19 @@ smb_proc_readdir_long (
 
 		if(server->unicode_enabled)
 		{
-			copy_latin1_to_utf16le(p,mask_size,mask,mask_len);
+			copy_latin1_to_utf16le(p,pattern_size,pattern,pattern_len);
 		}
 		else
 		{
-			memcpy (p, mask, mask_len);
-			p[mask_len] = '\0';
+			memcpy (p, pattern, pattern_len);
+			p[pattern_len] = '\0';
 		}
 
 		result = smb_trans2_request (server, SMBtrans2, &resp_data_len, &resp_param_len, &resp_data, &resp_param, error_ptr);
 
 		LOG (("smb_trans2_request returns %ld\n", result));
 
-		/* If an error was flagged, check is_first if it's a protocol
+		/* If an error was flagged, check first if it's a protocol
 		 * error which we could handle below. Otherwise, try again.
 		 */
 		if (result < 0 && (*error_ptr) != error_check_smb_error)
@@ -3236,12 +3218,26 @@ smb_proc_readdir_long (
 
 		/* Bail out if this is empty. */
 		if (resp_param == NULL)
+		{
+			LOG(("no response parameters to process; stopping the search for now\n"));
 			break;
+		}
 
 		/* parse out some important return info */
 		p = resp_param;
+
 		if (is_first)
 		{
+			if(resp_param_len < 6)
+			{
+				LOG(("not enough response parameter data to process; stopping the search for now\n"));
+				break;
+			}
+
+			/* This is the "search identifier" which allows us to
+			 * keep scanning this directory until we hit the
+			 * last entry.
+			 */
 			ff_dir_handle = WVAL (p, 0);
 
 			ff_searchcount = WVAL (p, 2);
@@ -3249,74 +3245,46 @@ smb_proc_readdir_long (
 		}
 		else
 		{
+			if(resp_param_len < 4)
+			{
+				LOG(("not enough response parameter data to process; stopping the search for now\n"));
+				break;
+			}
+
 			ff_searchcount = WVAL (p, 0);
 			ff_end_of_search = WVAL (p, 2);
 		}
 
-		LOG (("received %ld entries (end_of_search=%ld)\n",ff_searchcount, ff_end_of_search));
+		LOG (("received %ld entries (end of search = %s)\n",ff_searchcount, ff_end_of_search ? "yes" : "no"));
+
 		if (ff_searchcount == 0)
+		{
+			LOG(("no further entries available; stopping the search for now\n"));
 			break;
+		}
 
 		/* Bail out if this is empty. */
 		if (resp_data == NULL)
+		{
+			LOG(("no directory data to process; stopping the search for now\n"));
 			break;
+		}
 
 		/* point to the data bytes */
 		p = resp_data;
 
 		/* Now we are ready to parse smb directory entries. */
-		for (i = 0 ; i < ff_searchcount; i++, p += entry_length)
+		for (i = 0, entry_length = 0 ;
+		     i < ff_searchcount && entry != NULL && dircache->is_valid && p < &resp_data[resp_data_len];
+		     i++, p += entry_length)
 		{
-			if(i == ff_searchcount - 1)
+			ff_resume_key = DVAL(p, 0);
+
+			/* Skip this entry if we cannot decode the name. This could happen
+			 * if the name will no fit into the buffer.
+			 */
+			if(!smb_decode_long_dirent (server, p, entry, info_level, &entry_length))
 			{
-				char * last_name;
-				int len;
-
-				ff_resume_key = DVAL(p, 0);
-
-				smb_get_dirent_name(p,info_level,&last_name,&len);
-
-				if(len > 0)
-				{
-					if(len + 1 > mask_buffer_size)
-					{
-						/* Grow the buffer in steps of 16 bytes,
-						 * so that we won't have to reallocate it
-						 * over and over again if it keeps growing
-						 * in smaller portions only.
-						 */
-						const int grow_size_by = 16;
-
-						LOG(("increasing mask; old value = %ld new value = %ld\n",mask_buffer_size,len + grow_size_by));
-
-						mask_buffer_size = len + grow_size_by;
-						SHOWVALUE(mask_buffer_size);
-
-						if(mask != NULL)
-							free (mask);
-
-						mask = malloc (mask_buffer_size);
-						if (mask == NULL)
-						{
-							LOG (("Memory allocation failed\n"));
-
-							(*error_ptr) = ENOMEM;
-
-							result = -1;
-							goto out;
-						}
-					}
-
-					memcpy (mask, last_name, len);
-					mask[len] = '\0';
-				}
-
-				mask_len = len;
-			}
-
-			if (total_count < fpos)
-			{
-				smb_decode_long_dirent (server, p, NULL, info_level, &entry_length);
 				if(entry_length == 0)
 				{
 					LOG (("no more entries available; stopping.\n"));
@@ -3324,41 +3292,14 @@ smb_proc_readdir_long (
 				}
 
 				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
-			}
-			/* Did we run out of cache, or the cache was invalidated? */
-			else if (entry == NULL || !dircache->is_valid)
-			{
-				LOG (("no more entries available; stopping.\n"));
-				break;
-			}
-			else
-			{
-				/* Skip this entry if we cannot decode the name. This could happen
-				 * if the name will no fit into the buffer.
-				 */
-				if(!smb_decode_long_dirent (server, p, entry, info_level, &entry_length))
-				{
-					if(entry_length == 0)
-					{
-						LOG (("no more entries available; stopping.\n"));
-						break;
-					}
 
-					LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
-
-					continue;
-				}
-
-				entry = get_next_dircache_entry(dircache);
+				continue;
 			}
+
+			entry = get_next_dircache_entry(dircache);
 
 			total_count += 1;
-
-			if(entry_length == 0)
-				break;
 		}
-
-		SHOWVALUE(ff_resume_key);
 
 		if (resp_data != NULL)
 		{
@@ -3381,8 +3322,8 @@ smb_proc_readdir_long (
  out:
 
 	/* finished: not needed any more */
-	if (mask != NULL)
-		free (mask);
+	if (pattern != NULL)
+		free (pattern);
 
 	if (resp_data != NULL)
 		free (resp_data);
@@ -3393,7 +3334,29 @@ smb_proc_readdir_long (
 	(*end_of_search_ptr) = ff_end_of_search;
 
 	if(result == 0)
-		result = total_count - fpos;
+	{
+		if(ff_end_of_search)
+		{
+			LOG(("not resuming this scan operation\n"));
+
+			dircache->sid = -1;
+			dircache->resume_key = 0;
+		}
+		else
+		{
+			dircache->sid = ff_dir_handle;
+			dircache->resume_key = ff_resume_key;
+		}
+
+		result = total_count;
+	}
+	else
+	{
+		LOG(("not resuming this scan operation\n"));
+
+		dircache->sid = -1;
+		dircache->resume_key = 0;
+	}
 
 	RETURN(result);
 	return(result);

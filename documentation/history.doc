@@ -2962,3 +2962,29 @@ smbfs 2.17 (18.2.2019)
 - Verified that the CACHETABLE settings do have a positive effect on
   the problematic "delete directory-name all" case which almost always
   failed to delete the entire directory tree.
+
+
+smbfs 2.18 (21.2.2019)
+
+- The ERROROUTPUT option as released in version 2.17 did not work at all. I
+  wonder how I managed to test it successfully :-/
+
+- Rewrote the smb_proc_readdir_short() and smb_proc_readdir_long() functions
+  so that they tell the server exactly how many directory entries they are
+  able to receive. Previously, the server could deliver more, with
+  interesting consequences.
+
+- smb_proc_readdir_long() now verifies that the server's response parameter
+  and data are in order, and it also makes sure not to read more from
+  the response data buffer than there is available when decoding directory
+  entries.
+
+- smb_proc_readdir_long() now updates the scan resume information for every
+  directory entry it can process.
+
+- smb_proc_readdir_long() now actually uses the scan resume information
+  when asked to resume scanning. This means, for example, if the directory
+  cache only has room for 60 entries, then smb_proc_readdir_long() will
+  read up to 60 entries, get called again, and resume filling the cache
+  with the next entry provided by the server. This never worked anywhere
+  near correctly before.

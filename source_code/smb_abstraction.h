@@ -96,6 +96,9 @@ typedef struct dircache
 	int					eof;		/* cache end is eof */
 	int					is_valid;	/* cache can be used */
 
+	int					sid;		/* search identifier */
+	ULONG				resume_key;	/* for resuming directory scanning */
+
 	ULONG				created_at;	/* for invalidation */
 
 	struct smba_file *	cache_for;	/* owner of this cache */
@@ -154,6 +157,7 @@ typedef int (*smba_callback_t) (void *callback_data, int fpos, int nextpos, cons
 
 /****************************************************************************/
 
+int get_dircache_entries_available(const dircache_t * dircache);
 struct smb_dirent * get_next_dircache_entry(dircache_t * dircache);
 struct smb_dirent * get_first_dircache_entry(dircache_t * dircache);
 void smba_disconnect(smba_server_t *server);

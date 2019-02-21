@@ -30,6 +30,7 @@
  * Fritz!Box: smbfs debuglevel=2 debugfile=ram:fritz.nas.log user=nas password=nas volume=fritz.nas //fritzbox-3272/fritz.nas
  * Samba 4.6.7: smbfs debuglevel=2 debugfile=ram:ubuntu-17.log volume=ubuntu-test //ubuntu-17-olaf/test
  * Samba 4.7.6: smbfs debuglevel=2 debugfile=ram:ubuntu-18.log volume=ubuntu-test //ubuntu-18-olaf/test
+ * Samba 4.7.6: smbfs debuglevel=2 debugfile=ram:ubuntu-18.log cachesize=30 volume=ubuntu-etc //ubuntu-18-olaf/etc
  * Samba 3.0.25: smbfs debuglevel=2 debugfile=ram:samba-3.0.25.log user=olsen password=... volume=olsen //192.168.1.118/olsen
  *
  * diskspeed drive olsen:Documents dir seek fast byte nocpu
@@ -442,6 +443,7 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 	 * whether we could get them.
 	 */
 	DOSBase = OpenLibrary("dos.library",0);
+	UtilityBase = OpenLibrary("utility.library",37);
 
 	#if defined(__amigaos4__)
 	{
@@ -454,13 +456,7 @@ _start(STRPTR args, LONG args_length, struct ExecBase * exec_base)
 				DOSBase = NULL;
 			}
 		}
-	}
-	#endif /* __amigaos4__ */
 
-	UtilityBase = OpenLibrary("utility.library",37);
-
-	#if defined(__amigaos4__)
-	{
 		if(UtilityBase != NULL)
 		{
 			IUtility = (struct UtilityIFace *)GetInterface(UtilityBase, "main", 1, 0);
@@ -1396,10 +1392,10 @@ main(void)
 	/* Where do we send error messages to if started from shell? */
 	if(WBStartup == NULL)
 	{
-		if(args.Protocol != NULL && Stricmp(args.Protocol,"stderr") == SAME)
-			args.Protocol = NULL;
+		if(args.ErrorOutput != NULL && Stricmp(args.ErrorOutput,"stderr") == SAME)
+			args.ErrorOutput = NULL;
 
-		if(args.Protocol != NULL && Stricmp(args.Protocol,"stdout") != SAME)
+		if(args.ErrorOutput != NULL && Stricmp(args.ErrorOutput,"stdout") != SAME)
 		{
 			report_error("'ERROROUTPUT' parameter must be either 'STDERR' or 'STDOUT'.");
 			goto out;
