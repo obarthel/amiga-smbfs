@@ -151,6 +151,8 @@ Here is how the options look like, in alphabetical order (as command line parame
 <pre>
 ADDVOLUME/K
 CACHE=CACHESIZE/N/K
+CACHEEXPIRES/N/K
+CACHETABLES/N/K
 CASE=CASESENSITIVE/S
 CHANGEUSERNAMECASE/K
 CHANGEPASSWORDCASE/K
@@ -359,23 +361,35 @@ This information is stored in a cache which by default will hold up to 170 entri
 
 You may want to change this requirement, by making the cache smaller or larger using the `CACHESIZE` parameter. The size of the cache cannot be smaller than 10 entries.
 
-#### 5.3.2. `RAISEPRIORITY/S`
+#### 5.3.2. `CACHETABLES/N/K`
+
+The cache can be used only by one directory at a time, which can cause problems if you are trying to delete a complete directory hierarchy, with several subdirectories (and their respective subdirectories). The cache will have to be refilled for each directory currently being processed. Consequently, **smbfs** will lose track of where it was when it read from the previous directory it was dealing with and must start over again.
+
+You can mitigate these effects by increasing the number of caches which **smbfs** may use at a time. By default only a single cache, for a single directory, will be active (`CACHETABLES=1`). You can use more directory caches if you want to, but keep in mind that each cache will consume extra memory. If you want to use multiple caches, you might want to reduce the cache size.
+
+#### 5.3.3. `CACHEEXPIRES/N/K`
+
+There is a limit on how long the contents of a cache are considered "good" until it will have to be refilled. By default a cache will be considered "stale" 10 seconds after it has been filled.
+
+Changing the cache expiration time and the cache size can be necessary if you find that reading and processing (e.g. deleting) directory entries stops or skips certain entries. The large the cache, the longer the expiration time will have to be, and a smaller cache likely requires a shorter expiration time.
+
+#### 5.3.4. `RAISEPRIORITY/S`
 
 The **smbfs** program can be run at a higher priority than it would normally do (normal would be priority 0), which might increase performance, but raise system load, too. If the `RAISEPRIORITY` switch is used, the **smbfs** program will run at the same priority as other Amiga file systems do (this would be priority 10).
 
-#### 5.3.3. `TIMEOUT/N/K`
+#### 5.3.5. `TIMEOUT/N/K`
 
 The **smbfs** program may lose the connection to the server during file system operations. While it will try to reestablish a connection to the server, some time has to pass before it becomes clear that the server connection is no longer working correctly.
 
 You can set the number of seconds which have to pass before the **smbfs** program will stop waiting for the server to respond, shut down the connection and try again. For example, `TIMEOUT=5` will select a timeout of 5 seconds.
 
-#### 5.3.4. `WRITEBEHIND/S`
+#### 5.3.6. `WRITEBEHIND/S`
 
 The **smbfs** program can try to improve write performance by not waiting for the server to confirm that all the data just transmitted has in fact been stored. There is a risk involved in that the server may not have been able to store the data and you will never know about it.
 
 Please note that the `WRITEBEHIND` switch has no effect if `PROTOCOL=nt1` is used because the **smbfs** program will then be using a different server write command which does not support the "write behind" functionality.
 
-#### 5.3.5. `READTHRESHOLD/N/K` and `WRITETHRESHOLD/N/K`
+#### 5.3.7. `READTHRESHOLD/N/K` and `WRITETHRESHOLD/N/K`
 
 The purpose of **smbfs** is chiefly to enable you to read and write files stored on a networked computer. To this end **smbfs** tries its best to squeeze as much performance out of the data transmission as possible.
 

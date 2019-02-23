@@ -264,7 +264,7 @@ static ULONG stack_usage_exit(const struct StackSwapStruct * stk);
 static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static int LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args);
 static void cleanup(void);
-static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_cache_tables, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, BOOL scatter_gather, BOOL tcp_no_delay, int socket_receive_buffer_size, int socket_send_buffer_size, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
+static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_cache_tables, int opt_cache_expires, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, BOOL scatter_gather, BOOL tcp_no_delay, int socket_receive_buffer_size, int socket_send_buffer_size, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
 static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
@@ -773,6 +773,7 @@ main(void)
 		NUMBER	MaxNameLen;
 		NUMBER	CacheSize;
 		NUMBER	CacheTables;
+		NUMBER	CacheExpires;
 		SWITCH	DisableExAll;
 		NUMBER	MaxTransmit;
 		NUMBER	Timeout;
@@ -822,6 +823,7 @@ main(void)
 		"MAXNAMELEN/N/K,"
 		"CACHE=CACHESIZE/N/K,"
 		"CACHETABLES/N/K,"
+		"CACHEEXPIRES/N/K,"
 		"DISABLEEXALL/S,"
 		"MAXTRANSMIT/N/K,"
 		"TIMEOUT/N/K,"
@@ -857,6 +859,7 @@ main(void)
 	LONG tz_number, dst_number, debug_number;
 	LONG cache_size = 0;
 	LONG cache_tables = 1;
+	LONG cache_expires = 10;
 	LONG max_transmit = -1;
 	LONG smb_write_threshold = 0;
 	LONG smb_read_threshold = 0;
@@ -1154,6 +1157,18 @@ main(void)
 			}
 
 			args.CacheTables = &cache_tables;
+		}
+
+		str = get_icon_tool_type_value("CACHEEXPIRES",NULL);
+		if(str != NULL)
+		{
+			if(StrToLong(str,&cache_expires) == -1)
+			{
+				report_error("Invalid number '%s' for 'CACHETEXPIRES' parameter.",str);
+				goto out;
+			}
+
+			args.CacheExpires = &cache_expires;
 		}
 
 		str = get_icon_tool_type_value("MAXTRANSMIT", NULL);
@@ -1523,6 +1538,16 @@ main(void)
 		}
 	}
 
+	if(args.CacheExpires != NULL)
+	{
+		cache_expires = (*args.CacheExpires);
+		if(cache_expires <= 0)
+		{
+			report_error("'CACHEEXPIRES' parameter must be > 0.");
+			goto out;
+		}
+	}
+
 	if(args.MaxTransmit != NULL)
 	{
 		max_transmit = (*args.MaxTransmit);
@@ -1656,6 +1681,7 @@ main(void)
 	D(("max name length = %ld.", MaxNameLen));
 	D(("cache size = %ld.", cache_size));
 	D(("cache tables = %ld.", cache_tables));
+	D(("cache expires = %ld.", cache_expires));
 	D(("max transmit = %ld.", max_transmit));
 	D(("timeout = %ld.", timeout));
 
@@ -1671,6 +1697,7 @@ main(void)
 		args.ServerName,
 		cache_size,
 		cache_tables,
+		cache_expires,
 		max_transmit,
 		timeout,
 		args.TimeZoneOffset,
@@ -3994,6 +4021,7 @@ setup(
 	const TEXT *	opt_servername,
 	int				opt_cachesize,
 	int				opt_cache_tables,
+	int				opt_cache_expires,
 	int				opt_max_transmit,
 	int				opt_timeout,
 	LONG *			opt_time_zone_offset,
@@ -4245,6 +4273,7 @@ setup(
 		opt_servername,
 		opt_cachesize,
 		opt_cache_tables,
+		opt_cache_expires,
 		opt_max_transmit,
 		opt_timeout,
 		opt_raw_smb,

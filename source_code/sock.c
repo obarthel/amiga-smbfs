@@ -88,8 +88,7 @@ smb_encode_smb_length (byte * p, int len)
 
 /* Attempt to receive all the incoming data, even if recv() returns only
  * parts of the total number of bytes requested. Returns the number of bytes
- * read or, in case of error a negative number. A negative result is the
- * value of -errno.
+ * read or, in case of error, a negative number.
  */
 static INLINE int
 receive_all(int fd, void * _data, int len)
@@ -118,10 +117,55 @@ receive_all(int fd, void * _data, int len)
 
 		len -= n;
 
+		/* Stop as soon as all the requested data has been
+		 * read, or there is no more data to be read (n == 0).
+		 */
 		if(len == 0 || n == 0)
 			break;
 
 		data += n;
+	}
+
+	return(result);
+}
+
+/*****************************************************************************/
+
+/* Attempt to transmit all the incoming data, even if send() returns only
+ * parts of the total number of bytes to be sent. Returns the total number of
+ * bytes transmitted or, in case of error, a negative number.
+ * 
+ * send() is documented to not necessarily transport as much data as
+ * requested, just like recv(), so we just play it safe here.
+ */
+static INLINE int
+send_all(int fd, const void * _data, int len)
+{
+	const char * data = _data;
+	int result = 0;
+	int n;
+
+	ASSERT( data != NULL || len == 0 );
+
+	while(len > 0)
+	{
+		PROFILE_OFF();
+
+		n = send(fd, (void *)data, len, 0);
+
+		PROFILE_ON();
+
+		if(n < 0)
+		{
+			result = -1;
+			break;
+		}
+
+		result += n;
+
+		data += n;
+
+		len -= n;
 	}
 
 	return(result);
@@ -1619,12 +1663,7 @@ smb_request (
 		{
 			LOG(("using two send() calls\n"));
 
-			PROFILE_OFF();
-
-			result = send (sock_fd, (void *) buffer, len, 0);
-
-			PROFILE_ON();
-
+			result = send_all (sock_fd, buffer, len);
 			if (result < 0)
 			{
 				LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
@@ -1634,12 +1673,7 @@ smb_request (
 				goto out;
 			}
 
-			PROFILE_OFF();
-
-			result = send (sock_fd, (void *)output_payload, payload_size, 0);
-
-			PROFILE_ON();
-
+			result = send_all (sock_fd, output_payload, payload_size);
 			if (result < 0)
 			{
 				LOG(("payload send() for %ld bytes failed (errno=%ld)\n", payload_size, errno));
@@ -1688,12 +1722,7 @@ smb_request (
 	}
 	else
 	{
-		PROFILE_OFF();
-
-		result = send (sock_fd, (void *) buffer, len, 0);
-
-		PROFILE_ON();
-
+		result = send_all (sock_fd, buffer, len);
 		if (result < 0)
 		{
 			LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
@@ -1757,12 +1786,7 @@ smb_trans2_request (
 	dump_smb(__FILE__,__LINE__,0,buffer+NETBIOS_HEADER_SIZE,len-NETBIOS_HEADER_SIZE,smb_packet_from_consumer,server->max_recv);
 	#endif /* defined(DUMP_SMB) */
 
-	PROFILE_OFF();
-
-	result = send (sock_fd, (void *) buffer, len, 0);
-
-	PROFILE_ON();
-
+	result = send_all (sock_fd, buffer, len);
 	if (result < 0)
 	{
 		LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
@@ -1821,12 +1845,7 @@ smb_request_read_raw (struct smb_server *server, unsigned char *target, int max_
 	#endif /* defined(DUMP_SMB) */
 
 	/* Request that data should be read in raw mode. */
-	PROFILE_OFF();
-
-	result = send (sock_fd, (void *) buffer, len, 0);
-
-	PROFILE_ON();
-
+	result = send_all (sock_fd, buffer, len);
 	if (result < 0)
 	{
 		LOG(("send() for %ld bytes failed (errno=%ld)\n", len, errno));
@@ -1887,12 +1906,7 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 		LOG(("using two send() calls\n"));
 
 		/* Send the NetBIOS header. */
-		PROFILE_OFF();
-
-		result = send (sock_fd, nb_header, NETBIOS_HEADER_SIZE, 0);
-
-		PROFILE_ON();
-
+		result = send_all (sock_fd, nb_header, NETBIOS_HEADER_SIZE);
 		if(result < 0)
 		{
 			LOG(("send() for %ld bytes failed (errno=%ld)\n", NETBIOS_HEADER_SIZE, errno));
@@ -1903,12 +1917,7 @@ smb_request_write_raw (struct smb_server *server, unsigned const char *source, i
 		}
 
 		/* Now send the data to be written. */
-		PROFILE_OFF();
-
-		result = send (sock_fd, (void *)source, length, 0);
-
-		PROFILE_ON();
-
+		result = send_all (sock_fd, source, length);
 		if(result < 0)
 		{
 			LOG(("send() for %ld bytes failed (errno=%ld)\n", length, errno));

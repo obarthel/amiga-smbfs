@@ -88,6 +88,9 @@ struct smb_server
 
 	/* olsen (2018-06-11): Prefer SMB core protocol commands over NT1 commands. */
 	int prefer_core_protocol;
+
+	/* olsen (2019-02-23): How many seconds will the directory cache remain valid? */
+	int cache_expires;
 };
 
 #endif

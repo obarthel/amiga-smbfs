@@ -90,7 +90,7 @@
 /*****************************************************************************/
 
 #define SMB_DIRINFO_SIZE	43
-#define SMB_STATUS_SIZE		21
+#define SMB_RESUME_KEY_SIZE	21
 
 /*****************************************************************************/
 
@@ -525,7 +525,7 @@ smb_encode_vblock (byte * p, const byte * data, int len)
 {
 	ASSERT( 0 <= len && len <= 65535 );
 
-	(*p++) = 5;
+	(*p++) = 5; /* a variable block is to follow. */
 	p = smb_encode_word (p, len);
 	memcpy (p, data, len);
 }
@@ -2374,7 +2374,7 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 }
 
 /* This does not really truncate the file, making it shorter. It just
- * writes "enough" data to the file.
+ * writes "enough" data to the file to make it as large as requested.
  */
 int
 smb_proc_trunc (struct smb_server *server, struct smb_dirent *entry, dword length, int * error_ptr)
@@ -2412,13 +2412,15 @@ smb_proc_trunc (struct smb_server *server, struct smb_dirent *entry, dword lengt
 	return result;
 }
 
-static int
-smb_decode_short_dirent (const char *p, struct smb_dirent *entry)
+static void
+smb_decode_short_dirent (dircache_t * dircache, const char *p, struct smb_dirent *entry)
 {
 	int name_len;
 	int i;
 
-	p += SMB_STATUS_SIZE; /* reserved (search_status) */
+	ASSERT( sizeof(dircache->search_resume_key) >= SMB_RESUME_KEY_SIZE );
+	memcpy(dircache->search_resume_key, p, SMB_RESUME_KEY_SIZE);
+	p += SMB_RESUME_KEY_SIZE;
 
 	entry->attr = BVAL (p, 0);
 	entry->mtime = entry->atime = entry->ctime = entry->wtime = date_dos2unix (WVAL (p, 1), WVAL (p, 3));
@@ -2448,8 +2450,7 @@ smb_decode_short_dirent (const char *p, struct smb_dirent *entry)
 	while(name_len > 0 && p[name_len-1] == ' ')
 		name_len--;
 
-	if(name_len >= entry->complete_path_size)
-		return(-1);
+	ASSERT( name_len < entry->complete_path_size );
 
 	memcpy (entry->complete_path, p, name_len);
 
@@ -2472,8 +2473,6 @@ smb_decode_short_dirent (const char *p, struct smb_dirent *entry)
 			tm.tm_sec));
 	}
 	#endif /* DEBUG */
-
-	return(0);
 }
 
 /* This routine is used to read in directory entries from the network.
@@ -2490,16 +2489,16 @@ smb_proc_readdir_short (
 {
 	char *p;
 	char *buf;
-	int result = 0;
+	int result = -1;
 	int i;
-	int first, total_count;
+	int is_first, total_count;
 	struct smb_dirent * entry;
 	word bcc;
 	word count;
-	char status[SMB_STATUS_SIZE];
+	word datalength;
+	char resume_key[SMB_RESUME_KEY_SIZE];
 
 	int entries_asked;
-	int dircache_entries_available;
 	int path_len = strlen (path);
 	int mask_len;
 	int mask_size;
@@ -2510,8 +2509,6 @@ smb_proc_readdir_short (
 	if (mask == NULL)
 	{
 		(*error_ptr) = ENOMEM;
-
-		result = -1;
 		goto out;
 	}
 
@@ -2530,23 +2527,35 @@ smb_proc_readdir_short (
 
 	buf = server->transmit_buffer;
 
+	memset(resume_key, 0, sizeof(resume_key));
+
  retry:
 
-	first = TRUE;
-	total_count = 0;
+	if(dircache->sid == -1)
+	{
+		is_first = TRUE;
 
-	entries_asked = (server->max_recv - 100) / SMB_DIRINFO_SIZE;
+		LOG (("start scanning from the top (fpos=%ld)\n", fpos));
+	}
+	else
+	{
+		is_first = FALSE;
+
+		memcpy(resume_key, dircache->search_resume_key, SMB_RESUME_KEY_SIZE);
+	}
+
+	total_count = 0;
 
 	entry = get_first_dircache_entry(dircache);
 
-	while (entry != NULL)
+	while (entry != NULL && dircache->is_valid)
 	{
-		dircache_entries_available = get_dircache_entries_available(dircache);
-		if(entries_asked > dircache_entries_available)
-			entries_asked = dircache_entries_available;
+		entries_asked = get_dircache_entries_available(dircache);
 
-		if (first)
+		if (is_first)
 		{
+			LOG(("reading first directory entries\n"));
+
 			ASSERT( smb_payload_size(server, 2, mask_size) >= 0 );
 
 			p = smb_setup_header (server, SMBsearch, 2, mask_size);
@@ -2563,17 +2572,21 @@ smb_proc_readdir_short (
 				p = smb_encode_ascii (p, mask, strlen (mask));
 			}
 
-			(*p++) = 5;
-			(void) smb_encode_word (p, 0);
+			(*p++) = 5; /* a variable block follows. */
+			(void) smb_encode_word (p, 0); /* resume key length = 0, i.e. this is the initial search command. */
+
+			is_first = FALSE;
 		}
 		else
 		{
 			int size;
 
+			LOG(("reading next directory entries\n"));
+
 			if(server->unicode_enabled)
-				size = 1 + 2 * (1) + 3 + SMB_STATUS_SIZE;
+				size = 1 + 2 * (1) + 3 + SMB_RESUME_KEY_SIZE;
 			else
-				size = 1 + 1 + 3 + SMB_STATUS_SIZE;
+				size = 1 + 1 + 3 + SMB_RESUME_KEY_SIZE;
 
 			ASSERT( smb_payload_size(server, 2, size) >= 0 );
 
@@ -2581,6 +2594,7 @@ smb_proc_readdir_short (
 			WSET (buf, smb_vwv0, entries_asked);
 			WSET (buf, smb_vwv1, SMB_FILE_ATTRIBUTE_DIRECTORY);
 
+			/* Add an empty file name. */
 			if(server->unicode_enabled)
 			{
 				(*p++) = 4; /* A NUL-terminated string follows. */
@@ -2591,40 +2605,44 @@ smb_proc_readdir_short (
 				p = smb_encode_ascii (p, "", 0);
 			}
 
-			(void) smb_encode_vblock (p, status, SMB_STATUS_SIZE);
+			/* Add the resume key. */
+			(void) smb_encode_vblock (p, resume_key, SMB_RESUME_KEY_SIZE);
 		}
 
 		if (smb_request_ok (server, SMBsearch, 1, -1, error_ptr) < 0)
 		{
 			if (server->rcls == ERRDOS && server->err == ERRnofiles)
 			{
-				end_of_search = 1;
+				LOG(("not resuming this scan operation\n"));
 
-				result = total_count - fpos;
-				goto out;
+				end_of_search = TRUE;
+
+				dircache->sid = -1;
+
+				break;
+			}
+
+			if ((*error_ptr) != error_check_smb_error && smb_retry (server))
+			{
+				LOG(("retrying...\n"));
+
+				goto retry;
 			}
 			else
 			{
-				if ((*error_ptr) != error_check_smb_error && smb_retry (server))
-					goto retry;
-
-				result = -1;
 				goto out;
 			}
 		}
 
 		p = SMB_VWV (server->transmit_buffer);
 		p = smb_decode_word (p, &count); /* vwv[0] = count-returned */
+
 		p = smb_decode_word (p, &bcc);
 
-		first = FALSE;
+		LOG(("number of directory entries returned = %ld\n", count));
 
 		if (count <= 0)
-		{
-			result = total_count - fpos;
-
-			goto out;
-		}
+			break;
 
 		ASSERT (bcc == count * SMB_DIRINFO_SIZE + 3);
 
@@ -2634,55 +2652,69 @@ smb_proc_readdir_short (
 
 			(*error_ptr) = error_invalid_directory_size;
 
-			result = -1;
 			goto out;
 		}
 
-		p += 3; /* Skipping VBLOCK header (5, length lo, length hi). */
+		if((*p++) != 5)
+		{
+			LOG (("buffer format mismatch (should be 5, is %ld)\n", p[-1]));
 
-		/* Read the last entry into the status field. */
-		memcpy (status, SMB_BUF (server->transmit_buffer) + 3 + (count - 1) * SMB_DIRINFO_SIZE, SMB_STATUS_SIZE);
+			(*error_ptr) = error_invalid_directory_size;
+
+			goto out;
+		}
+
+		p = smb_decode_word (p, &datalength);
+
+		if(datalength != 43 * count)
+		{
+			LOG (("data length (%ld) does not match expected size (%ld)\n", datalength, count * SMB_DIRINFO_SIZE));
+
+			(*error_ptr) = error_invalid_directory_size;
+
+			goto out;
+		}
 
 		/* Now we are ready to parse smb directory entries. */
-
 		for (i = 0; i < count; i++)
 		{
-			if (total_count < fpos)
-			{
-				p += SMB_DIRINFO_SIZE;
-
-				LOG (("skipped entry; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
-			}
 			/* Was the cache invalidated, or there are no further
 			 * cache entries to be filled?
 			 */
-			else if (entry == NULL || !dircache->is_valid)
-			{
-				result = total_count - fpos;
+			if (entry == NULL || !dircache->is_valid)
+				break;
 
-				goto out;
-			}
-			else if (smb_decode_short_dirent (p, entry) == 0)
-			{
-				entry = get_next_dircache_entry(dircache);
-			}
-			else
-			{
-				p += SMB_DIRINFO_SIZE;
+			smb_decode_short_dirent (dircache, p, entry);
+			p += SMB_DIRINFO_SIZE;
 
-				LOG (("skipped entry because name is too long; total_count = %ld, i = %ld, fpos = %ld\n", total_count, i, fpos));
-			}
+			entry = get_next_dircache_entry(dircache);
 
 			total_count += 1;
 		}
+
+		ASSERT( sizeof(dircache->search_resume_key) >= SMB_RESUME_KEY_SIZE );
+		memcpy(resume_key, dircache->search_resume_key, SMB_RESUME_KEY_SIZE);
+
+		dircache->sid = 0;
 	}
+
+	result = total_count;
 
  out:
 
 	if(mask != NULL)
 		free(mask);
 
+	if(result == -1)
+	{
+		LOG(("not resuming this scan operation\n"));
+
+		dircache->sid = -1;
+	}
+
 	(*end_of_search_ptr) = end_of_search;
+
+	LOG(("number of entries read = %ld", result));
 
 	return result;
 }
@@ -3071,6 +3103,20 @@ smb_proc_readdir_long (
 	resp_param = NULL;
 	resp_data = NULL;
 
+	if(dircache->sid == -1 && dircache->close_sid != -1)
+	{
+		int sid = dircache->close_sid;
+
+		LOG(("closing previous find-first/find-next session with sid=0x%04lx\n", sid));
+
+		dircache->close_sid = -1;
+
+		smb_setup_header (server, SMBfindclose, 1, 0);
+		WSET (server->transmit_buffer, smb_vwv0, sid);
+
+		smb_request_ok (server, SMBfindclose, 0, 0, error_ptr);
+	}
+
  retry:
 
 	if(dircache->sid == -1)
@@ -3279,6 +3325,8 @@ smb_proc_readdir_long (
 		     i++, p += entry_length)
 		{
 			ff_resume_key = DVAL(p, 0);
+
+			LOG(("sid=0x%04lx, resume_key=0x%08lx\n", ff_dir_handle, ff_resume_key));
 
 			/* Skip this entry if we cannot decode the name. This could happen
 			 * if the name will no fit into the buffer.

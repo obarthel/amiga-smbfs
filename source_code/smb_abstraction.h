@@ -97,7 +97,16 @@ typedef struct dircache
 	int					is_valid;	/* cache can be used */
 
 	int					sid;		/* search identifier */
-	ULONG				resume_key;	/* for resuming directory scanning */
+	int					close_sid;	/* if cache scan is restarted without closing
+									 * the directory first, this is the id to use.
+									 */
+	ULONG				resume_key;	/* for resuming directory scanning with
+									 * TRANS2_FIND_FIRST2/TRANS2_FIND_NEXT2
+									 */
+	char				search_resume_key[22];
+									/* For resuming directory scanning with
+									 * SMB_COM_FIND.
+									 */
 
 	ULONG				created_at;	/* for invalidation */
 
@@ -176,7 +185,7 @@ int smba_rmdir(smba_server_t *s, const char *path, int *error_ptr);
 int smba_rename(smba_server_t *s, const char *from, const char *to, int *error_ptr);
 int smba_statfs(smba_server_t *s, long *bsize, long *blocks, long *bfree, int *error_ptr);
 void smba_invalidate_all_inodes(smba_server_t *server);
-int smba_start(const char *service, const char *opt_workgroup, const char *opt_username, const char *opt_password, const char *opt_clientname, const char *opt_servername, int opt_cachesize, int opt_cache_tables, int opt_max_transmit, int opt_timeout, int opt_raw_smb, int opt_unicode, int opt_prefer_core_protocol, int opt_case_sensitive, int opt_session_setup_delay_unicode, int opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, int opt_scatter_gather, int opt_tcp_no_delay, int opt_socket_receive_buffer_size, int opt_socket_send_buffer_size, int *error_ptr, int *smb_error_class_ptr, int *smb_error_ptr, smba_connect_parameters_t *smba_connect_par, smba_server_t **smba_server_ptr);
+int smba_start(const char *service, const char *opt_workgroup, const char *opt_username, const char *opt_password, const char *opt_clientname, const char *opt_servername, int opt_cachesize, int opt_cache_tables, int opt_cache_expires, int opt_max_transmit, int opt_timeout, int opt_raw_smb, int opt_unicode, int opt_prefer_core_protocol, int opt_case_sensitive, int opt_session_setup_delay_unicode, int opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, int opt_scatter_gather, int opt_tcp_no_delay, int opt_socket_receive_buffer_size, int opt_socket_send_buffer_size, int *error_ptr, int *smb_error_class_ptr, int *smb_error_ptr, smba_connect_parameters_t *smba_connect_par, smba_server_t **smba_server_ptr);
 int smba_get_dircache_size(struct smba_server *server);
 int smba_change_dircache_size(struct smba_server *server, int cache_size);
 

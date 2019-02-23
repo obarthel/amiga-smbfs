@@ -22,10 +22,10 @@
 
 /*****************************************************************************/
 
-#define ATTR_CACHE_TIME		5	/* cache attributes for this time (seconds) */
-#define DIR_CACHE_TIME		5	/* cache directories for this time (seconds) */
-#define DIRCACHE_SIZE		170
-#define DOS_PATHSEP			'\\'
+#define ATTR_CACHE_TIME	5	/* cache attributes for this time (seconds) */
+#define DIR_CACHE_TIME	10	/* cache directories for this time (seconds) */
+#define DIRCACHE_SIZE	170
+#define DOS_PATHSEP		'\\'
 
 /*****************************************************************************/
 
@@ -34,13 +34,13 @@
 /*****************************************************************************/
 
 static int
-dircache_has_expired(ULONG now, const dircache_t * dircache)
+dircache_is_stale(ULONG now, int expires, const dircache_t * dircache)
 {
 	int result;
 
 	ASSERT( dircache != NULL );
 
-	result = (now > dircache->created_at && (now - dircache->created_at) >= DIR_CACHE_TIME);
+	result = (now > dircache->created_at && (now - dircache->created_at) > expires);
 
 	return(result);
 }
@@ -56,6 +56,7 @@ reset_dircache (dircache_t * dircache)
 	dircache->cache_used = dircache->base = 0;
 	dircache->is_valid = TRUE;
 	dircache->sid = -1;
+	dircache->close_sid = -1;
 }
 
 /*****************************************************************************/
@@ -319,6 +320,7 @@ smba_connect (
 	const char *				workgroup_name,
 	int							cache_size,
 	int							opt_cache_tables,
+	int							opt_cache_expires,
 	int							max_transmit,
 	int							timeout,
 	int							opt_raw_smb,
@@ -430,6 +432,8 @@ smba_connect (
 	LOG(("use asynchronous SMB_COM_WRITE_RAW operations = %s\n",opt_write_behind ? "yes" : "no"));
 
 	LOG(("cache size = %ld entries\n", cache_size));
+
+	res->server.cache_expires = opt_cache_expires;
 
 	if(setup_server_dircache (res, cache_size, opt_cache_tables) < 0)
 	{
@@ -1737,11 +1741,17 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 	else
 	{
 		/* Has the cache already become stale? */
-		if (dircache_has_expired(now, f->dircache))
+		if (dircache_is_stale(now, f->server->server.cache_expires, f->dircache))
 		{
+			int sid;
+
 			LOG (("cache for '%s' has become stale\n", escape_name(f->dircache->cache_for->dirent.complete_path)));
 
+			sid = f->dircache->sid;
+
 			reset_dircache(f->dircache);
+
+			f->dircache->close_sid = sid;
 		}
 	}
 
@@ -2365,6 +2375,7 @@ smba_start(
 	const char *		opt_servername,
 	int					opt_cachesize,
 	int					opt_cache_tables,
+	int					opt_cache_expires,
 	int					opt_max_transmit,
 	int					opt_timeout,
 	int					opt_raw_smb,
@@ -2625,6 +2636,7 @@ smba_start(
 		workgroup,
 		opt_cachesize,
 		opt_cache_tables,
+		opt_cache_expires,
 		opt_max_transmit,
 		opt_timeout,
 		opt_raw_smb,

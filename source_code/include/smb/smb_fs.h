@@ -23,6 +23,10 @@
 #include <smb/smb_fs_sb.h>
 #endif /* _SMB_FS_SB */
 
+#ifndef _SMB_ABSTRACTION_H
+#include "smb_abstraction.h"
+#endif /* _SMB_ABSTRACTION_H */
+
 #include <netinet/in.h>
 
 #ifndef _QUAD_MATH_H
@@ -68,7 +72,7 @@ int smb_proc_mkdir(struct smb_server *server, const char *path, const int len, i
 int smb_proc_rmdir(struct smb_server *server, const char *path, const int len, int * error_ptr);
 int smb_proc_unlink(struct smb_server *server, const char *path, const int len, int * error_ptr);
 int smb_proc_trunc(struct smb_server *server, struct smb_dirent *entry, dword length, int * error_ptr);
-int smb_proc_readdir(struct smb_server *server, const char *path, int fpos, int cache_size, struct smb_dirent *entry, int * error_ptr);
+int smb_proc_readdir(struct smb_server *server, const char *path, int fpos, dircache_t * dircache, int * end_of_search_ptr, int * error_ptr);
 int smb_proc_getattr_core(struct smb_server *server, const char *path, int len, struct smb_dirent *entry, int * error_ptr);
 int smb_proc_getattrE(struct smb_server *server, struct smb_dirent *entry, int * error_ptr);
 int smb_query_path_information(struct smb_server *server, const char *path, int len, int fid, struct smb_dirent *entry, int * error_ptr);

@@ -91,7 +91,9 @@ CFLAGS = \
 	ignore=306 gst=system_headers.gst
 
 LFLAGS = \
-	noicons batch
+	noicons batch \
+	define __CXM33=__UCXM33 define __CXD33=__UCXD33 \
+	define __CXM22=__UCXM22 define __CXD22=__UCXD22
 
 ###############################################################################
 

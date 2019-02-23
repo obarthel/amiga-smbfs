@@ -2988,3 +2988,21 @@ smbfs 2.18 (21.2.2019)
   read up to 60 entries, get called again, and resume filling the cache
   with the next entry provided by the server. This never worked anywhere
   near correctly before.
+
+
+smbfs 2.19 (23.2.2019)
+
+- smb_proc_readdir_short() now updates the scan resume information for every
+  directory entry it can process and actually uses the scan resume information
+  when asked to resume scanning.
+
+- If the directory cache becomes stale before the contents have been processed,
+  scanning will have to be restarted. smbfs now tells the server that the
+  scan operation has been aborted before it is started again.
+
+- Directory scanning in combination with deletion operations can collapse if
+  the directory cache becomes stale before all the relevant entries have been
+  processed. You can now tune how long the cache will remain active, which
+  previously was a period of 5 seconds. The current default is 10 seconds,
+  which definitely helps. Use the new CACHEEXPIRES option to change how long
+  the cache is considered good enough.
