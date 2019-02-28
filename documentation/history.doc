@@ -3006,3 +3006,18 @@ smbfs 2.19 (23.2.2019)
   previously was a period of 5 seconds. The current default is 10 seconds,
   which definitely helps. Use the new CACHEEXPIRES option to change how long
   the cache is considered good enough.
+
+
+smbfs 2.20 (27.2.2019)
+
+- If the Examine/ExNext/ExAll functions need to restart directory scanning,
+  the cache maintained by the smbfs directory reader is now always cleared.
+
+- Removed the directory cache expiration time feature, along with the
+  just-introduced CACHEEXPIRES option. The context in which the expiration
+  time was used did not justify it as a feature. It looked more like a bug...
+
+- Rewrote the smba_readdir() function to perform its only task in a much
+  simpler manner. It now either fills the directory cache or retrieves
+  the cache entries to the caller, resuming the retrieval at a predefined
+  position if required.

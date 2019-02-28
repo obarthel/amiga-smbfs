@@ -151,7 +151,6 @@ Here is how the options look like, in alphabetical order (as command line parame
 <pre>
 ADDVOLUME/K
 CACHE=CACHESIZE/N/K
-CACHEEXPIRES/N/K
 CACHETABLES/N/K
 CASE=CASESENSITIVE/S
 CHANGEUSERNAMECASE/K
@@ -206,9 +205,9 @@ This parameter takes the form of `//server-name/share-name` or `//server-name:po
 
 For example `//sourcery/all`, `//192.168.0.1/all`, `//nas:445/files`, `//nas:microsoft-ds/files` would all be valid `SHARE` parameters.
 
-In this example `server-name` must be either the IPv4 address of the file server to connect to, or the name of the server (note that server names cannot be longer than 16 characters).
+In this example `server-name` must be either the IPv4 address of the file server to connect to, or the name of the server (**note that server names cannot be longer than 16 characters**).
 
-If necessary, you can specify which port number should be used when making the connection. The port number is optional, though. In place of the port (e.g. 445) number you can also use the name of a TCP/UDP service (e.g. "microsoft-ds").
+If necessary, you can specify which port number should be used when making the connection. The port number is optional, though. In place of the port (e.g. 445) number you can also use the name of a TCP/UDP service (e.g. `microsoft-ds`).
 
 Finally, you need to tell the *SMB* server which service you want to connect to, which for the **smbfs** program should be the name of a shared network file system. In the example the name of the shared network file system would be `share-name`.
 
@@ -218,7 +217,7 @@ Unless you use the `VOLUMENAME` option (e.g. `VOLUMENAME=MyData`), **smbfs** wil
 
 In order to connect to an *SMB* share, the server requires that a user name is provided. If you omit the user name, the **smbfs** program will use `GUEST` as a replacement.
 
-If you do provide a user name, it must not be longer than 63 characters. Unless you use the `CHANGEUSERNAMECASE=NO` option the name you provide will be translated to all upper case characters.
+If you do provide a user name, **it must not be longer than 63 characters**. Unless you use the `CHANGEUSERNAMECASE=NO` option the name you provide will be translated to all upper case characters.
 
 You need not provide for a user name on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
 
@@ -270,7 +269,7 @@ However, it may be required to change the password to all-uppercase characters b
 
 This option may be omitted, in which case the **smbfs** program will ask the file server about the work group which it is a member of. Should the server fail to respond with this information, the **smbfs** program will use `WORKGROUP` as the domain name.
 
-You should not need to specify the name of the work group or domain which the file server to connect to is a member of. However, if you do need to use it, you must make sure that the name is not longer than 16 characters. The name you provide will be translated to all upper case characters.
+You should not need to specify the name of the work group or domain which the file server to connect to is a member of. However, if you do need to use it, you must **make sure that the name is not longer than 16 characters**. The name you provide will be translated to all upper case characters.
 
 You need not provide for a work group or domain name on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
 
@@ -295,7 +294,7 @@ In some cases this may be undesirable as the computer's name differs from what t
 
 You can use the `CLIENT` parameter to tell **smbfs** under which name it should announce itself to the server.
 
-This parameter is optional and will be translated to all upper case characters; it cannot be longer than 16 characters.
+This parameter is optional and will be translated to all upper case characters; **it cannot be longer than 16 characters**.
 
 Please note that the `CLIENT` parameter will be ignored unless the `NETBIOS` switch is used, too.
 
@@ -305,7 +304,7 @@ Please note that the `CLIENT` parameter will be ignored unless the `NETBIOS` swi
 
 In some cases this may be undesirable as the server's name differs from what you specified as the share name. You can use the `SERVER` parameter to tell **smbfs** under which name it should contact the server.
 
-This parameter is optional and will be translated to all upper case characters; it cannot be longer than 16 characters.
+This parameter is optional and will be translated to all upper case characters; **it cannot be longer than 16 characters**.
 
 Please note that the `SERVER` parameter will be ignored unless the `NETBIOS` switch is used, too.
 
@@ -323,7 +322,7 @@ Also note that file and drawer names which cannot be represented on the Amiga du
 
 The built-in default translation method is restricted to the part of Unicode which is covered by the *ISO-8859-1* character set. It is enabled by default, as if `UNICODE=on` had been used. You can disable it with `UNICODE=off`, which completely disables the translation.
 
-Note: some *Samba* versions will return corrupted file and drawer names unless Unicode support is enabled. Names which use only US-ASCII characters appear to be generally safe to use and are unlikely to suffer from corruption.
+**Note**: Some *Samba* versions will return corrupted file and drawer names unless Unicode support is enabled. Names which use only US-ASCII characters appear to be generally safe to use and are unlikely to suffer from corruption.
 
 #### 5.2.2. `CP437/S`
 
@@ -367,29 +366,23 @@ The cache can be used only by one directory at a time, which can cause problems 
 
 You can mitigate these effects by increasing the number of caches which **smbfs** may use at a time. By default only a single cache, for a single directory, will be active (`CACHETABLES=1`). You can use more directory caches if you want to, but keep in mind that each cache will consume extra memory. If you want to use multiple caches, you might want to reduce the cache size.
 
-#### 5.3.3. `CACHEEXPIRES/N/K`
-
-There is a limit on how long the contents of a cache are considered "good" until it will have to be refilled. By default a cache will be considered "stale" 10 seconds after it has been filled.
-
-Changing the cache expiration time and the cache size can be necessary if you find that reading and processing (e.g. deleting) directory entries stops or skips certain entries. The large the cache, the longer the expiration time will have to be, and a smaller cache likely requires a shorter expiration time.
-
-#### 5.3.4. `RAISEPRIORITY/S`
+#### 5.3.3. `RAISEPRIORITY/S`
 
 The **smbfs** program can be run at a higher priority than it would normally do (normal would be priority 0), which might increase performance, but raise system load, too. If the `RAISEPRIORITY` switch is used, the **smbfs** program will run at the same priority as other Amiga file systems do (this would be priority 10).
 
-#### 5.3.5. `TIMEOUT/N/K`
+#### 5.3.4. `TIMEOUT/N/K`
 
 The **smbfs** program may lose the connection to the server during file system operations. While it will try to reestablish a connection to the server, some time has to pass before it becomes clear that the server connection is no longer working correctly.
 
 You can set the number of seconds which have to pass before the **smbfs** program will stop waiting for the server to respond, shut down the connection and try again. For example, `TIMEOUT=5` will select a timeout of 5 seconds.
 
-#### 5.3.6. `WRITEBEHIND/S`
+#### 5.3.5. `WRITEBEHIND/S`
 
 The **smbfs** program can try to improve write performance by not waiting for the server to confirm that all the data just transmitted has in fact been stored. There is a risk involved in that the server may not have been able to store the data and you will never know about it.
 
 Please note that the `WRITEBEHIND` switch has no effect if `PROTOCOL=nt1` is used because the **smbfs** program will then be using a different server write command which does not support the "write behind" functionality.
 
-#### 5.3.7. `READTHRESHOLD/N/K` and `WRITETHRESHOLD/N/K`
+#### 5.3.6. `READTHRESHOLD/N/K` and `WRITETHRESHOLD/N/K`
 
 The purpose of **smbfs** is chiefly to enable you to read and write files stored on a networked computer. To this end **smbfs** tries its best to squeeze as much performance out of the data transmission as possible.
 

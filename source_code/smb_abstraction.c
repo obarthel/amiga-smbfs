@@ -22,10 +22,13 @@
 
 /*****************************************************************************/
 
-#define ATTR_CACHE_TIME	5	/* cache attributes for this time (seconds) */
-#define DIR_CACHE_TIME	10	/* cache directories for this time (seconds) */
-#define DIRCACHE_SIZE	170
-#define DOS_PATHSEP		'\\'
+/* File attributes will have to be refreshed after this many
+ * seconds have passed since the last update.
+ */
+#define ATTR_CACHE_TIME	5
+
+/* Default number of entries in the directory cache. */
+#define DIRCACHE_SIZE 170
 
 /*****************************************************************************/
 
@@ -33,27 +36,14 @@
 
 /*****************************************************************************/
 
-static int
-dircache_is_stale(ULONG now, int expires, const dircache_t * dircache)
-{
-	int result;
-
-	ASSERT( dircache != NULL );
-
-	result = (now > dircache->created_at && (now - dircache->created_at) > expires);
-
-	return(result);
-}
-
-/*****************************************************************************/
-
+/* Mark the cache as valid and empty. */
 static void
 reset_dircache (dircache_t * dircache)
 {
 	ASSERT( dircache != NULL );
 
 	dircache->eof = FALSE;
-	dircache->cache_used = dircache->base = 0;
+	dircache->cache_used = 0;
 	dircache->is_valid = TRUE;
 	dircache->sid = -1;
 	dircache->close_sid = -1;
@@ -113,7 +103,7 @@ get_next_dircache_entry(dircache_t * dircache)
 
 	if(dircache->is_valid && dircache->cache_used < dircache->cache_size)
 	{
-		LOG(("read directory entry '%s', now %ld entries in cache (of %ld)\n",
+		D(("read directory entry '%s', now %ld entries in cache (of %ld)",
 			escape_name(dircache->cache[dircache->cache_used].complete_path),
 			dircache->cache_used+1,
 			dircache->cache_size));
@@ -123,7 +113,7 @@ get_next_dircache_entry(dircache_t * dircache)
 		if(dircache->cache_used < dircache->cache_size)
 			result = &dircache->cache[dircache->cache_used];
 		else
-			LOG(("directory cache is now full\n"));
+			SHOWMSG("directory cache is now full");
 	}
 
 	return(result);
@@ -149,7 +139,7 @@ invalidate_dircache(dircache_t * dircache)
 
 	if(dircache->cache_for != NULL)
 	{
-		LOG(("invalidating directory cache for '%s'\n", escape_name(dircache->cache_for->dirent.complete_path)));
+		D(("invalidating directory cache for '%s'", escape_name(dircache->cache_for->dirent.complete_path)));
 
 		dircache->cache_for->dircache = NULL;
 		dircache->cache_for = NULL;
@@ -320,7 +310,6 @@ smba_connect (
 	const char *				workgroup_name,
 	int							cache_size,
 	int							opt_cache_tables,
-	int							opt_cache_expires,
 	int							max_transmit,
 	int							timeout,
 	int							opt_raw_smb,
@@ -367,32 +356,32 @@ smba_connect (
 	if(opt_raw_smb)
 		res->server.raw_smb = TRUE;
 
-	LOG(("use raw SMB = %s\n",opt_raw_smb ? "yes" : "no"));
+	D(("use raw SMB = %s",opt_raw_smb ? "yes" : "no"));
 
 	/* Timeout for send/receive operations in seconds. */
 	res->server.timeout = timeout;
 
-	LOG(("send/receive/connect timeout = %ld seconds%s\n",timeout,timeout > 0 ? "" : " (= default timeout)"));
+	D(("send/receive/connect timeout = %ld seconds%s",timeout,timeout > 0 ? "" : " (= default timeout)"));
 
 	/* Enable Unicode support if the server supports it, too. */
 	res->server.use_unicode = opt_unicode;
 
-	LOG(("use Unicode = %s\n",opt_unicode ? "yes" : "no"));
+	D(("use Unicode = %s",opt_unicode ? "yes" : "no"));
 
 	/* Prefer SMB core protocol commands to NT1 commands, if possible. */
 	res->server.prefer_core_protocol = opt_prefer_core_protocol;
 
-	LOG(("prefer core protocol = %s\n",opt_prefer_core_protocol ? "yes" : "no"));
+	D(("prefer core protocol = %s",opt_prefer_core_protocol ? "yes" : "no"));
 
 	/* Path names are case-sensitive. */
 	res->server.case_sensitive = opt_case_sensitive;
 
-	LOG(("path names are case sensitive = %s\n",opt_case_sensitive ? "yes" : "no"));
+	D(("path names are case sensitive = %s",opt_case_sensitive ? "yes" : "no"));
 
 	/* Delay the use of Unicode strings during session setup. */
 	res->server.session_setup_delay_unicode = opt_session_setup_delay_unicode;
 
-	LOG(("delay use of unicode during session setup = %s\n",opt_session_setup_delay_unicode ? "yes" : "no"));
+	D(("delay use of unicode during session setup = %s",opt_session_setup_delay_unicode ? "yes" : "no"));
 
 	/* Do not send SMB header and payload for write operations separately,
 	 * but in a single chunk if their combined size is smaller than
@@ -400,7 +389,7 @@ smba_connect (
 	 */
 	res->server.smb_write_threshold = opt_smb_request_write_threshold;
 
-	LOG(("SMB write request threshold size = %ld bytes\n", res->server.smb_write_threshold));
+	D(("SMB write request threshold size = %ld bytes", res->server.smb_write_threshold));
 
 	/* Do not receive SMB header and payload for read operations separately,
 	 * but in a single chunk if their combined size is smaller than
@@ -408,12 +397,12 @@ smba_connect (
 	 */
 	res->server.smb_read_threshold = opt_smb_request_read_threshold;
 
-	LOG(("SMB read request threshold size = %ld bytes\n", res->server.smb_read_threshold));
+	D(("SMB read request threshold size = %ld bytes", res->server.smb_read_threshold));
 
 	/* Use sendmsg() instead of send() where useful? */
 	res->server.scatter_gather = opt_scatter_gather;
 
-	LOG(("use sendmsg() instead of send() where useful = %s\n",opt_scatter_gather ? "yes" : "no"));
+	D(("use sendmsg() instead of send() where useful = %s",opt_scatter_gather ? "yes" : "no"));
 
 	/* Disable the Nagle algorithm, causing send() to immediately
 	 * result in the data being transmitted?
@@ -429,11 +418,9 @@ smba_connect (
 	/* Enable asynchronous SMB_COM_WRITE_RAW operations? */
 	res->server.write_behind = opt_write_behind;
 
-	LOG(("use asynchronous SMB_COM_WRITE_RAW operations = %s\n",opt_write_behind ? "yes" : "no"));
+	D(("use asynchronous SMB_COM_WRITE_RAW operations = %s",opt_write_behind ? "yes" : "no"));
 
-	LOG(("cache size = %ld entries\n", cache_size));
-
-	res->server.cache_expires = opt_cache_expires;
+	D(("cache size = %ld entries", cache_size));
 
 	if(setup_server_dircache (res, cache_size, opt_cache_tables) < 0)
 	{
@@ -445,7 +432,7 @@ smba_connect (
 
 	strlcpy(data.workgroup_name,workgroup_name,sizeof(data.workgroup_name));
 
-	LOG(("workgroup name = '%s'\n",workgroup_name));
+	D(("workgroup name = '%s'",workgroup_name));
 
 	res->server.abstraction = res;
 
@@ -459,9 +446,9 @@ smba_connect (
 	if ((s = strchr (hostname, '.')) != NULL)
 		(*s) = '\0';
 
-	LOG(("local host name = '%s'\n",hostname));
+	D(("local host name = '%s'",hostname));
 
-	LOG(("server ip address = %s\n",Inet_NtoA(server_ip_addr.sin_addr.s_addr)));
+	D(("server ip address = %s",Inet_NtoA(server_ip_addr.sin_addr.s_addr)));
 
 	data.addr = server_ip_addr;
 
@@ -477,7 +464,7 @@ smba_connect (
 		{
 			data.addr.sin_port = servent->s_port;
 
-			LOG(("using port number %ld\n",ntohs(data.addr.sin_port)));
+			D(("using port number %ld",ntohs(data.addr.sin_port)));
 		}
 		else
 		{
@@ -495,7 +482,7 @@ smba_connect (
 				{
 					data.addr.sin_port = htons (n);
 
-					LOG(("using port number %ld\n",n));
+					D(("using port number %ld",n));
 				}
 				else
 				{
@@ -524,7 +511,7 @@ smba_connect (
 		else
 			port = htons (445);
 
-		LOG(("using port number %ld\n",ntohs(port)));
+		D(("using port number %ld",ntohs(port)));
 
 		data.addr.sin_port = port;
 	}
@@ -538,7 +525,7 @@ smba_connect (
 		else
 			port = htons (139);
 
-		LOG(("using port number %ld\n",ntohs(port)));
+		D(("using port number %ld",ntohs(port)));
 
 		data.addr.sin_port = port;
 	}
@@ -554,24 +541,24 @@ smba_connect (
 
 	strlcpy (data.service, connect_parameters->service, sizeof(data.service));
 
-	LOG(("service = '%s'\n",data.service));
+	D(("service = '%s'",data.service));
 
 	string_toupper (data.service);
 
 	strlcpy (data.username, connect_parameters->username, sizeof(data.username));
 	strlcpy (data.password, connect_parameters->password, sizeof(data.password));
 
-	LOG(("user name = '%s'\n",data.username));
+	D(("user name = '%s'",data.username));
 
 	data.given_max_xmit = max_transmit;
 
-	LOG(("max transmit = %ld bytes\n",max_transmit));
+	D(("max transmit = %ld bytes",max_transmit));
 
 	strlcpy (data.server_name, connect_parameters->server_name, sizeof(data.server_name));
 	strlcpy (data.client_name, connect_parameters->client_name, sizeof(data.client_name));
 
-	LOG(("server name = '%s'\n",data.server_name));
-	LOG(("client name = '%s'\n",data.client_name));
+	D(("server name = '%s'",data.server_name));
+	D(("client name = '%s'",data.client_name));
 
 	if (data.server_name[0] == '\0')
 	{
@@ -649,15 +636,24 @@ smba_disconnect (smba_server_t * server)
 /*****************************************************************************/
 
 static int
-file_attributes_are_stale(ULONG now, const smba_file_t * f)
+file_attributes_are_stale(const smba_file_t * f)
 {
-	int result;
+	int stale;
 
 	ASSERT( f != NULL );
 
-	result = (f->attr_time == 0 || (now > f->attr_time && (now - f->attr_time) > ATTR_CACHE_TIME));
+	if(f->attr_time == 0)
+	{
+		stale = TRUE;
+	}
+	else
+	{
+		ULONG now = get_current_time();
 
-	return(result);
+		stale = (now > f->attr_time && (now - f->attr_time) > ATTR_CACHE_TIME);
+	}
+
+	return(stale);
 }
 
 /*****************************************************************************/
@@ -672,26 +668,24 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 
 	if (!f->is_valid || (need_fid && !f->dirent.opened))
 	{
-		ULONG now = get_current_time();
-
 		server = f->server;
 
-		if (!f->is_valid || file_attributes_are_stale(now, f))
+		if (!f->is_valid || file_attributes_are_stale(f))
 		{
 			if (!f->is_valid || f->attr_time == 0)
-				LOG(("file attributes not yet known\n"));
+				D(("file '%s' attributes are not yet known",escape_name(f->dirent.complete_path)));
 			else
-				LOG(("file attributes need to be updated\n"));
+				D(("file '%s' attributes are need to be updated",escape_name(f->dirent.complete_path)));
 
 			if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 			{
-				LOG(("using the LAN Manager 2.0 getattr() variant\n"));
+				SHOWMSG("using the LAN Manager 2.0 getattr() variant");
 
 				result = smb_query_path_information (&server->server, f->dirent.complete_path, f->dirent.len, 0, &f->dirent, error_ptr);
 			}
 			else
 			{
-				LOG(("using the legacy getattr() variant\n"));
+				SHOWMSG("using the legacy getattr() variant");
 
 				result = smb_proc_getattr_core (&server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
 			}
@@ -708,9 +702,9 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 				{
 					if(!f->dirent.opened)
 					{
-						LOG (("opening file '%s'\n", escape_name(f->dirent.complete_path)));
+						D(("opening file '%s'", escape_name(f->dirent.complete_path)));
 
-						LOG(("using the LAN Manager 2.0 open() variant\n"));
+						SHOWMSG("using the LAN Manager 2.0 open() variant");
 
 						result = smb_proc_open (&server->server, f->dirent.complete_path, f->dirent.len, writable, truncate_file, &f->dirent, error_ptr);
 						if (result < 0)
@@ -718,7 +712,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 					}
 					else
 					{
-						LOG (("file '%s' is already open (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
+						D(("file '%s' is already open (fileid=0x%04lx)", escape_name(f->dirent.complete_path), f->dirent.fileid));
 					}
 				}
 			}
@@ -726,9 +720,9 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 			{
 				if(!f->dirent.opened)
 				{
-					LOG (("opening file '%s'\n", escape_name(f->dirent.complete_path)));
+					D(("opening file '%s'", escape_name(f->dirent.complete_path)));
 
-					LOG(("using the legacy open() variant\n"));
+					SHOWMSG("using the legacy open() variant");
 
 					result = smb_proc_open (&server->server, f->dirent.complete_path, f->dirent.len, writable, truncate_file, &f->dirent, error_ptr);
 					if (result < 0)
@@ -736,7 +730,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 				}
 				else
 				{
-					LOG (("file '%s' is already open (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
+					D(("file '%s' is already open (fileid=0x%04lx)", escape_name(f->dirent.complete_path), f->dirent.fileid));
 				}
 
 				if (server->supports_E || !server->supports_E_known)
@@ -761,7 +755,7 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 		{
 			if (f->dircache != NULL)
 			{
-				LOG(("discarding the '%s' directory cache\n", escape_name(f->dirent.complete_path)));
+				D(("discarding the '%s' directory cache", escape_name(f->dirent.complete_path)));
 
 				Remove((struct Node *)f->dircache);
 				AddTail((struct List *)&server->dircache_list, (struct Node *)f->dircache);
@@ -848,7 +842,7 @@ smba_open (
 	f->dirent.len = strlen (name);
 	f->server = s;
 
-	LOG(("open '%s' (writable=%s, truncate_file=%s)\n",
+	D(("open '%s' (writable=%s, truncate_file=%s)",
 		escape_name(name),
 		writable ? "yes" : "no",
 		truncate_file ? "yes" : "no"));
@@ -856,14 +850,14 @@ smba_open (
 	result = make_open (f, open_dont_need_fid, writable, truncate_file, error_ptr);
 	if (result < 0)
 	{
-		LOG(("open failed\n"));
+		SHOWMSG("open failed");
 		goto out;
 	}
 
 	add_smba_file(s, f);
 	s->num_open_files++;
 
-	LOG(("file has been 'opened', number of open files = %ld\n",s->num_open_files));
+	D(("file has been 'opened', number of open files = %ld",s->num_open_files));
 
 	(*file) = f;
 	f = NULL;
@@ -883,9 +877,9 @@ write_attr (smba_file_t * f, int * error_ptr)
 {
 	int result;
 
-	LOG (("file '%s'\n", escape_name(f->dirent.complete_path)));
+	D(("file '%s'", escape_name(f->dirent.complete_path)));
 
-	LOG(("mtime = %lu\n",f->dirent.mtime));
+	D(("mtime = %lu",f->dirent.mtime));
 
 	if(!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
@@ -894,17 +888,17 @@ write_attr (smba_file_t * f, int * error_ptr)
 		time_t ctime = f->dirent.ctime;
 		dword attr = f->dirent.attr;
 
-		LOG(("mtime = %lu\n",f->dirent.mtime));
-		LOG(("ctime = %lu\n",f->dirent.ctime));
+		D(("mtime = %lu",f->dirent.mtime));
+		D(("ctime = %lu",f->dirent.ctime));
 
-		LOG(("using the LAN Manager 2.0 open() variant\n"));
+		SHOWMSG("using the LAN Manager 2.0 open() variant");
 
 		result = make_open (f, open_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
 			goto out;
 
-		LOG(("mtime = %lu\n",f->dirent.mtime));
-		LOG(("ctime = %lu\n",f->dirent.ctime));
+		D(("mtime = %lu",f->dirent.mtime));
+		D(("ctime = %lu",f->dirent.ctime));
 
 		f->dirent.mtime = mtime;
 		f->dirent.ctime = ctime;
@@ -923,17 +917,17 @@ write_attr (smba_file_t * f, int * error_ptr)
 		time_t ctime = f->dirent.ctime;
 		dword attr = f->dirent.attr;
 
-		LOG(("mtime = %lu\n",f->dirent.mtime));
-		LOG(("ctime = %lu\n",f->dirent.ctime));
+		D(("mtime = %lu",f->dirent.mtime));
+		D(("ctime = %lu",f->dirent.ctime));
 
-		LOG(("using the legacy open() variant\n"));
+		SHOWMSG("using the legacy open() variant");
 
 		result = make_open (f, open_dont_need_fid, open_writable, open_dont_truncate, error_ptr);
 		if (result < 0)
 			goto out;
 
-		LOG(("mtime = %lu\n",f->dirent.mtime));
-		LOG(("ctime = %lu\n",f->dirent.ctime));
+		D(("mtime = %lu",f->dirent.mtime));
+		D(("ctime = %lu",f->dirent.ctime));
 
 		f->dirent.mtime = mtime;
 		f->dirent.ctime = ctime;
@@ -1029,7 +1023,7 @@ smba_close (smba_server_t * s, smba_file_t * f)
 
 		if (f->dirent.opened)
 		{
-			LOG (("closing file '%s' (fileid=0x%04lx)\n", escape_name(f->dirent.complete_path), f->dirent.fileid));
+			D(("closing file '%s' (fileid=0x%04lx)", escape_name(f->dirent.complete_path), f->dirent.fileid));
 
 			/* Don't change the modification time. */
 			smb_proc_close (&f->server->server, f->dirent.fileid, -1, &ignored_error);
@@ -1046,13 +1040,13 @@ smba_close (smba_server_t * s, smba_file_t * f)
 
 		f->server->num_open_files--;
 
-		LOG(("file closed, number of open files = %ld\n",f->server->num_open_files));
+		D(("file closed, number of open files = %ld",f->server->num_open_files));
 
 		free (f);
 	}
 	else
 	{
-		LOG(("file seems to be invalid\n"));
+		SHOWMSG("file seems to be invalid");
 	}
 
 	LEAVE();
@@ -1071,7 +1065,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 	if (result < 0)
 		goto out;
 
-	LOG(("read %ld bytes from offset %s\n",len,convert_quad_to_string(offset)));
+	D(("read %ld bytes from offset %s",len,convert_quad_to_string(offset)));
 
 	/* SMB_COM_READ_ANDX supported? */
 	if (f->server->server.protocol >= PROTOCOL_LANMAN1 && !f->server->server.prefer_core_protocol)
@@ -1113,7 +1107,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 		if(max_readx_size > f->server->server.transmit_buffer_size - 62)
 			max_readx_size = f->server->server.transmit_buffer_size - 62;
 
-		LOG (("len = %ld, max_readx_size = %ld\n", len, max_readx_size));
+		D(("len = %ld, max_readx_size = %ld", len, max_readx_size));
 
 		do
 		{
@@ -1130,7 +1124,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 
 			if(result < count)
 			{
-				LOG(("read returned fewer characters than expected (%ld < %ld)\n",result,count));
+				D(("read returned fewer characters than expected (%ld < %ld)",result,count));
 				break;
 			}
 		}
@@ -1161,7 +1155,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 			result = smb_proc_read_raw (&f->server->server, &f->dirent, &position_quad, n, data, error_ptr);
 			if(result <= 0)
 			{
-				LOG(("!!! wanted to read %ld bytes, got %ld\n",n,result));
+				D(("!!! wanted to read %ld bytes, got %ld",n,result));
 				break;
 			}
 
@@ -1172,7 +1166,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 
 			if(result < n)
 			{
-				LOG(("read returned fewer characters than expected (%ld < %ld)\n",result,n));
+				D(("read returned fewer characters than expected (%ld < %ld)",result,n));
 				break;
 			}
 		}
@@ -1240,7 +1234,7 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 
 			if(result < count)
 			{
-				LOG(("read returned fewer characters than expected (%ld < %ld)\n",result,count));
+				D(("read returned fewer characters than expected (%ld < %ld)",result,count));
 				break;
 			}
 		}
@@ -1267,7 +1261,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 	if (result < 0)
 		goto out;
 
-	D(("maximum buffer size = %ld\n", f->server->server.max_buffer_size));
+	D(("maximum buffer size = %ld", f->server->server.max_buffer_size));
 
 	max_buffer_size = f->server->server.max_buffer_size;
 
@@ -1310,7 +1304,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		if((f->server->server.capabilities & CAP_LARGE_WRITEX) != 0)
 			max_writex_size = 65535;
 
-		LOG (("len = %ld, max_writex_size = %ld\n", len, max_writex_size));
+		D(("len = %ld, max_writex_size = %ld", len, max_writex_size));
 
 		do
 		{
@@ -1318,13 +1312,13 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 
 			ASSERT( n > 0 );
 
-			LOG(("writing %ld bytes; offset=%s, len=%ld\n", n, convert_quad_to_string(&position_quad), len));
+			D(("writing %ld bytes; offset=%s, len=%ld", n, convert_quad_to_string(&position_quad), len));
 
 			result = smb_proc_writex(&f->server->server, &f->dirent, &position_quad, n, data, error_ptr);
 			if(result < 0)
 				goto out;
 
-			LOG(("number of bytes written = %ld\n", result));
+			D(("number of bytes written = %ld", result));
 
 			data += result;
 			add_64_plus_32_to_64(&position_quad,result,&position_quad);
@@ -1364,7 +1358,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		if(max_size_smb_com_write_raw > 65535)
 			max_size_smb_com_write_raw = 65535;
 
-		LOG (("len = %ld, max_size_smb_com_write_raw = %ld\n", len, max_size_smb_com_write_raw));
+		D(("len = %ld, max_size_smb_com_write_raw = %ld", len, max_size_smb_com_write_raw));
 
 		do
 		{
@@ -1421,7 +1415,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		if(max_size_smb_com_write > 65535)
 			max_size_smb_com_write = 65535;
 
-		LOG (("len = %ld, max_size_smb_com_write = %ld\n", len, max_size_smb_com_write));
+		D(("len = %ld, max_size_smb_com_write = %ld", len, max_size_smb_com_write));
 
 		do
 		{
@@ -1443,7 +1437,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		while (len > 0);
 	}
 
-	LOG(("num_bytes_written=%ld\n", num_bytes_written));
+	D(("num_bytes_written=%ld", num_bytes_written));
 
 	result = num_bytes_written;
 
@@ -1546,24 +1540,21 @@ int
 smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 {
 	int result;
-	ULONG now;
 
 	result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
 
-	now = get_current_time();
-
-	if (file_attributes_are_stale (now, f))
+	if (file_attributes_are_stale (f))
 	{
-		LOG (("file '%s' attributes %s\n",
+		D(("file '%s' attributes %s",
 			escape_name(f->dirent.complete_path),
 			(f->attr_time == 0) ? "are not yet known" : "need to be updated"
 		));
 
 		if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 		{
-			LOG(("using the LAN Manager 2.0 path query variant\n"));
+			SHOWMSG("using the LAN Manager 2.0 path query variant");
 
 			if (f->dirent.opened)
 				result = smb_query_path_information (&f->server->server, NULL, 0, f->dirent.fileid, &f->dirent, error_ptr);
@@ -1572,17 +1563,17 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 		}
 		else
 		{
-			LOG(("using the legacy path query variant\n"));
+			SHOWMSG("using the legacy path query variant");
 
 			if (f->dirent.opened && f->server->supports_E)
 			{
-				LOG(("using smb_proc_getattrE\n"));
+				SHOWMSG("using smb_proc_getattrE");
 
 				result = smb_proc_getattrE (&f->server->server, &f->dirent, error_ptr);
 			}
 			else
 			{
-				LOG(("using smb_proc_getattr_core\n"));
+				SHOWMSG("using smb_proc_getattr_core");
 
 				result = smb_proc_getattr_core (&f->server->server, f->dirent.complete_path, f->dirent.len, &f->dirent, error_ptr);
 			}
@@ -1591,7 +1582,7 @@ smba_getattr (smba_file_t * f, smba_stat_t * data, int * error_ptr)
 		if (result < 0)
 			goto out;
 
-		f->attr_time = now;
+		f->attr_time = get_current_time();
 	}
 
 	copy_dirent_to_stat_data(data, &f->dirent);
@@ -1614,7 +1605,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 	{
 		if (st->atime != 0 && st->atime != (time_t)-1 && f->dirent.atime != st->atime)
 		{
-			LOG(("atime changed to %lu\n",st->atime));
+			D(("atime changed to %lu",st->atime));
 
 			f->dirent.atime = st->atime;
 			times_changed = TRUE;
@@ -1622,7 +1613,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 
 		if (st->ctime != 0 && st->ctime != (time_t)-1 && f->dirent.ctime != st->ctime)
 		{
-			LOG(("ctime changed to %lu\n",st->ctime));
+			D(("ctime changed to %lu",st->ctime));
 
 			f->dirent.ctime = st->ctime;
 			times_changed = TRUE;
@@ -1630,7 +1621,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 
 		if (st->mtime != 0 && st->mtime != (time_t)-1 && f->dirent.mtime != st->mtime)
 		{
-			LOG(("mtime changed to %lu\n",st->mtime));
+			D(("mtime changed to %lu",st->mtime));
 
 			f->dirent.mtime = st->mtime;
 			times_changed = TRUE;
@@ -1659,6 +1650,8 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 			result = write_attr (f, error_ptr);
 			if (result < 0)
 				goto out;
+
+			f->attr_time = get_current_time();	
 		}
 	}
 
@@ -1670,13 +1663,13 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 
 		if(!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 		{
-			LOG(("using the LAN Manager 2.0 trunc variant\n"));
+			SHOWMSG("using the LAN Manager 2.0 trunc variant");
 
 			result = smb_set_file_information (&f->server->server, &f->dirent, size, error_ptr);
 		}
 		else
 		{
-			LOG(("using the legacy trunc variant (which cannot truncate files)\n"));
+			SHOWMSG("using the legacy trunc variant (which cannot truncate files)");
 
 			result = smb_proc_trunc (&f->server->server, &f->dirent, size->Low, error_ptr);
 		}
@@ -1696,14 +1689,14 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 /*****************************************************************************/
 
 int
-smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t callback, int * eof_ptr, int * error_ptr)
+smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_callback_t callback, int * eof_ptr, int * error_ptr)
 {
 	const struct smb_dirent * dirent;
-	int cache_index, o, eof, count = 0;
+	int cache_index = 0;
+	int eof = FALSE;
 	int num_entries;
 	smba_stat_t data;
 	int result;
-	ULONG now;
 
 	if(eof_ptr != NULL)
 		(*eof_ptr) = FALSE;
@@ -1711,8 +1704,6 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 	result = make_open (f, open_dont_need_fid, open_read_only, open_dont_truncate, error_ptr);
 	if (result < 0)
 		goto out;
-
-	now = get_current_time();
 
 	/* get a cache for this directory unless we already have one */
 	if (f->dircache == NULL)
@@ -1727,7 +1718,7 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 		/* Is the cache currently in use? */
 		if (dircache->cache_for != NULL)
 		{
-			LOG(("stealing cache from '%s'\n", escape_name(dircache->cache_for->dirent.complete_path)));
+			D(("stealing cache from '%s'", escape_name(dircache->cache_for->dirent.complete_path)));
 
 			/* Steal the cache from the other directory? */
 			dircache->cache_for->dircache = NULL;
@@ -1738,21 +1729,21 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 		dircache->cache_for = f;
 		f->dircache = dircache;
 	}
+	else if (restart)
+	{
+		int sid;
+
+		D(("refilling cache for '%s'", escape_name(f->dircache->cache_for->dirent.complete_path)));
+
+		sid = f->dircache->sid;
+
+		reset_dircache(f->dircache);
+
+		f->dircache->close_sid = sid;
+	}
 	else
 	{
-		/* Has the cache already become stale? */
-		if (dircache_is_stale(now, f->server->server.cache_expires, f->dircache))
-		{
-			int sid;
-
-			LOG (("cache for '%s' has become stale\n", escape_name(f->dircache->cache_for->dirent.complete_path)));
-
-			sid = f->dircache->sid;
-
-			reset_dircache(f->dircache);
-
-			f->dircache->close_sid = sid;
-		}
+		cache_index = offs;
 	}
 
 	/* Make sure that the cache is not easily stolen. */
@@ -1762,41 +1753,34 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 		AddHead((struct List *)&f->server->dircache_list, (struct Node *)f->dircache);
 	}
 
-	/* Read each single directory entry, drawing upon the
-	 * cache contents, if possible.
-	 */
-	for (cache_index = offs ; ; cache_index++)
+	while(TRUE)
 	{
-		/* Nothing more to be read? */
-		if (cache_index >= f->dircache->base + f->dircache->cache_used && f->dircache->eof)
-			break;
-
-		/* Is this entry not in the cache? */
-		if (cache_index < f->dircache->base || cache_index >= f->dircache->base + f->dircache->cache_used)
+		if(cache_index >= f->dircache->cache_used)
 		{
-			LOG (("cachefill for '%s'\n", escape_name(f->dirent.complete_path)));
-			LOG (("\tbase was: %ld, len was: %ld, newbase=%ld\n", f->dircache->base, f->dircache->cache_used, cache_index));
+			if(f->dircache->eof)
+			{
+				SHOWMSG("no further directory entries are available");
 
-			/* Start over and read the next entries, beginning with
-			 * entry at offset 'cache_index'.
-			 */
-			f->dircache->cache_used = 0;
-			f->dircache->base = cache_index;
+				eof = TRUE;
+				break;
+			}
+
+			SHOWMSG("filling the directory cache");
+
+			/* Start over and read the next entries. */
+			f->dircache->cache_used = cache_index = 0;
 
 			/* Try to read up as many entries as will fit into
 			 * the cache (cache_size).
 			 */
-			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, cache_index, f->dircache, &eof, error_ptr);
-
-			/* We stop on error, or if the directory is empty. */
-			if (num_entries <= 0)
+			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, f->dircache, &eof, error_ptr);
+			if (num_entries < 0)
 			{
-				if (num_entries == 0)
-					LOG(("no directory entries read\n"));
-
 				result = num_entries;
 				goto out;
 			}
+
+			D(("cachefill returned %ld entries", num_entries));
 
 			/* The cache may have been invalidated because an error
 			 * occured (e.g. server connection was terminated), or if
@@ -1804,7 +1788,7 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 			 */
 			if (f->dircache == NULL || !f->dircache->is_valid)
 			{
-				LOG (("dircache was invalidated, bailing out!\n"));
+				SHOWMSG("dircache was invalidated, bailing out!");
 
 				(*error_ptr) = ENOENT;
 
@@ -1812,25 +1796,21 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 				goto out;
 			}
 
-			/* f->dircache->cache_used = num_entries; */
 			f->dircache->eof = eof;
-			f->dircache->created_at = now;
 
-			LOG (("cachefill with %ld entries\n", num_entries));
+			if(eof)
+				SHOWMSG("no further directory entries are available");
+
+			if(num_entries == 0)
+				break;
 		}
 
-		o = cache_index - f->dircache->base;
+		/* Will this be the last directory entry to be processed? */
+		eof = (f->dircache->eof && cache_index+1 == f->dircache->cache_used);
 
-		/* Is this the last directory entry to be delivered? */
-		eof = (o >= (f->dircache->cache_used - 1) && f->dircache->eof);
-		if(eof && eof_ptr != NULL)
-			(*eof_ptr) = TRUE;
+		dirent = &f->dircache->cache[cache_index];
 
-		count++;
-
-		dirent = &f->dircache->cache[o];
-
-		LOG (("delivering '%s', cache_index=%ld, last entry=%s\n",
+		D(("delivering '%s', cache index=%ld, last entry=%s",
 			escape_name(dirent->complete_path),
 			cache_index,
 			eof ? "yes" : "no")
@@ -1838,13 +1818,18 @@ smba_readdir (smba_file_t * f, int offs, void *callback_data, smba_callback_t ca
 
 		copy_dirent_to_stat_data(&data, dirent);
 
-		if ((*callback) (callback_data, cache_index, cache_index + 1, dirent->complete_path, eof, &data))
+		if ((*callback) (callback_data, cache_index, cache_index+1, dirent->complete_path, eof, &data))
 			break;
-	}
 
-	result = count;
+		cache_index++;
+	}
+	
+	result = 0;
 
  out:
+
+	if(eof && eof_ptr != NULL)
+		(*eof_ptr) = TRUE;
 
 	return result;
 }
@@ -1864,7 +1849,7 @@ allocate_path_name(const smba_file_t * dir, const char *name, size_t * path_name
 	if(path != NULL)
 	{
 		memcpy (path, dir->dirent.complete_path, dir_len);
-		path[dir_len++] = DOS_PATHSEP;
+		path[dir_len++] = '\\';
 		memcpy(&path[dir_len], name, len+1); /* length includes terminating NUL character */
 
 		ASSERT( path_name_len_ptr != NULL );
@@ -1905,7 +1890,7 @@ smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 
 	if (!dir->server->server.prefer_core_protocol && dir->server->server.protocol >= PROTOCOL_LANMAN2)
 	{
-		LOG(("using the LAN Manager 2.0 creat variant\n"));
+		SHOWMSG("using the LAN Manager 2.0 creat variant");
 
 		result = smb_proc_open (&dir->server->server, path, path_len, open_writable, truncate, &entry, error_ptr);
 		if(result < 0)
@@ -1913,7 +1898,7 @@ smba_create (smba_file_t * dir, const char *name, int truncate, int * error_ptr)
 	}
 	else
 	{
-		LOG(("using the legacy creat variant\n"));
+		SHOWMSG("using the legacy creat variant");
 
 		result = smb_proc_create (&dir->server->server, path, path_len, &entry, error_ptr);
 		if(result < 0)
@@ -1981,7 +1966,7 @@ invalidate_smba_file(smba_server_t * s, smba_file_t *f, const char *path, int * 
 		result = smb_proc_close (&s->server, f->dirent.fileid, -1, error_ptr);
 		if(result < 0)
 		{
-			LOG(("closing '%s' with file id %ld failed\n", escape_name(path), f->dirent.fileid));
+			D(("closing '%s' with file id %ld failed", escape_name(path), f->dirent.fileid));
 			goto out;
 		}
 
@@ -2375,7 +2360,6 @@ smba_start(
 	const char *		opt_servername,
 	int					opt_cachesize,
 	int					opt_cache_tables,
-	int					opt_cache_expires,
 	int					opt_max_transmit,
 	int					opt_timeout,
 	int					opt_raw_smb,
@@ -2441,7 +2425,7 @@ smba_start(
 		char * dot;
 		int lookup_error;
 
-		LOG(("server name is '%s'\n", server));
+		D(("server name is '%s'", server));
 
 		h_errno = 0;
 
@@ -2464,7 +2448,7 @@ smba_start(
 			goto out;
 		}
 
-		LOG(("server network address found (%s)\n", Inet_NtoA(server_ip_address.sin_addr.s_addr)));
+		D(("server network address found (%s)", Inet_NtoA(server_ip_address.sin_addr.s_addr)));
 
 		/* No workgroup given? Ask the server... */
 		if(opt_workgroup == NULL)
@@ -2493,7 +2477,7 @@ smba_start(
 		char workgroup_name[16];
 		const char * name;
 
-		LOG(("server network address is %s\n", server));
+		D(("server network address is %s", server));
 
 		/* Ask the server about its name and its workgroup. We need to
 		 * know the name to continue, and the workgroup name may
@@ -2501,7 +2485,7 @@ smba_start(
 		 */
 		if(SendNetBIOSStatusQuery(server_ip_address,server_name,sizeof(server_name),workgroup_name,sizeof(workgroup_name)) == 0 && server_name[0] != '\0')
 		{
-			LOG(("server %s provided its own name '%s', with workgroup '%s'\n",Inet_NtoA(server_ip_address.sin_addr.s_addr),server_name,workgroup_name));
+			D(("server %s provided its own name '%s', with workgroup '%s'",Inet_NtoA(server_ip_address.sin_addr.s_addr),server_name,workgroup_name));
 
 			/* No workgroup given? Use what the server told us... */
 			if(opt_workgroup == NULL && workgroup_name[0] != '\0')
@@ -2534,7 +2518,7 @@ smba_start(
 
 			name = h->h_name;
 
-			LOG(("server host name found (%s)\n",name));
+			D(("server host name found (%s)",name));
 
 			/* Brian Willette: Now we will set the server name to the DNS
 			 * hostname, hopefully this will be the same as the NetBIOS name for
@@ -2625,7 +2609,7 @@ smba_start(
 	par.username = username;
 	par.password = password;
 
-	LOG(("server name = '%s', client name = '%s', workgroup name = '%s', user name = '%s'\n",
+	D(("server name = '%s', client name = '%s', workgroup name = '%s', user name = '%s'",
 		server_name, client_name, workgroup, username));
 
 	if(smba_connect (
@@ -2636,7 +2620,6 @@ smba_start(
 		workgroup,
 		opt_cachesize,
 		opt_cache_tables,
-		opt_cache_expires,
 		opt_max_transmit,
 		opt_timeout,
 		opt_raw_smb,

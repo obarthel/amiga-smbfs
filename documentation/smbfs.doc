@@ -194,7 +194,6 @@ parameters):
 
     ADDVOLUME/K
     CACHE=CACHESIZE/N/K
-    CACHEEXPIRES/N/K
     CACHETABLES/N/K
     CASE=CASESENSITIVE/S
     CHANGEUSERNAMECASE/K
@@ -520,19 +519,7 @@ be active ("CACHETABLES=1"). You can use more directory caches if you want to,
 but keep in mind that each cache will consume extra memory. If you want to use
 multiple caches, you might want to reduce the cache size.
 
-5.3.3. "CACHEEXPIRES/N/K"
-
-There is a limit on how long the contents of a cache are considered "good"
-until it will have to be refilled. By default a cache will be considered
-"stale" 10 seconds after it has been filled.
-
-Changing the cache expiration time and the cache size can be necessary if you
-find that reading and processing (e.g. deleting) directory entries stops or
-skips certain entries. The large the cache, the longer the expiration time
-will have to be, and a smaller cache likely requires a shorter expiration
-time.
-
-5.3.4. "RAISEPRIORITY/S"
+5.3.3. "RAISEPRIORITY/S"
 
 The smbfs program can be run at a higher priority than it would normally do
 (normal would be priority 0), which might increase performance, but raise
@@ -540,7 +527,7 @@ system load, too. If the "RAISEPRIORITY" switch is used, the smbfs program
 will run at the same priority as other Amiga file systems do (this would be
 priority 10).
 
-5.3.5. "TIMEOUT/N/K"
+5.3.4. "TIMEOUT/N/K"
 
 The smbfs program may lose the connection to the server during file system
 operations. While it will try to reestablish a connection to the server, some
@@ -551,7 +538,7 @@ You can set the number of seconds which have to pass before the smbfs program
 will stop waiting for the server to respond, shut down the connection and try
 again. For example, "TIMEOUT=5" will select a timeout of 5 seconds.
 
-5.3.6. "WRITEBEHIND/S"
+5.3.5. "WRITEBEHIND/S"
 
 The smbfs program can try to improve write performance by not waiting for the
 server to confirm that all the data just transmitted has in fact been stored.
@@ -562,7 +549,7 @@ Please note that the "WRITEBEHIND" switch has no effect if "PROTOCOL=nt1" is
 used because the smbfs program will then be using a different server write
 command which does not support the "write behind" functionality.
 
-5.3.7. "READTHRESHOLD/N/K" and "WRITETHRESHOLD/N/K"
+5.3.6. "READTHRESHOLD/N/K" and "WRITETHRESHOLD/N/K"
 
 The purpose of smbfs is chiefly to enable you to read and write files stored
 on a networked computer. To this end smbfs tries its best to squeeze as much
@@ -955,9 +942,9 @@ version 2.1.
 
 8. Credits
 
-The smbfs file system is based upon prior work by Pål-Kristian Engstad, Volker
+The smbfs file system is based upon prior work by Pï¿½l-Kristian Engstad, Volker
 Lendecke, Mark A. Shand, Donald J. Becker, Rick Sladkey, Fred N. van Kempen,
-Eric Kasten and Rudolf König. It is a direct descendant of the "Sharity-Light"
+Eric Kasten and Rudolf Kï¿½nig. It is a direct descendant of the "Sharity-Light"
 file system written by Christian Starkjohann.
 
 Versions including 1.80 incorporate changes from the MorphOS smbfs
