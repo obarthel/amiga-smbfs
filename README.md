@@ -96,7 +96,7 @@ You can also run the **smbfs** program in the background, like so:
 Run >NIL: smbfs user=PCGuest service=//sourcery/all`
 </pre>
 
-**Note that this is not recommended**, though, because it becomes much harder to tell why the **smbfs** program did not work correctly (as it invariably will at some point). Any error messages which could help in figuring out what the problem may have been will be lost.
+**Note that this is not recommended** because it becomes much harder to tell why the **smbfs** program did not work correctly (as it invariably will at some point). Any error messages which could help in figuring out what the problem may have been will be lost.
 
 If you have trouble setting up the **smbfs** program, first make sure that it works correctly without the `Run >NIL:` instructions and have a look at any error messages it may produce.
 
@@ -174,6 +174,7 @@ PASSWORD/K
 PROTOCOL/K
 QUIET/S
 RAISEPRIORITY/S
+READONLY/N/K
 READTHRESHOLD/N/K
 SERVER=SERVERNAME/K
 SERVICE/A
@@ -201,9 +202,11 @@ The parameters relevant for this information are described below.
 
 #### 5.1.1. `SHARE=SERVICE/A`
 
-This parameter takes the form of `//server-name/share-name` or `//server-name:port-number/share-name`.
+This parameter takes the form of `//server-name/share-name` or `//server-name:port-number/share-name`. You can also use the SMB URI form
+`smb://[[workgroup;]user-name[:password]@]server-name[:port-number]/share`.
 
-For example `//sourcery/all`, `//192.168.0.1/all`, `//nas:445/files`, `//nas:microsoft-ds/files` would all be valid `SHARE` parameters.
+For example `//sourcery/all`, `//192.168.0.1/all`, `//nas:445/files`, `//nas:microsoft-ds/files`, `smb://sourcery/all`, `smb://user@sourcery/all`
+and `smb://user:password@sourcery/all` would all be valid `SHARE` parameters.
 
 In this example `server-name` must be either the IPv4 address of the file server to connect to, or the name of the server (**note that server names cannot be longer than 16 characters**).
 
@@ -503,7 +506,15 @@ You can tell **smbfs** not to add a volume, which may be useful because the nati
 If you want to use a specific volume name, use the `VOLUME` option,
 e.g. `VOLUME=Sourcery:`. Otherwise a volume name derived from the share name will be used instead.
 
-#### 5.6.2. `OMITHIDDEN/S`
+#### 5.6.2. `READONLY/S`
+
+If you want to make sure that the contents of the file system mounted cannot
+be modified or deleted by mistake, use the `READONLY` switch. This switch has
+the same effect as using the `Lock` shell command. However, this protection
+against modification will be enabled as soon as the file system has been
+mounted and the protection cannot be removed with the `Lock` shell command.
+
+#### 5.6.3. `OMITHIDDEN/S`
 
 When requesting a directory listing, the file server may return some files and drawers tagged as being hidden. By default **smbfs** will not treat these "hidden" entries any different from the other directory entries, i.e. they are not hidden from view.
 
@@ -511,14 +522,14 @@ You can request that the hidden entries should be omitted from directory listing
 
 Note that even though a file or drawer may be hidden, you should still be able to open and examine it.
 
-#### 5.6.3. `QUIET/S`
+#### 5.6.4. `QUIET/S`
 
 When started from shell, the **smbfs** program will print a message as soon as the
 connection to the file server has been established.
 
 If you do not want to see that message displayed, use the `QUIET` parameter. Please note that the **smbfs** program may still show error messages.
 
-#### 5.6.4. `SETENV/S`
+#### 5.6.5. `SETENV/S`
 
 You may want to stop or disable/re-enabled a currently running **smbfs** program through the shell `Break` command, but it may be impractical to figure out which CLI process number is involved.
 

@@ -267,7 +267,7 @@ static LONG CVSPrintf(const TEXT * format_string, APTR args);
 static int LocalVSNPrintf(STRPTR buffer, int limit, const TEXT * formatString, APTR args);
 static void cleanup(void);
 static BOOL setup(const TEXT * program_name, const TEXT * service, const TEXT * workgroup, STRPTR username, STRPTR opt_password, BOOL opt_change_username_case, BOOL opt_change_password_case, const TEXT * opt_clientname, const TEXT * opt_servername, int opt_cachesize, int opt_cache_tables, int opt_max_transmit, int opt_timeout, LONG *opt_time_zone_offset, LONG *opt_dst_offset, BOOL opt_raw_smb, BOOL opt_unicode, BOOL opt_prefer_core_protocol, BOOL opt_session_setup_delay_unicode, BOOL opt_write_behind, int opt_smb_request_write_threshold, int opt_smb_request_read_threshold, BOOL scatter_gather, BOOL tcp_no_delay, int socket_receive_buffer_size, int socket_send_buffer_size, const TEXT * device_name, const TEXT * volume_name, BOOL add_volume, const TEXT * translation_file);
-static void file_system_handler(BOOL raise_priority, const TEXT * device_name, const TEXT * volume_name, const TEXT * service_name);
+static void file_system_handler(BOOL raise_priority, const TEXT * volume_name, const TEXT * service_name);
 
 /****************************************************************************/
 
@@ -886,17 +886,20 @@ main(void)
 	 */
 	NewList((struct List *)&ErrorList);
 
+	/* The command parameters will be filled in either from
+	 * icon tool types or from the CLI command line arguments.
+	 */
+	memset(&args,0,sizeof(args));
+
+	/* Make sure that we can allocate memory from the
+	 * local pool.
+	 */
 	MemoryPool = CreatePool(MEMF_ANY|MEMF_PUBLIC, 4096, 4096);
 	if(MemoryPool == NULL)
 	{
 		report_error("Could not create memory pool.");
 		goto out;
 	}
-
-	/* The command parameters will be filled in either from
-	 * icon tool types or from the CLI command line arguments.
-	 */
-	memset(&args,0,sizeof(args));
 
 	/* If this program was launched from Workbench, the
 	 * command parameters will have to be read from the
@@ -1541,14 +1544,6 @@ main(void)
 	if(args.TCPDelay == NULL && args.TCPNoDelay)
 		args.TCPDelay = "no";
 
-	/* Use the default if no device or volume name is given. */
-	if(args.DeviceName == NULL && args.VolumeName == NULL)
-	{
-		args.DeviceName = "SMBFS";
-
-		D(("no device/volume name given, using 'devicename=%s' instead.", args.DeviceName));
-	}
-
 	if(args.VolumeName != NULL)
 		args.AddVolume = "yes";
 
@@ -1912,7 +1907,7 @@ main(void)
 			}
 		}
 
-		file_system_handler(args.RaisePriority,args.DeviceName,args.VolumeName,args.Service);
+		file_system_handler(args.RaisePriority, args.VolumeName, args.Service);
 
 		/* Clean up after the environment variable... */
 		if(setenv_name[0] != '\0')
@@ -4495,17 +4490,20 @@ setup(
 		if(FindDosEntry(dl,name,LDF_DEVICES) != NULL)
 			device_exists = TRUE;
 	}
-	/* Otherwise pick a device name of the form SMBFS0..SMBFS99,
+	/* Otherwise pick a device name of the form SMBFS, SMBFS0..SMBFS99,
 	 * which is not currently in use.
 	 */
 	else
 	{
 		dl = LockDosList(LDF_WRITE|LDF_VOLUMES|LDF_DEVICES);
 
-		/* Try to find a unique device name out of 100 possible options. */
-		for(i = 0 ; i < 100 ; i++)
+		/* Try to find a unique device name out of 101 possible options. */
+		for(i = -1 ; i < 100 ; i++)
 		{
-			LocalSNPrintf(name,sizeof(name),"SMBFS%ld",i);
+			if(i == -1)
+				strlcpy(name,"SMBFS",sizeof(name));
+			else
+				LocalSNPrintf(name,sizeof(name),"SMBFS%ld",i);
 
 			device_exists = (BOOL)(FindDosEntry(dl,name,LDF_DEVICES) != NULL);
 			if(NOT device_exists)
@@ -10415,7 +10413,6 @@ Action_FilesystemAttr(
 static void
 file_system_handler(
 	BOOL			raise_priority,
-	const TEXT *	device_name,
 	const TEXT *	volume_name,
 	const TEXT *	service_name)
 {
@@ -10441,8 +10438,6 @@ file_system_handler(
 
 		if(NOT cli->cli_Background)
 		{
-			TEXT name[MAX_FILENAME_LEN+1];
-			TEXT * dot;
 			LONG max_cli;
 			LONG which;
 			LONG i;
@@ -10465,22 +10460,8 @@ file_system_handler(
 
 			Permit();
 
-			if(volume_name == NULL)
-				strlcpy(name,device_name,sizeof(name));
-			else
-				strlcpy(name,volume_name,sizeof(name));
-
-			/* If the device or volume name had a trailing
-			 * colon character attached, remove it so that the
-			 * output below will always show one colon
-			 * character following the name, and not two.
-			 */
-			dot = (TEXT *)strchr(name, ':');
-			if(dot != NULL)
-				(*dot) = '\0';
-
-			LocalFPrintf(ZERO, "Mounted '%s' as '%s:'; \"Break %ld\" or [Ctrl+C] to stop and unmount... ",
-				service_name,name,which);
+			LocalFPrintf(ZERO, "Mounted '%s' as '%b:'; \"Break %ld\" or [Ctrl+C] to stop and unmount... ",
+				service_name,(volume_name != NULL && VolumeNodeAdded) ? VolumeNode->dol_Name : DeviceNode->dol_Name,which);
 
 			Flush(Output());
 

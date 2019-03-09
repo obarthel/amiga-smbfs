@@ -3043,3 +3043,15 @@ smbfs 2.21 (9.3.2019)
   you can now use "smbfs smb://workgroup;barney:secret@nas:445/share" instead.
   It is a bit shorter than the alternative and has an advantage in allowing
   you to reuse smb:// URLs which you know work well on other systems.
+
+
+smbfs 2.22 (9.3.2019)
+
+- The memory pool initialization should have happened after having
+  initialized the command line argument data, not before it.
+
+- I broke the automatic device name ("smbfs0:" .. "smbfs99:") initialization
+  at some point. Ouch :-(  The revised code now starts with "smbfs:", then
+  tries "smbfs0:" through "smbfs99:" until it has picked a unique file
+  system device name. This is consistent with the old behaviour of trying
+  to use "smbfs:" if no device specific name has been requested.
