@@ -3,7 +3,7 @@
  *
  * SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
  *
- * Copyright (C) 2000-2019 by Olaf 'Olsen' Barthel <obarthel -at- gmx -dot- net>
+ * Copyright (C) 2019 by Olaf 'Olsen' Barthel <obarthel -at- gmx -dot- net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,33 +20,36 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#ifndef _QUAD_MATH_H
-#define _QUAD_MATH_H
+#ifndef _PARSE_SMB_URL_H
+#define _PARSE_SMB_URL_H
 
 /****************************************************************************/
 
-#ifndef EXEC_TYPES_H
-#include <exec/types.h>
-#endif /* EXEC_TYPES_H */
+#include <stddef.h>
 
 /****************************************************************************/
 
-typedef struct
+/* SMB URI parameters, as processed and produced by parse_smb_url_args(). */
+struct smb_url_args
 {
-	ULONG High;
-	ULONG Low;
-} QUAD;
+	/* Each string pointer is either a NULL pointer (not provided by the
+	 * URI text), or it points to a NUL-terminated string.
+	 */
+	char * domain;
+	char * username;
+	char * password;
+	char * server;
+	char * port;
+	char * share;
+	char * path;
+};
 
 /****************************************************************************/
 
-void multiply_32_by_32_to_64(ULONG ab,ULONG cd,QUAD * product);
-ULONG multiply_64_by_32_to_64(const QUAD * const abcd,ULONG ef,QUAD * abcdef);
-ULONG divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient);
-ULONG add_64_plus_32_to_64(const QUAD * const a,ULONG b,QUAD * ab);
-ULONG add_64_plus_64_to_64(const QUAD * const a,const QUAD * const b,QUAD * ab);
-ULONG subtract_64_from_64_to_64(const QUAD * const minuend,const QUAD * const subtrahend,QUAD * difference);
-int compare_64_to_64(const QUAD * const a,const QUAD * const b);
+int could_be_smb_url(const char * arg);
+struct smb_url_args * parse_smb_url_args(const char * arg);
+void free_smb_url_args(struct smb_url_args *args);
 
 /****************************************************************************/
 
-#endif /* _QUAD_MATH_H */
+#endif /* _PARSE_SMB_URL_H */

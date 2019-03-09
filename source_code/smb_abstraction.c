@@ -47,6 +47,7 @@ reset_dircache (dircache_t * dircache)
 	dircache->is_valid = TRUE;
 	dircache->sid = -1;
 	dircache->close_sid = -1;
+	dircache->num_entries_read = 0;
 }
 
 /*****************************************************************************/
@@ -136,6 +137,7 @@ invalidate_dircache(dircache_t * dircache)
 	dircache->cache_used = dircache->base = 0;
 	dircache->is_valid = FALSE;
 	dircache->sid = -1;
+	dircache->num_entries_read = 0;
 
 	if(dircache->cache_for != NULL)
 	{
@@ -352,7 +354,7 @@ smba_connect (
 
 	NewList ((struct List *)&res->dircache_list);
 
-	/* Use raw SMB over TCP rather than NetBIOS. */
+	/* Use raw SMB over TCP rather than NetBIOS? */
 	if(opt_raw_smb)
 		res->server.raw_smb = TRUE;
 
@@ -672,10 +674,10 @@ make_open (smba_file_t * f, int need_fid, int writable, int truncate_file, int *
 
 		if (!f->is_valid || file_attributes_are_stale(f))
 		{
-			if (!f->is_valid || f->attr_time == 0)
-				D(("file '%s' attributes are not yet known",escape_name(f->dirent.complete_path)));
-			else
-				D(("file '%s' attributes are need to be updated",escape_name(f->dirent.complete_path)));
+			D(("file '%s' attributes %s",
+				escape_name(f->dirent.complete_path),
+				(!f->is_valid || f->attr_time == 0) ? "are not yet known" : "need to be updated"
+			));
 
 			if (!f->server->server.prefer_core_protocol && f->server->server.protocol >= PROTOCOL_LANMAN2)
 			{
@@ -1032,6 +1034,9 @@ smba_close (smba_server_t * s, smba_file_t * f)
 		/* release the directory cache */
 		if (f->dircache != NULL)
 		{
+			if(f->dircache->is_valid)
+				SHOWMSG("dropping directory cache");
+
 			Remove((struct Node *)f->dircache);
 			AddTail((struct List *)&s->dircache_list, (struct Node *)f->dircache);
 
@@ -1651,7 +1656,7 @@ smba_setattr (smba_file_t * f, const smba_stat_t * st, const QUAD * const size, 
 			if (result < 0)
 				goto out;
 
-			f->attr_time = get_current_time();	
+			f->attr_time = get_current_time();
 		}
 	}
 
@@ -1705,10 +1710,24 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 	if (result < 0)
 		goto out;
 
-	/* get a cache for this directory unless we already have one */
+	/* Get a cache for this directory unless we already have one. */
 	if (f->dircache == NULL)
 	{
+		int num_directory_caches_in_use = 0;
+		int num_directory_caches_total = 0;
 		dircache_t * dircache;
+
+		for(dircache = (dircache_t *)f->server->dircache_list.mlh_Head ;
+			dircache->min_node.mln_Succ != NULL ;
+			dircache = (dircache_t *)dircache->min_node.mln_Succ)
+		{
+			if(dircache->cache_for != NULL)
+				num_directory_caches_in_use++;
+
+			num_directory_caches_total++;
+		}
+
+		D(("number of directory caches in use = %ld (of %ld)", num_directory_caches_in_use, num_directory_caches_total));
 
 		/* Grab the least recently used cache table entry, which
 		 * should sit at the end of the list.
@@ -1755,6 +1774,7 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 
 	while(TRUE)
 	{
+		/* Refill the directory cache? */
 		if(cache_index >= f->dircache->cache_used)
 		{
 			if(f->dircache->eof)
@@ -1770,8 +1790,8 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 			/* Start over and read the next entries. */
 			f->dircache->cache_used = cache_index = 0;
 
-			/* Try to read up as many entries as will fit into
-			 * the cache (cache_size).
+			/* Try to read as many entries as will fit into
+			 * the cache.
 			 */
 			num_entries = smb_proc_readdir (&f->server->server, f->dirent.complete_path, f->dircache, &eof, error_ptr);
 			if (num_entries < 0)
@@ -1810,11 +1830,12 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 
 		dirent = &f->dircache->cache[cache_index];
 
-		D(("delivering '%s', cache index=%ld, last entry=%s",
+		D(("delivering '%s', cache index=%ld, last entry=%s, total entries read so far = %ld",
 			escape_name(dirent->complete_path),
 			cache_index,
-			eof ? "yes" : "no")
-		);
+			eof ? "yes" : "no",
+			f->dircache->num_entries_read
+		));
 
 		copy_dirent_to_stat_data(&data, dirent);
 
@@ -1822,8 +1843,10 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 			break;
 
 		cache_index++;
+
+		f->dircache->num_entries_read++;
 	}
-	
+
 	result = 0;
 
  out:
@@ -1831,7 +1854,7 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 	if(eof && eof_ptr != NULL)
 		(*eof_ptr) = TRUE;
 
-	return result;
+	return(result);
 }
 
 /*****************************************************************************/

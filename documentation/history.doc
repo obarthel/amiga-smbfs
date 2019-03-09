@@ -3019,5 +3019,27 @@ smbfs 2.20 (27.2.2019)
 
 - Rewrote the smba_readdir() function to perform its only task in a much
   simpler manner. It now either fills the directory cache or retrieves
-  the cache entries to the caller, resuming the retrieval at a predefined
-  position if required.
+  the cache entries to be delivered to the caller, resuming the retrieval
+  at a predefined position if required.
+
+
+smbfs 2.21 (9.3.2019)
+
+- Added more diagnostic output and debug functionality, e.g. regarding
+  how many directory caches are currently being used.
+
+- Long name directory scanning is a bit more paranoid when retrying a
+  scan operation which might have been triggered by the server connection
+  getting dropped.
+
+- Added the new READONLY option (why stop at 47 options when you can
+  have 48?) which makes the file system read-only by default and does not
+  require you to use the "Lock" shell command to achieve the same effect.
+  Note that the shell "Lock" command cannot be used to turn the read-only
+  mode off again.
+
+- Added support for the smb:// URI scheme, which means that instead of
+  using "smbfs username=barney password=secret domain=workgroup //nas:445/share"
+  you can now use "smbfs smb://workgroup;barney:secret@nas:445/share" instead.
+  It is a bit shorter than the alternative and has an advantage in allowing
+  you to reuse smb:// URLs which you know work well on other systems.

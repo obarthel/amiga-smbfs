@@ -3,7 +3,7 @@
  *
  * SMB file system wrapper for AmigaOS, using the AmiTCP V3 API
  *
- * Copyright (C) 2000-2019 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
+ * Copyright (C) 2000-2019 by Olaf 'Olsen' Barthel <obarthel -at- gmx -dot- net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -170,9 +170,15 @@ extern void smb_nt_encrypt(const unsigned char *passwd, const unsigned char *c8,
 
 extern void free_memory(APTR address);
 extern APTR allocate_memory(LONG size);
+extern APTR allocate_cleared_memory(LONG count, LONG record_size);
 
 #define malloc(s) allocate_memory(s)
 #define free(m) free_memory(m)
+#define calloc(n, s) allocate_cleared_memory(n, s)
+
+/****************************************************************************/
+
+extern LONG strncasecmp(const char *a, const char *b, LONG n);
 
 /****************************************************************************/
 

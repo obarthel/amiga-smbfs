@@ -107,7 +107,10 @@ typedef struct dircache
 									/* For resuming directory scanning with
 									 * SMB_COM_FIND.
 									 */
-
+	int					num_entries_read;
+									/* Total number of cache entries read
+									 * over multiple cache refill operations.
+									 */
 	ULONG				created_at;	/* for invalidation */
 
 	struct smba_file *	cache_for;	/* owner of this cache */

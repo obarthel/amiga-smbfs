@@ -2643,6 +2643,8 @@ smb_proc_readdir_short (
 		if (count == 0)
 			break;
 
+		ASSERT( count <= entries_asked );
+
 		ASSERT (bcc == count * SMB_DIRINFO_SIZE + 3);
 
 		if (bcc != count * SMB_DIRINFO_SIZE + 3)
@@ -2665,7 +2667,7 @@ smb_proc_readdir_short (
 
 		p = smb_decode_word (p, &datalength);
 
-		if(datalength != 43 * count)
+		if(datalength != SMB_DIRINFO_SIZE * count)
 		{
 			D(("data length (%ld) does not match expected size (%ld)", datalength, count * SMB_DIRINFO_SIZE));
 
@@ -2681,6 +2683,11 @@ smb_proc_readdir_short (
 			p += SMB_DIRINFO_SIZE;
 
 			entry = get_next_dircache_entry(dircache);
+
+			ASSERT( entry == NULL || i+1 == count );
+
+			if(entry == NULL && i+1 < count)
+				SHOWMSG("ran out of directory cache entries, which should never happen...");
 
 			total_count++;
 		}
@@ -3058,7 +3065,7 @@ smb_proc_readdir_long (
 
 	int ff_searchcount;
 	int ff_end_of_search = 0;
-	int ff_dir_handle = 0;
+	int ff_dir_handle = -1;
 	int ff_resume_key = 0;
 	int loop_count = 0;
 
@@ -3114,6 +3121,9 @@ smb_proc_readdir_long (
 	if(dircache->sid == -1)
 	{
 		is_first = TRUE;
+
+		ff_dir_handle = -1;
+		ff_resume_key = 0;
 
 		SHOWMSG("start scanning from the top");
 	}
@@ -3258,6 +3268,8 @@ smb_proc_readdir_long (
 		}
 
 		/* Bail out if this is empty. */
+		ASSERT( resp_param != NULL );
+
 		if (resp_param == NULL)
 		{
 			SHOWMSG("no response parameters to process; stopping the search for now");
@@ -3269,6 +3281,8 @@ smb_proc_readdir_long (
 
 		if (is_first)
 		{
+			ASSERT( resp_param_len >= 6 );
+
 			if(resp_param_len < 6)
 			{
 				SHOWMSG("not enough response parameter data to process; stopping the search for now");
@@ -3286,6 +3300,8 @@ smb_proc_readdir_long (
 		}
 		else
 		{
+			ASSERT( resp_param_len >= 4 );
+
 			if(resp_param_len < 4)
 			{
 				SHOWMSG("not enough response parameter data to process; stopping the search for now");
@@ -3296,6 +3312,8 @@ smb_proc_readdir_long (
 			ff_end_of_search = WVAL (p, 2);
 		}
 
+		ASSERT( ff_searchcount <= max_matches );
+
 		D(("received %ld entries (end of search = %s)",ff_searchcount, ff_end_of_search ? "yes" : "no"));
 
 		if (ff_searchcount == 0)
@@ -3305,17 +3323,16 @@ smb_proc_readdir_long (
 		}
 
 		/* Bail out if this is empty. */
+		ASSERT( resp_data != NULL );
+
 		if (resp_data == NULL)
 		{
 			SHOWMSG("no directory data to process; stopping the search for now");
 			break;
 		}
 
-		/* point to the data bytes */
-		p = resp_data;
-
 		/* Now we are ready to parse smb directory entries. */
-		for (i = 0, entry_length = 0 ;
+		for (i = 0, p = resp_data, entry_length = 0 ;
 		     i < ff_searchcount && entry != NULL && p < &resp_data[resp_data_len];
 		     i++, p += entry_length)
 		{
@@ -3340,6 +3357,11 @@ smb_proc_readdir_long (
 			}
 
 			entry = get_next_dircache_entry(dircache);
+
+			ASSERT( entry != NULL || i+1 == ff_searchcount );
+
+			if(entry == NULL && i+1 < ff_searchcount)
+				SHOWMSG("ran out of directory cache entries, which should never happen...");
 
 			total_count++;
 		}

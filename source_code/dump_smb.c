@@ -3,7 +3,7 @@
  *
  * dump_smb.c
  *
- * Copyright (C) 2016-2019 by Olaf `Olsen' Barthel <obarthel -at- gmx -dot- net>
+ * Copyright (C) 2016-2019 by Olaf 'Olsen' Barthel <obarthel -at- gmx -dot- net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
