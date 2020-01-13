@@ -178,6 +178,15 @@ extern APTR allocate_cleared_memory(LONG count, LONG record_size);
 
 /****************************************************************************/
 
+/* This is a less than elegant workaround for our local strncasecmp()
+ * function which the smbfs code which "parse-smb-url.c" uses.
+ */
+#ifdef strncasecmp
+#undef strncasecmp
+#endif /* strncasecmp */
+
+#define strncasecmp _strncasecmp
+
 extern LONG strncasecmp(const char *a, const char *b, LONG n);
 
 /****************************************************************************/
