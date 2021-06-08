@@ -272,9 +272,9 @@ static void file_system_handler(BOOL raise_priority, const TEXT * volume_name, c
 /****************************************************************************/
 
 struct Library * SysBase;
-struct Library * DOSBase;
+struct DosLibrary * DOSBase;
 struct Library * UtilityBase;
-struct Library * IntuitionBase;
+struct IntuitionBase * IntuitionBase;
 struct Library * SocketBase;
 struct Library * LocaleBase;
 struct Library * TimerBase;
@@ -1605,6 +1605,11 @@ main(void)
 		report_error("'UNICODE' parameter must be either 'ON' or 'OFF'.");
 		goto out;
 	}
+
+	// Tygre 2021/04/30: Mutual exclusion
+	// SMBFS should warn if options TRANSLATE
+	// and UNICODE=ON are combined, because
+	// TRANSLATE silently switches OFF UNICODE.
 
 	/* Code page based translation using a file disables
 	 * Unicode support and the built-in CP437 and CP850
@@ -10475,7 +10480,6 @@ file_system_handler(
 	 * doesn't happen).
 	 */
 	Quiet = TRUE;
-
 	done = FALSE;
 
 	if(raise_priority)
