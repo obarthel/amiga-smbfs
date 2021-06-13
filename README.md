@@ -411,7 +411,7 @@ Some file servers treat files and drawers as different if their names differ onl
 
 For file servers which would see `File1` and `file1` as different names you should activate the `CASESENSITIVE` switch to treat those files as being different.
 
-There is a catch though: the AmigaDOS file naming scheme does not follow this model and you may run into problems when you are trying to use it. For example, in case sensitive mode attempting to access a file called `FILENAME` as `filename` or `Filename` will fail; you can access it only under the original name `FILENAME`.
+There is a catch, though: the AmigaDOS file naming scheme does not follow this model and you may run into problems when you are trying to use it. For example, in case sensitive mode attempting to access a file called `FILENAME` as `filename` or `Filename` will fail; you can access it only under the original name `FILENAME`.
 
 By default, the **smbfs** program does not treat file and drawer names differently which only differ with respect to the case of letters.
 
