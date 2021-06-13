@@ -35,6 +35,8 @@
  * Samba 3.0.25: smbfs debuglevel=2 debugfile=ram:samba-3.0.25.log smb://olsen:...@192.168.1.118/olsen
  *
  * diskspeed drive olsen:Documents dir seek fast byte nocpu
+ * diskspeed drive ubuntu-test: dir nocpu buf1=0 buf2=0 buf3=0 buf4=0
+ * diskspeed drive ubuntu-test: nocpu byte fast buf1=512
  */
 
 #include "smbfs.h"
@@ -272,9 +274,9 @@ static void file_system_handler(BOOL raise_priority, const TEXT * volume_name, c
 /****************************************************************************/
 
 struct Library * SysBase;
-struct DosLibrary * DOSBase;
+struct Library * DOSBase;
 struct Library * UtilityBase;
-struct IntuitionBase * IntuitionBase;
+struct Library * IntuitionBase;
 struct Library * SocketBase;
 struct Library * LocaleBase;
 struct Library * TimerBase;
