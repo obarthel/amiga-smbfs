@@ -657,6 +657,8 @@ copy_utf16le_to_latin1(const struct smb_server *server, byte * to, int to_size, 
 
 /*****************************************************************************/
 
+#define strnlen local_strnlen
+
 /* Works just like strlen(), but stops as soon as it hits
  * the boundaries of the buffer which contains the string.
  */
