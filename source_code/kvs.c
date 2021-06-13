@@ -12,6 +12,9 @@
 
 #include "kvs.h"
 
+/* For ULONG */
+#include <exec/types.h>
+
 #include <stdlib.h> // For realloc()...
 #include <string.h> // For memmove()...
 
