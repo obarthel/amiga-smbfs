@@ -219,7 +219,7 @@ add_64_plus_64_to_64(const QUAD * const a,const QUAD * const b,QUAD * ab)
 
 /* Subtract a 64 bit integer from another 64 bit integer, producing a
  * 64 bit integer difference, returning a 32 bit integer that indicates
- * whether or not an underflow occured.
+ * whether or not an underflow occurred.
  */
 ULONG
 subtract_64_from_64_to_64(const QUAD * const minuend,const QUAD * const subtrahend,QUAD * difference)
