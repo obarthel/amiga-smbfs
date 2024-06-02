@@ -220,7 +220,7 @@ static const err_code_struct hard_msgs[] =
 	{"ERRbadunit",		20,	"Unknown unit"},
 	{"ERRnotready",		21,	"Drive not ready"},
 	{"ERRbadcmd",		22,	"Unknown command"},
-	{"ERRdata",			23,	"A problem has occured in the physical I/O"},
+	{"ERRdata",			23,	"A problem has occurred in the physical I/O"},
 	{"ERRbadreq",		24,	"Bad request structure length"},
 	{"ERRseek",			25,	"Seek error"},
 	{"ERRbadmedia",		26,	"Unknown media type"},
@@ -310,7 +310,7 @@ copy_latin1_to_utf16le(const struct smb_server *server, byte * to,int to_size, c
 	int i;
 
 	// Tygre 21/05/15: Asymmetry
-	// The arguments of this function are not symetrical
+	// The arguments of this function are not symmetrical
 	// with those of copy_utf16le_to_latin1(). While in
 	// copy_utf16le_to_latin1(), the "from" represents
 	// a single part of a path, i.e., "toto". Here, the
