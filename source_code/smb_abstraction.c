@@ -345,7 +345,7 @@ smba_connect (
 		report_error("Not enough memory.");
 
 		(*error_ptr) = ENOMEM;
-		goto error_occured;
+		goto error_occurred;
 	}
 
 	memset (res, 0, sizeof(*res));
@@ -429,7 +429,7 @@ smba_connect (
 		(*error_ptr) = ENOMEM;
 
 		report_error("Directory cache initialization failed (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
-		goto error_occured;
+		goto error_occurred;
 	}
 
 	strlcpy(data.workgroup_name,workgroup_name,sizeof(data.workgroup_name));
@@ -441,7 +441,7 @@ smba_connect (
 	if(gethostname (hostname, MAXHOSTNAMELEN) < 0)
 	{
 		report_error("Could not look up local host name (%ld, %s).",(*error_ptr),posix_strerror(*error_ptr));
-		goto error_occured;
+		goto error_occurred;
 	}
 
 	/* Only retain the host name, drop any domain names following it. */
@@ -491,7 +491,7 @@ smba_connect (
 					report_error("Port number '%s' is out of range.", tcp_service_name);
 
 					(*error_ptr) = EINVAL;
-					goto error_occured;
+					goto error_occurred;
 				}
 			}
 			else
@@ -499,7 +499,7 @@ smba_connect (
 				report_error("Invalid service '%s'.", tcp_service_name);
 
 				(*error_ptr) = EINVAL;
-				goto error_occured;
+				goto error_occurred;
 			}
 		}
 	}
@@ -538,7 +538,7 @@ smba_connect (
 		report_error("socket() call failed (%ld, %s).", errno, posix_strerror(errno));
 
 		(*error_ptr) = errno;
-		goto error_occured;
+		goto error_occurred;
 	}
 
 	strlcpy (data.service, connect_parameters->service, sizeof(data.service));
@@ -569,7 +569,7 @@ smba_connect (
 			report_error("Server name '%s' is too long for NetBIOS (%ld characters are possible).",connect_parameters->server_ipname,16);
 
 			(*error_ptr) = ENAMETOOLONG;
-			goto error_occured;
+			goto error_occurred;
 		}
 
 		strlcpy (data.server_name, connect_parameters->server_ipname, sizeof(data.server_name));
@@ -584,7 +584,7 @@ smba_connect (
 			report_error("Local host name '%s' is too long for NetBIOS (%ld characters are possible).", hostname, 16);
 
 			(*error_ptr) = ENAMETOOLONG;
-			goto error_occured;
+			goto error_occurred;
 		}
 
 		strlcpy (data.client_name, hostname, sizeof(data.client_name));
@@ -600,7 +600,7 @@ smba_connect (
 	res->server.latin1_to_utf16le_sizes = kvs_create(strcmp);
 
 	if (smb_proc_connect (&res->server, error_ptr) < 0)
-		goto error_occured;
+		goto error_occurred;
 
 	if (!use_E)
 		res->supports_E_known = TRUE;
@@ -610,7 +610,7 @@ smba_connect (
 
 	result = 0;
 
- error_occured:
+ error_occurred:
 
 	if(res != NULL)
 	{
@@ -1811,7 +1811,7 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 			D(("cachefill returned %ld entries", num_entries));
 
 			/* The cache may have been invalidated because an error
-			 * occured (e.g. server connection was terminated), or if
+			 * occurred (e.g. server connection was terminated), or if
 			 * the cache size was changed.
 			 */
 			if (f->dircache == NULL || !f->dircache->is_valid)
