@@ -1445,7 +1445,7 @@ main(void)
 		ASSERT( args.Service != NULL );
 
 		/* Set up the name of the program, as it will be
-		 * displayed in the proces status list.
+		 * displayed in the process status list.
 		 */
 		name = FilePart(program_name);
 
@@ -2282,7 +2282,7 @@ add_error_message(const TEXT * fmt,APTR args)
 
 /****************************************************************************/
 
-/* Report an error that has occured; if the program was not launched
+/* Report an error that has occurred; if the program was not launched
  * from Shell, error messages will be accumulated for later display.
  */
 void VARARGS68K
