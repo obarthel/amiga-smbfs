@@ -75,7 +75,7 @@ allocate_smb_url_args(void)
 
 /****************************************************************************/
 
-/* Allocate enough memory to hold a a NUL-terminated copy of the substring
+/* Allocate enough memory to hold a NUL-terminated copy of the substring
  * whose start/end position is provided, then copy its contents. Returns
  * NULL on failure. Note that the start/end positions are expected to be
  * start <= end.

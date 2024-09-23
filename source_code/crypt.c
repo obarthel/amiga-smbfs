@@ -72,7 +72,7 @@ static void mdfour (unsigned char *out, const unsigned char *in, int n);
    the minimum necessary for SMB authentication, as used by all SMB
    products (including every copy of Microsoft Windows95 ever sold)
 
-   In particular, it can only do a unchained forward DES pass. This
+   In particular, it can only do an unchained forward DES pass. This
    means it is not possible to use this code for encryption/decryption
    of data, instead it is only useful as a "hash" algorithm.
 
@@ -426,7 +426,7 @@ E_P24 (const unsigned char *p21, const unsigned char *c8, unsigned char *p24)
 /****************************************************************************/
 
 /* This implements the X/Open SMB password encryption
-   It takes a password, a 8 byte "crypt key" and puts 24 bytes of
+   It takes a password, an 8 byte "crypt key" and puts 24 bytes of
    encrypted password into p24 */
 void
 smb_encrypt (const unsigned char *passwd, const unsigned char *c8, unsigned char *p24)

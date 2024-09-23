@@ -1087,13 +1087,13 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
 		 * = 32 bytes
 		 *
-		 * The parameters of a SMB_COM_READ_ANDX response account for
+		 * The parameters of an SMB_COM_READ_ANDX response account for
 		 * 1(wordcount)+1(andxcommand)+1(andxreserved)+2(andxoffset)+
 		 * 2(available)+2(datacompactionmode)+2(reserved)+2(datalength)+
 		 * 2(dataoffset)+10(reserved2)
 		 * = 25 bytes
 		 *
-		 * The data part of a SMB_COM_READ_ANDX response account for
+		 * The data part of an SMB_COM_READ_ANDX response account for
 		 * 2(bytecount)+1(pad) = 3 bytes,
 		 * not including the actual payload
 		 *
@@ -1194,11 +1194,11 @@ smba_read (smba_file_t * f, char *data, long len, const QUAD * const offset, int
 		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
 		 * = 32 bytes
 		 *
-		 * The parameters of a SMB_COM_READ response account for
+		 * The parameters of an SMB_COM_READ response account for
 		 * 1(wordcount)+2(countofbytesreturned)+8(reserved)
 		 * = 11 bytes
 		 *
-		 * The data part of a SMB_COM_READ response account for
+		 * The data part of an SMB_COM_READ response account for
 		 * 2(bytecount)+1(bufferformat)+2(countofbytesread) = 5 bytes,
 		 * not including the actual payload
 		 *
@@ -1288,13 +1288,13 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
 		 * = 32 bytes
 		 *
-		 * The parameters of a SMB_COM_WRITE_ANDX command account for
+		 * The parameters of an SMB_COM_WRITE_ANDX command account for
 		 * 1(word_count)+1(and_x_command)+1(and_x_reserved)+2(and_x_offset)+
 		 * 2(fid)+4(offset)+4(timeout)+2(write_mode)+2(remaining)+2(reserved)+
 		 * 2(data_length)+2(data_offset)+4(offset_high)
 		 * = 29 bytes
 		 *
-		 * The data part of a SMB_COM_WRITE_ANDX command account for
+		 * The data part of an SMB_COM_WRITE_ANDX command account for
 		 * 2(byte_count)+1(pad) = 3 bytes, not including
 		 * the actual payload
 		 *
@@ -1347,12 +1347,12 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
 		 * = 32 bytes
 		 *
-		 * The parameters of a SMB_COM_WRITE_RAW command account for
+		 * The parameters of an SMB_COM_WRITE_RAW command account for
 		 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
 		 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+
 		 * 2(dataoffset)+4(offset high) = 29 bytes
 		 *
-		 * The data part of a SMB_COM_WRITE_RAW command accounts for
+		 * The data part of an SMB_COM_WRITE_RAW command accounts for
 		 * 2(bytecount) = 2 bytes
 		 *
 		 * This leaves 'max_buffer_size' - 63 for the payload.
@@ -1403,11 +1403,11 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
 		 * = 32 bytes
 		 *
-		 * The parameters of a SMB_COM_WRITE command account for
+		 * The parameters of an SMB_COM_WRITE command account for
 		 * 1(wordcount)+2(fid)+2(countofbytestowrite)+4(writeoffsetinbytes)+
 		 * 2(estimateofremainingbytestobewritten) = 11 bytes
 		 *
-		 * The data part of a SMB_COM_WRITE command account for
+		 * The data part of an SMB_COM_WRITE command account for
 		 * 2(bytecount)+1(bufferformat)+2(datalength) = 5 bytes, not including
 		 * the actual payload
 		 *
@@ -1452,7 +1452,7 @@ smba_write (smba_file_t * f, const char *data, long len, const QUAD * const offs
 		f->attr_time = 0;
 
 	/* Even if one write access failed, we may have succeeded
-	 * at writing some data. Hence we update the cached file
+	 * at writing some data. Hence, we update the cached file
 	 * size here and take note of the change made.
 	 */
 	if(num_bytes_written > 0)
@@ -1803,7 +1803,7 @@ smba_readdir (smba_file_t * f, int offs, int restart, void *callback_data, smba_
 			D(("cachefill returned %ld entries", num_entries));
 
 			/* The cache may have been invalidated because an error
-			 * occured (e.g. server connection was terminated), or if
+			 * occurred (e.g. server connection was terminated), or if
 			 * the cache size was changed.
 			 */
 			if (f->dircache == NULL || !f->dircache->is_valid)
@@ -2557,7 +2557,7 @@ smba_start(
 
 			host_name[i] = '\0';
 
-			/* Make sure the hostname is 16 characters or less (for NetBIOS) */
+			/* Make sure the hostname is 16 characters in size, of less (for NetBIOS) */
 			if (!opt_raw_smb && strlen (host_name) > 16)
 			{
 				report_error("Server name '%s' is too long (%ld characters are possible).", host_name, 16);

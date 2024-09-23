@@ -59,7 +59,7 @@ struct smb_dskattr
 };
 
 /*
- * Contains all relevant data on a SMB networked file.
+ * Contains all relevant data on an SMB networked file.
  */
 struct smb_dirent
 {

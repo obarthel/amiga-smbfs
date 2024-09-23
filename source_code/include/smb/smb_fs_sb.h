@@ -58,7 +58,7 @@ struct smb_server
 	/* olsen (2018-06-01): UTF-16LE Unicode strings are used for path names. */
 	int unicode_enabled;
 
-	/* olsen (2018-08-12): Path names are case sensitive. */
+	/* olsen (2018-08-12): Path names are case-sensitive. */
 	int case_sensitive;
 
 	/* olsen (2018-08-12): Delay the use of Unicode strings during session setup. */

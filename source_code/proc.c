@@ -220,7 +220,7 @@ static const err_code_struct hard_msgs[] =
 	{"ERRbadunit",		20,	"Unknown unit"},
 	{"ERRnotready",		21,	"Drive not ready"},
 	{"ERRbadcmd",		22,	"Unknown command"},
-	{"ERRdata",			23,	"A problem has occured in the physical I/O"},
+	{"ERRdata",			23,	"A problem has occurred in the physical I/O"},
 	{"ERRbadreq",		24,	"Bad request structure length"},
 	{"ERRseek",			25,	"Seek error"},
 	{"ERRbadmedia",		26,	"Unknown media type"},
@@ -277,7 +277,7 @@ static void convert_time_t_to_long_date(time_t t, QUAD * long_date);
  * returns how many bytes were written to the buffer, including the
  * null-termination.
  *
- * To be on the safe side (the path name length can be a 32 bit
+ * To be on the safe side (the path name length can be a 32-bit
  * integer), the whole copying operation stops as soon as the
  * output buffer is filled.
  */
@@ -330,7 +330,7 @@ copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
  * returns how many bytes were written to the buffer, including the
  * null-termination.
  *
- * To be on the safe side (the path name length can be a 32 bit
+ * To be on the safe side (the path name length can be a 32-bit
  * integer), the whole copying operation stops as soon as the
  * output buffer is filled.
  */
@@ -591,7 +591,7 @@ local2utc (int time_value)
 	return result;
 }
 
-/* Convert a MS-DOS time/date pair to a UNIX date (seconds since January 1st 1970). */
+/* Convert an MS-DOS time/date pair to a UNIX date (seconds since January 1st 1970). */
 static int
 date_dos2unix (unsigned short time_value, unsigned short date)
 {
@@ -816,7 +816,7 @@ smb_errno (int errcls, int error)
 			{ ERRfilexists,		EEXIST },
 			{ ERRinvalidparam,	EINVAL },
 			{ 145,				ENOTEMPTY},	/* Directory is not empty; this is what Samba reports (2016-04-23) */
-			{ 183,				EEXIST },	/* This next error seems to occur on an mv when the destination exists ("object name collision") */
+			{ 183,				EEXIST },	/* This next error seems to occur on a "mv" when the destination exists ("object name collision") */
 			{ -1,				-1 }
 		};
 
@@ -1324,7 +1324,7 @@ smb_proc_open (
 			}
 
 			/* Allows others to read, write and delete the file just created.
-			 * This may be useful if smbfs hangs or you need to restart your
+			 * This may be useful if smbfs hangs, or you need to restart your
 			 * System and you need to clean up after the file you just
 			 * created.
 			 */
@@ -1768,13 +1768,13 @@ smb_proc_write_raw (
 	 * 8(securityfeatures)+2(reserved)+2(tid)+2(pidlow)+2(uid)+2(mid)
 	 * = 32 bytes
 	 *
-	 * The parameters of a SMB_COM_WRITE_RAW command account for
+	 * The parameters of an SMB_COM_WRITE_RAW command account for
 	 * 1(wordcount)+2(fid)+2(countofbytes)+2(reserved1)+4(offset)+
 	 * 4(timeout)+2(writemode)+4(reserved2)+2(datalength)+2(dataoffset)+
 	 * 4(offset high)
 	 * = 29 bytes
 	 *
-	 * The data part of a SMB_COM_WRITE_RAW command account for
+	 * The data part of an SMB_COM_WRITE_RAW command account for
 	 * 2(bytecount)+0(pad) = 2 bytes, not including
 	 * the actual payload
 	 *
@@ -4377,7 +4377,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 		SHOWMSG("Passed SESSION REQUEST.");
 	}
 
-	/* Now we are ready to send a SMB Negotiate Protocol packet. */
+	/* Now we are ready to send an SMB Negotiate Protocol packet. */
 	plength = 0;
 	for (i = 0; i < num_prots ; i++)
 		plength += 1 + strlen (prots[i].name) + 1;
@@ -4741,7 +4741,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			WSET (packet, smb_vwv3, 2);					/* maximum mpx count; should be copied from server */
 			WSET (packet, smb_vwv4, 0); /* server->pid */
 			DSET (packet, smb_vwv5, server_sesskey);
-			WSET (packet, smb_vwv7, oem_password_len);	/* case sensitive password length */
+			WSET (packet, smb_vwv7, oem_password_len);	/* case-sensitive password length */
 			WSET (packet, smb_vwv8, 0);	/* no encrypted password */
 
 			p = SMB_BUF (packet);

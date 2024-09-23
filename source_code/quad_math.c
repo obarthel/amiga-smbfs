@@ -67,12 +67,12 @@ static ULONG mulhu (ULONG u, ULONG v)
 	return u1 * v1 + w2 + (w1 >> 16);
 }
 
-/* Multiply two 32 bit numbers, yielding a 64 bit result value. */
+/* Multiply two 32-bit numbers, yielding a 64 bit result value. */
 void
 multiply_32_by_32_to_64(ULONG ab,ULONG cd,QUAD * product)
 {
 	product->High	= mulhu(ab,cd);
-	product->Low	= ab * cd; 
+	product->Low	= ab * cd;
 }
 
 /* Multiply an unsigned 64 bit quantity by a 32 bit quantity, yielding a 64
@@ -111,8 +111,8 @@ multiply_64_by_32_to_64(const QUAD * const abcd,ULONG ef,QUAD * abcdef)
 
 /****************************************************************************/
 
-/* Divide a 64 bit integer by a 32 bit integer, filling in a 64 bit quotient
- * and returning a 32 bit remainder.
+/* Divide a 64-bit integer by a 32-bit integer, filling in a 64 bit quotient
+ * and returning a 32-bit remainder.
  */
 ULONG
 divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient)
@@ -217,9 +217,9 @@ add_64_plus_64_to_64(const QUAD * const a,const QUAD * const b,QUAD * ab)
 
 /****************************************************************************/
 
-/* Subtract a 64 bit integer from another 64 bit integer, producing a
- * 64 bit integer difference, returning a 32 bit integer that indicates
- * whether or not an underflow occured.
+/* Subtract a 64-bit integer from another 64-bit integer, producing a
+ * 64-bit integer difference, returning a 32-bit integer that indicates
+ * whether an underflow occurred.
  */
 ULONG
 subtract_64_from_64_to_64(const QUAD * const minuend,const QUAD * const subtrahend,QUAD * difference)
@@ -262,7 +262,7 @@ subtract_64_from_64_to_64(const QUAD * const minuend,const QUAD * const subtrahe
 
 /****************************************************************************/
 
-/* Compare two unsigned 64 bit integers in the manner of strcmp(). */
+/* Compare two unsigned 64-bit integers in the manner of strcmp(). */
 int
 compare_64_to_64(const QUAD * const a,const QUAD * const b)
 {

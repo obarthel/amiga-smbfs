@@ -341,7 +341,7 @@ splay_tree_find(struct splay_tree * tree, const splay_key_t key)
 
 /****************************************************************************/
 
-/* Initialize a splay tree to be empty. By default duplicate keys
+/* Initialize a splay tree to be empty. By default, duplicate keys
  * are not allowed.
  */
 void

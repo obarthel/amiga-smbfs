@@ -146,7 +146,7 @@
 #define smb_vwv15	67
 #define smb_vwv16	69
 
-/* these are the trans2 sub fields for primary requests */
+/* these are the trans2 sub-fields for primary requests */
 #define smb_tpscnt	smb_vwv0
 #define smb_tdscnt	smb_vwv1
 #define smb_mprcnt	smb_vwv2

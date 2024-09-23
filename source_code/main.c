@@ -83,7 +83,7 @@ TEXT Version[] = VERSTAG;
 /****************************************************************************/
 
 /* Difference between January 1st 1970 and January 1st 1978 in seconds,
- * which is needed because the Amiga system time base uses 1978 and we
+ * which is needed because the Amiga system time base uses 1978, and we
  * have to deal with Unix time information.
  */
 #define UNIX_TIME_OFFSET 252460800
@@ -145,7 +145,7 @@ struct FileNode
 										 */
 
 	QUAD				fn_OffsetQuad;	/* Current file read/write position,
-										 * as an unsigned 64 bit integer.
+										 * as an unsigned 64-bit integer.
 										 */
 	LONG				fn_Mode;		/* File access mode, e.g. MODE_NEWFILE,
 										 * MODE_OLDFILE, MODE_READWRITE.
@@ -1443,7 +1443,7 @@ main(void)
 		ASSERT( args.Service != NULL );
 
 		/* Set up the name of the program, as it will be
-		 * displayed in the proces status list.
+		 * displayed in the process status list.
 		 */
 		name = FilePart(program_name);
 
@@ -2086,7 +2086,7 @@ host_strerror(int error)
 
 /****************************************************************************/
 
-/* Compare two strings, either case sensitive or not
+/* Compare two strings, either case-sensitive or not
  * sensitive to the case of the letters. How this is
  * to be done is controlled by a global option. This
  * routine is called whenever two SMB file names are
@@ -2275,7 +2275,7 @@ add_error_message(const TEXT * fmt,APTR args)
 
 /****************************************************************************/
 
-/* Report an error that has occured; if the program was not launched
+/* Report an error that has occurred; if the program was not launched
  * from Shell, error messages will be accumulated for later display.
  */
 void VARARGS68K
@@ -2892,7 +2892,7 @@ BroadcastNameQuery(const char *name, const char *scope, UBYTE *address)
 	result = ENOENT;
 	n = 0;
 
-	/* Send the query packet; retry five times with a one second
+	/* Send the query packet; retry five times with a one-second
 	 * delay in between.
 	 */
 	for(i = 0 ; i < 5 ; i++)
@@ -3074,7 +3074,7 @@ SendNetBIOSStatusQuery(
 	result = ENOENT;
 	n = 0;
 
-	/* Send the query packet; retry five times with a one second
+	/* Send the query packet; retry five times with a one-second
 	 * delay in between.
 	 */
 	for(i = 0 ; i < 5 ; i++)
@@ -4728,8 +4728,8 @@ remove_lock_node(struct LockNode * ln)
 
 /****************************************************************************/
 
-/* Truncate an file size or position which cannot be represented by a
- * single 32 bit integer and substitute it with something vaguely more
+/* Truncate a file size or position which cannot be represented by a
+ * single 32-bit integer and substitute it with something vaguely more
  * sensible (which probably isn't so sensible in the first place, but
  * we keep trying).
  */
@@ -7245,7 +7245,7 @@ Action_ExamineObject(
 	}
 
 	/* If the ZERO lock is involved, it stands in for the
-	 * root directory. Otherwise it might be a lock on a
+	 * root directory. Otherwise, it might be a lock on a
 	 * file or directory.
 	 */
 	if(lock != NULL)
@@ -8158,7 +8158,7 @@ dir_scan_callback_func_exall(
 
 	/* If this was the last entry to be delivered (eof != FALSE)
 	 * make sure that the next invocation of this function will
-	 * cease delivering more directory entries. Otherwise allow
+	 * cease delivering more directory entries. Otherwise, allow
 	 * the next call to ExAll() to resume reading more directory
 	 * entries.
 	 */
@@ -9901,7 +9901,7 @@ Action_ChangeMode(
 	 * as SHARED_LOCK and EXCLUSIVE_LOCK. This works because these five modes
 	 * are represented by different numbers.
 	 *
-	 * For locks we only accept SHARED_LOCK and EXCLUSIVE_LOCK.
+	 * For locks, we only accept SHARED_LOCK and EXCLUSIVE_LOCK.
 	 */
 	if(type == CHANGE_FH)
 	{
@@ -10168,7 +10168,7 @@ Action_SetComment(
 		goto out;
 	}
 
-	/* All this work and we're only doing something very silly... */
+	/* All this work, and we're only doing something very silly... */
 	result = DOSTRUE;
 	error = OK;
 
@@ -11257,7 +11257,7 @@ file_system_handler(
 
 /****************************************************************************/
 
-/* Convert an unsigned 64 bit integer into a string. The
+/* Convert an unsigned 64-bit integer into a string. The
  * conversion uses a local static buffer and returns a pointer
  * to the first digit of the string.
  */
