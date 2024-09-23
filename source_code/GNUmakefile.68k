@@ -48,7 +48,7 @@ LFLAGS = -nostartfiles -nostdlib -L.
 
 OBJS = \
 	main.o cp437.o cp850.o crypt.o dump_smb.o parse-smb-url.o proc.o \
-	quad_math.o smb_abstraction.o sock.o splay.o kvs.o
+	quad_math.o smb_abstraction.o sock.o splay.o
 
 ###############################################################################
 

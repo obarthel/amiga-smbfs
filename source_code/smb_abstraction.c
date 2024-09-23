@@ -595,10 +595,6 @@ smba_connect (
 
 	init_open_file_list(res);
 
-	// Tygre 21/05/15: Create stores for UTF16le strings and their sizes
-	res->server.latin1_to_utf16le_bytes = kvs_create(strcmp);
-	res->server.latin1_to_utf16le_sizes = kvs_create(strcmp);
-
 	if (smb_proc_connect (&res->server, error_ptr) < 0)
 		goto error_occured;
 
@@ -635,10 +631,6 @@ smba_disconnect (smba_server_t * server)
 		CloseSocket (server->server.mount_data.fd);
 
 	cleanup_server_dircache(server);
-
-	// Tygre 21/05/15: Delete stores for UTF16le strings and their sizes
-	kvs_destroy(server->server.latin1_to_utf16le_bytes);
-	kvs_destroy(server->server.latin1_to_utf16le_sizes);
 
 	free (server);
 }

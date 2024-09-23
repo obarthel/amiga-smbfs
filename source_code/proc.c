@@ -268,28 +268,6 @@ static void convert_time_t_to_long_date(time_t t, QUAD * long_date);
 
 /*****************************************************************************/
 
-static int
-size_utf16le_of_latin1(const struct smb_server *server, const byte *from)
-{
-	const byte* from1;
-	int latin1_part_size;
-
-	from1 = strrchr(from, '\\');
-	from1++;
-
-	latin1_part_size = (from1 - from) * 2; // * 2 because UTF16
-
-	if(NULL != kvs_get_value(server->latin1_to_utf16le_bytes, from1))
-	{
-		// report_error("%s is in store! (1)", from1);
-		return latin1_part_size + atoi(kvs_get_value(server->latin1_to_utf16le_sizes, from1));
-	}
-	else
-	{
-		return -1;
-	}
-}
-
 /* Copy a string in ISO-Latin-1 form (8 bits per character) into a
  * buffer, converting it into a little-endian 16 bit Unicode version
  * of the string. This works because the ISO-Latin-1 character sits
@@ -304,42 +282,10 @@ size_utf16le_of_latin1(const struct smb_server *server, const byte *from)
  * output buffer is filled.
  */
 static int
-copy_latin1_to_utf16le(const struct smb_server *server, byte * to,int to_size, const byte * from,int len)
+copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
 {
 	int num_bytes_written = 0;
 	int i;
-
-	// Tygre 21/05/15: Asymmetry
-	// The arguments of this function are not symetrical
-	// with those of copy_utf16le_to_latin1(). While in
-	// copy_utf16le_to_latin1(), the "from" represents
-	// a single part of a path, i.e., "toto". Here, the
-	// "from" includes the whole path, i.e., "a\b\toto".
-	//
-	// Right now, I *ASSUME* that only the file name,
-	// i.e., the last part of the path, can be non-Latin1.
-	// I replace this last part with the stored original
-	// UTF16le name if it exists.
-	const byte* from1;
-	long  id_l;
-	char* id_s;
-	BOOL  is_stored;
-
-	from1 = strrchr(from, '\\');
-	from1++;
-	id_s = malloc(11);
-	if(NULL == id_s)
-	{
-		return -1;
-	}
-	is_stored  = FALSE;
-
-	if(NULL != kvs_get_value(server->latin1_to_utf16le_bytes, from1))
-	{
-		// report_error("%s is in store! (2)", from1);
-		is_stored = TRUE;
-		len = len - strlen(from1);
-	}
 
 	/* We have to have enough room to NUL-terminate the
 	 * resulting converted string.
@@ -360,45 +306,11 @@ copy_latin1_to_utf16le(const struct smb_server *server, byte * to,int to_size, c
 			num_bytes_written += 2;
 		}
 
-		// Tygre 21/05/15: Stored UTF16le
-		if(is_stored)
-		{
-			/* No needdd to take care of the NUL. */
-			to_size += 2;
+		/* And we terminate that string... */
+		(*to++)	= '\0';
+		(*to)	= '\0';
 
-			/* We already wrote some bytes */
-			to_size -= num_bytes_written;
-
-			
-			id_l = atoi(kvs_get_value(server->latin1_to_utf16le_sizes, from1));
-			// sprintf(id_s, "%ld", id_l);
-			// report_error("Retrieving %s bytes for %s", id_s, from1);
-			// sprintf(id_s, "%ld", to_size);
-			// report_error("To be copied in %s bytes", id_s);
-			if(id_l > to_size)
-			{
-				report_error("Cannot copy all bytes for lack of space!");
-			}
-			else if(id_l < to_size)
-			{
-				report_error("Cannot fill in all space!");
-			}
-
-			memcpy(
-				to,
-				kvs_get_value(server->latin1_to_utf16le_bytes, from1),
-				to_size);
-			
-			num_bytes_written += to_size;
-		}
-		else
-		{
-			/* And we terminate that string... */
-			(*to++)	= '\0';
-			(*to)	= '\0';
-			
-			num_bytes_written += 2;
-		}
+		num_bytes_written += 2;
 	}
 
 	return(num_bytes_written);
@@ -423,34 +335,11 @@ copy_latin1_to_utf16le(const struct smb_server *server, byte * to,int to_size, c
  * output buffer is filled.
  */
 static int
-copy_utf16le_to_latin1(const struct smb_server *server, byte * to, int to_size, const byte * from, int len)
+copy_utf16le_to_latin1(byte * to,int to_size,const byte * from,int len)
 {
 	int num_bytes_written = 0;
 	word c;
-	int i, j;
-
-	// Tygre 21/05/08: Encoding of non-Latin1 names
-	// The maximum number of chars for representing a long is 10 on 32-bit computers (2147483647)
-	#define LONG_MAX_CHARS 10
-	// The maximum number of chars for a file name in OFS
-	#define MAX_SIZE 31
-	const byte* from1;
-	byte* from1_copy;
-	byte* to1;
-	long  tmp_l;
-	byte* tmp_s;
-	long  id_l;
-	char* id_s;
-	BOOL  should_store;
-	char  tmp[MAX_SIZE];
-	
-	from1 = from;
-	to1 = to;
-	id_s = malloc(LONG_MAX_CHARS + 1); // LONG_MAX_CHARS plus NUL
-	if(NULL == id_s)
-	{
-		return -1;
-	}
+	int i;
 
 	/* We have to have enough room to NUL-terminate the
 	 * resulting converted string.
@@ -460,7 +349,7 @@ copy_utf16le_to_latin1(const struct smb_server *server, byte * to, int to_size, 
 		/* That takes care of the NUL. */
 		to_size -= 1;
 
-		for(i = 0, id_l = 0, should_store = FALSE; i < len ; i++, from += 2)
+		for(i = 0 ; i < len ; i++, from += 2)
 		{
 			if(num_bytes_written + 1 > to_size)
 				break;
@@ -476,188 +365,22 @@ copy_utf16le_to_latin1(const struct smb_server *server, byte * to, int to_size, 
 			 */
 			c = ((word)from[1] << 8) | from[0];
 			if(c >= 256)
-			{
-				// Tygre 21/05/08: Encoding
-				// Replace non-Latin1 chars by 'X'
-				// and sum up their values to make
-				// up an encoding.
-				should_store = TRUE;
-				id_l += c;
-				(*to++) = 'X';
-				num_bytes_written++;
-			}
-			else
-			{
-				id_l += c;
-				(*to++) = c;
-				num_bytes_written++;
-			}
+				c = 0x80;
+
+			(*to++) = c;
+			num_bytes_written++;
 		}
 
 		/* And we terminate that string... */
 		(*to) = '\0';
+
 		num_bytes_written++;
-
-		// Tygre 21/05/08: Encoding of non-Latin1 names
-		// I can memmove happily because to_size is always 255
-		// and thus greater than the longest file name (107)
-		// and the dozen chars that I add.
-		// Tested with six files whose names are (with X for non-Latin1 chars):
-		//	- <40 chars>
-		//	- <40 chars>.txt
-		//	- <40 chars>.<40 chars>
-		//	- <5 chars>
-		//	- <5 chars>.txt
-		//	- <5 chars>.<40 chars>
-		if(should_store)
-		{
-			// 1. Replace non-Latin1 names with a unique (?) number
-			// TOO SIMPLISTIC
-			/*
-			sprintf(id_s, "%0*ld", LONG_MAX_CHARS, id_l);
-			memmove(to1, id_s, LONG_MAX_CHARS + 1);
-			num_bytes_written = LONG_MAX_CHARS + 1;
-			*/
-
-			// 2. Replace non-Latin1 names with a unique (?) number and add extension
-			// BETTER BUT WHAT IF EXTENSION IS LOOONG?
-			/*
-			if(tmp_s = strrchr(to1, '.'))
-			{
-				tmp_l = strlen(tmp_s);
-				memmove(to1 + LONG_MAX_CHARS, tmp_s, tmp_l + 1); // "+ 1" to include the NUL
-			}
-			else
-			{
-				tmp_l = 0;
-				(*(to1 + LONG_MAX_CHARS)) = '\0';
-			}
-			sprintf(id_s, "%0*ld", LONG_MAX_CHARS, id_l);
-			memmove(to1, id_s, LONG_MAX_CHARS);
-			num_bytes_written = LONG_MAX_CHARS + tmp_l + 1;
-			*/
-
-			// 3. Prefix non-Latin1 names with unique (?) number
-			// WHAT ABOUT FILE NAMES GREATER THAN A LIMIT? (31 or 107...)
-			/*
-			sprintf(id_s, "%0*ld", LONG_MAX_CHARS, id_l);
-			if(num_bytes_written > to_size - LONG_MAX_CHARS - 1)
-			{
-				num_bytes_written = num_bytes_written - (to_size - LONG_MAX_CHARS - 1 - num_bytes_written);
-			}
-			memmove(to1 + (LONG_MAX_CHARS + 1), to1,  num_bytes_written);
-			memmove(to1,      id_s, LONG_MAX_CHARS);
-			(*(to1 + LONG_MAX_CHARS)) = ' ';
-			to = to + (LONG_MAX_CHARS + 1);
-			(*to) = '\0';
-			num_bytes_written += (LONG_MAX_CHARS + 1);
-			*/
-
-			// 4. Postfix, before any '.', non-Latin1 names with unique (?) number
-			// WHAT ABOUT FILE NAMES GREATER THAN A LIMIT? (31 or 107...)
-			/*
-			sprintf(id_s, "%0*ld", LONG_MAX_CHARS, id_l);
-			if(NULL != (tmp = strrchr(to1, '.')))
-			{
-				memmove(tmp + (LONG_MAX_CHARS + 1), tmp, strlen(tmp) + 1); // + 1 to include the NUL
-				to = tmp;
-			}
-			(*to++) = ' ';
-			memmove(to, id_s, LONG_MAX_CHARS);
-			to += LONG_MAX_CHARS;
-			num_bytes_written += strlen(to1) + 1;
-			*/
-
-			// 5. Keep as many chars of the extension as possible (with Xs for non-Latin1 chars).
-			// Insert the unique ID before the extension, the ID is always LONG_MAX_CHARS long.
-			// Keep as many chars of the original name (with Xs for non-Latin1 chars).
-			/*
-			#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
-			#define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
-			if(tmp_s = strrchr(to1, '.'))
-			{
-				tmp_l = strlen(tmp_s);
-				if(tmp_l > MAX_SIZE - 1 - LONG_MAX_CHARS - 1)
-				{
-					j = MAX_SIZE - 1 - LONG_MAX_CHARS - 1;
-					sprintf(tmp, "@%0*ld%.*s", LONG_MAX_CHARS, id_l, j, tmp_s);
-				}
-				else
-				{
-					j = tmp_l;
-					tmp_l = strlen(to1) - j;
-					i = MIN(tmp_l, MAX_SIZE - j - 1 - 1 - LONG_MAX_CHARS - 1);
-					sprintf(tmp, "%.*s @%0*ld%.*s", i, to1, LONG_MAX_CHARS, id_l, j, tmp_s);
-				}
-			}
-			else
-			{
-				tmp_l = strlen(to1);
-				i = MIN(tmp_l, MAX_SIZE - 1 - 1 - LONG_MAX_CHARS - 1);
-				sprintf(tmp, "%.*s @%0*ld", i, LONG_MAX_CHARS, id_l);
-			}
-			memmove(to1, tmp, tmp_l + 1);
-			num_bytes_written = tmp_l + 1;
-			*/
-
-
-			// 6. Keep as many chars of the extension as possible (with Xs for non-Latin1 chars).
-			// Insert the unique ID before the extension, as long as need but no longer.
-			// Keep as many chars of the original name (with Xs for non-Latin1 chars).
-			#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
-			#define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
-			sprintf(id_s, "%ld", id_l);
-			if(tmp_s = strrchr(to1, '.'))
-			{
-				tmp_l = strlen(tmp_s);
-				if(tmp_l > MAX_SIZE - 1 - strlen(id_s) - 1)
-				{
-					j = MAX_SIZE - 1 - strlen(id_s) - 1;
-					tmp_l = sprintf(tmp, "@%s%.*s", id_s, j, tmp_s);
-				}
-				else
-				{
-					j = tmp_l;
-					tmp_l = strlen(to1) - j;
-					i = strlen(id_s);
-					i = MIN(tmp_l, MAX_SIZE - j - 1 - 1 - i - 1);
-					tmp_l = sprintf(tmp, "%.*s @%s%.*s", i, to1, id_s, j, tmp_s);
-				}
-			}
-			else
-			{
-				tmp_l = strlen(to1);
-				i = strlen(id_s);
-				i = MIN(tmp_l, MAX_SIZE - 1 - 1 - i - 1);
-				tmp_l = sprintf(tmp, "%.*s @%s", i, to1, id_s);
-			}
-			memmove(to1, tmp, tmp_l + 1);
-			num_bytes_written = tmp_l + 1;
-
-			// If the bytes and their sizes are not already in store
-			if(NULL == kvs_get_value(server->latin1_to_utf16le_bytes, to1))
-			{
-				id_l = len * 2;            // "* 2" because each UTF16 char takes 2 bytes
-				from1_copy = malloc(id_l); // Make a copy of "from" of length "len"
-				if(NULL == from1_copy)
-				{
-					return -1;
-				}
-				memcpy(from1_copy, from1, id_l);
-				kvs_put(server->latin1_to_utf16le_bytes, to1, from1_copy);
-
-				sprintf(id_s, "%ld", id_l);
-				kvs_put(server->latin1_to_utf16le_sizes, to1, id_s);
-			}
-		}
 	}
 
 	return(num_bytes_written);
 }
 
 /*****************************************************************************/
-
-#define strnlen local_strnlen
 
 /* Works just like strlen(), but stops as soon as it hits
  * the boundaries of the buffer which contains the string.
@@ -1564,16 +1287,7 @@ smb_proc_open (
 
 		if(server->unicode_enabled)
 		{
-			// Tygre 2015/05/29: Size in UTF16
-			// The size is that of the bytes stored,
-			// plus the Latin1 path as prefix, not
-			// two bytes per char anymore in UTF16.
-			pathname_size = size_utf16le_of_latin1(server, pathname);
-			if(-1 == pathname_size)
-			{
-				// Default size
-				pathname_size = 2 * (len + 1);
-			}
+			pathname_size = 2 * (len + 1);
 			pathname_pad = 1;
 		}
 		else
@@ -1655,7 +1369,8 @@ smb_proc_open (
 				 * will be word-aligned.
 				 */
 				(*data++) = 0;
-				(void) copy_latin1_to_utf16le(server, data, pathname_size, pathname, len);
+
+				(void) copy_latin1_to_utf16le(data, pathname_size, pathname, len);
 			}
 			else
 			{
@@ -1739,24 +1454,11 @@ smb_proc_open (
 		int path_size;
 
 		if(server->unicode_enabled)
-		{
-			// Tygre 2015/05/29: Size in UTF16
-			// The size is that of the bytes stored,
-			// plus the Latin1 path as prefix, not
-			// two bytes per char anymore in UTF16.
-			path_size = size_utf16le_of_latin1(server, pathname);
-			if(-1 == path_size)
-			{
-				// Default size
-				path_size = 2 * (len + 1);
-			}
-		}
+			path_size = 1 + 2 * (len+1);
 		else
-		{
-			path_size = len + 1;
-		}
+			path_size = 1 + len+1;
 
-		ASSERT( smb_payload_size(server, 2, 1 + path_size) >= 0 );
+		ASSERT( smb_payload_size(server, 2, path_size) >= 0 );
 
 		SHOWMSG("using the old SMB_COM_OPEN");
 
@@ -1767,14 +1469,14 @@ smb_proc_open (
 			else
 				access_and_share_modes = SMB_OPEN_SHARE_DENY_NOTHING|SMB_OPEN_ACCESS_READ_ONLY;
 
-			p = smb_setup_header (server, SMBopen, 2, 1 + path_size);
+			p = smb_setup_header (server, SMBopen, 2, path_size);
 			WSET (buf, smb_vwv0, access_and_share_modes);
 			WSET (buf, smb_vwv1, SMB_FILE_ATTRIBUTE_HIDDEN|SMB_FILE_ATTRIBUTE_SYSTEM|SMB_FILE_ATTRIBUTE_DIRECTORY);
 
 			if(server->unicode_enabled)
 			{
 				(*p++) = 4; /* A NUL-terminated string follows. */
-				copy_latin1_to_utf16le(server, p, path_size, pathname, len);
+				copy_latin1_to_utf16le(p,2 * (len+1),pathname,len);
 			}
 			else
 			{
@@ -2457,35 +2159,22 @@ smb_proc_create (struct smb_server *server, const char *path, int len, struct sm
 	#endif /* DEBUG */
 
 	if(server->unicode_enabled)
-	{
-		// Tygre 2015/05/29: Size in UTF16
-		// The size is that of the bytes stored,
-		// plus the Latin1 path as prefix, not
-		// two bytes per char anymore in UTF16.
-		path_size = size_utf16le_of_latin1(server, path);
-		if(-1 == path_size)
-		{
-			// Default size
-			path_size = 2 * (len + 1);
-		}
-	}
+		path_size = 1 + 2 * (len + 1);
 	else
-	{
-		path_size = len + 1;
-	}
+		path_size = 1 + len + 1;
 
  retry:
 
-	ASSERT( smb_payload_size(server, 3, 1 + path_size) >= 0 );
+	ASSERT( smb_payload_size(server, 3, path_size) >= 0 );
 
-	p = smb_setup_header (server, SMBcreate, 3, 1 + path_size);
+	p = smb_setup_header (server, SMBcreate, 3, path_size);
 	WSET (buf, smb_vwv0, entry->attr);
 	DSET (buf, smb_vwv1, local_time);
 
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A NUL-terminated string follows. */
-		copy_latin1_to_utf16le(server, p, path_size, path, len);
+		copy_latin1_to_utf16le(p,2 * (len+1),path,len);
 	}
 	else
 	{
@@ -2523,7 +2212,6 @@ smb_proc_mv (
 	int size;
 	int result;
 
-	// TODO: Tygre
 	if(server->unicode_enabled)
 		size = 2 + 1 + 2 * (old_path_len+1) + 2 * (new_path_len+1);
 	else
@@ -2540,12 +2228,12 @@ smb_proc_mv (
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A NUL-terminated string follows. */
-		p += copy_latin1_to_utf16le(server, p,2 * (old_path_len+1),old_path,old_path_len);
+		p += copy_latin1_to_utf16le(p,2 * (old_path_len+1),old_path,old_path_len);
 
 		(*p++) = 4; /* A NUL-terminated string follows. */
 
 		(*p++) = 0; /* Padding byte, allowing for the string to be word-aligned. */
-		(void) copy_latin1_to_utf16le(server, p,2 * (new_path_len+1),new_path,new_path_len);
+		(void) copy_latin1_to_utf16le(p,2 * (new_path_len+1),new_path,new_path_len);
 	}
 	else
 	{
@@ -2570,7 +2258,6 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 	int result;
 	char *p;
 
-	// TODO: Tygre
 	if(server->unicode_enabled)
 		path_size = 2 * (len + 1);
 	else
@@ -2585,7 +2272,7 @@ smb_proc_mkdir (struct smb_server *server, const char *path, const int len, int 
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A NUL-terminated string follows. */
-		(void) copy_latin1_to_utf16le(server, p,path_size,path,len);
+		(void) copy_latin1_to_utf16le(p,path_size,path,len);
 	}
 	else
 	{
@@ -2611,7 +2298,6 @@ smb_proc_rmdir (struct smb_server *server, const char *path, const int len, int 
 	int result;
 	char *p;
 
-	// TODO: Tygre
 	if(server->unicode_enabled)
 		path_size = 2 * (len + 1);
 	else
@@ -2626,7 +2312,7 @@ smb_proc_rmdir (struct smb_server *server, const char *path, const int len, int 
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A NUL-terminated string follows. */
-		(void) copy_latin1_to_utf16le(server, p,path_size,path,len);
+		(void) copy_latin1_to_utf16le(p,path_size,path,len);
 	}
 	else
 	{
@@ -2651,7 +2337,6 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 	char *buf = server->transmit_buffer;
 	int result;
 
-	// TODO: Tygre
 	if(server->unicode_enabled)
 		path_size = 2 * (len + 1);
 	else
@@ -2671,7 +2356,7 @@ smb_proc_unlink (struct smb_server *server, const char *path, const int len, int
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A NUL-terminated string follows. */
-		(void) copy_latin1_to_utf16le(server, p,path_size,path,len);
+		(void) copy_latin1_to_utf16le(p,path_size,path,len);
 	}
 	else
 	{
@@ -2832,22 +2517,9 @@ smb_proc_readdir_short (
 	mask_len = strlen (mask);
 
 	if(server->unicode_enabled)
-	{
-		// Tygre 2015/05/29: Size in UTF16
-		// The size is that of the bytes stored,
-		// plus the Latin1 path as prefix, not
-		// two bytes per char anymore in UTF16.
-		mask_size = size_utf16le_of_latin1(server, path);
-		if(-1 == mask_size)
-		{
-			// Default size
-			mask_size = 2 * (mask_len + 1);
-		}
-	}
+		mask_size = 1 + 2 * (mask_len+1) + 3;
 	else
-	{
-		mask_size = mask_len+1;
-	}
+		mask_size = 1 + mask_len+1 + 3;
 
 	SHOWMSG("SMB call readdir_short");
 	D(("         mask = '%s'", escape_name(mask)));
@@ -2883,16 +2555,16 @@ smb_proc_readdir_short (
 		{
 			SHOWMSG("reading first directory entries");
 
-			ASSERT( smb_payload_size(server, 2, 1 + mask_size + 3) >= 0 );
+			ASSERT( smb_payload_size(server, 2, mask_size) >= 0 );
 
-			p = smb_setup_header (server, SMBsearch, 2, 1 + mask_size + 3);
+			p = smb_setup_header (server, SMBsearch, 2, mask_size);
 			WSET (buf, smb_vwv0, entries_asked);
 			WSET (buf, smb_vwv1, SMB_FILE_ATTRIBUTE_DIRECTORY);
 
 			if(server->unicode_enabled)
 			{
 				(*p++) = 4; /* A NUL-terminated string follows. */
-				p += copy_latin1_to_utf16le(server, p, mask_size, mask, mask_len);
+				p += copy_latin1_to_utf16le(p,2 * (mask_len+1),mask,mask_len);
 			}
 			else
 			{
@@ -2910,7 +2582,6 @@ smb_proc_readdir_short (
 
 			SHOWMSG("reading next directory entries");
 
-			// TODO: Tygre
 			if(server->unicode_enabled)
 				size = 1 + 2 * (1) + 3 + SMB_RESUME_KEY_SIZE;
 			else
@@ -2926,7 +2597,7 @@ smb_proc_readdir_short (
 			if(server->unicode_enabled)
 			{
 				(*p++) = 4; /* A NUL-terminated string follows. */
-				p += copy_latin1_to_utf16le(server, p,2 * (1),"",0);
+				p += copy_latin1_to_utf16le(p,2 * (1),"",0);
 			}
 			else
 			{
@@ -3196,7 +2867,7 @@ smb_decode_long_dirent (
 
 				if(server->unicode_enabled)
 				{
-					copy_utf16le_to_latin1(server, finfo->complete_path, finfo->complete_path_size, name, name_len);
+					copy_utf16le_to_latin1(finfo->complete_path, finfo->complete_path_size, name, name_len);
 				}
 				else
 				{
@@ -3322,7 +2993,7 @@ smb_decode_long_dirent (
 
 				if(server->unicode_enabled)
 				{
-					copy_utf16le_to_latin1(server, finfo->complete_path, finfo->complete_path_size, p, name_len);
+					copy_utf16le_to_latin1(finfo->complete_path, finfo->complete_path_size, p, name_len);
 				}
 				else
 				{
@@ -3542,7 +3213,7 @@ smb_proc_readdir_long (
 
 		if(server->unicode_enabled)
 		{
-			copy_latin1_to_utf16le(server, p,pattern_size,pattern,pattern_len);
+			copy_latin1_to_utf16le(p,pattern_size,pattern,pattern_len);
 		}
 		else
 		{
@@ -3785,33 +3456,20 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	D(("path='%s'", escape_name(path)));
 
 	if(server->unicode_enabled)
-	{
-		// Tygre 2015/05/29: Size in UTF16
-		// The size is that of the bytes stored,
-		// plus the Latin1 path as prefix, not
-		// two bytes per char anymore in UTF16.
-		path_size = size_utf16le_of_latin1(server, path);
-		if(-1 == path_size)
-		{
-			// Default size
-			path_size = 2 * (len + 1);
-		}
-	}
+		path_size = 1 + 2 * (len + 1);
 	else
-	{
-		path_size = len + 1;
-	}
+		path_size = 1 + len + 1;
 
-	ASSERT( smb_payload_size(server, 0, 1 + path_size) >= 0 );
+	ASSERT( smb_payload_size(server, 0, path_size) >= 0 );
 
  retry:
 
-	p = smb_setup_header (server, SMBgetatr, 0, 1 + path_size);
+	p = smb_setup_header (server, SMBgetatr, 0, path_size);
 
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A NUL-terminated string follows. */
-		copy_latin1_to_utf16le(server, p, path_size, path, len);
+		copy_latin1_to_utf16le(p,2 * (len+1),path,len);
 	}
 	else
 	{
@@ -3822,13 +3480,9 @@ smb_proc_getattr_core (struct smb_server *server, const char *path, int len, str
 	if (result < 0)
 	{
 		if ((*error_ptr) != error_check_smb_error && smb_retry (server))
-		{
 			goto retry;
-		}
 		else
-		{
 			goto out;
-		}
 	}
 
 	entry->attr = WVAL (buf, smb_vwv0);
@@ -3946,7 +3600,7 @@ smb_query_path_information(
 
 		if(server->unicode_enabled)
 		{
-			copy_latin1_to_utf16le(server, p,path_size,path,len);
+			copy_latin1_to_utf16le(p,path_size,path,len);
 		}
 		else
 		{
@@ -4043,7 +3697,7 @@ smb_query_path_information(
 		 * text is provided as 16 bit characters,
 		 * even if Unicode mode is not enabled.
 		 */
-		copy_utf16le_to_latin1(server, name, sizeof(name), file_name, file_name_length / sizeof(word));
+		copy_utf16le_to_latin1(name, sizeof(name), file_name, file_name_length / sizeof(word));
 
 		entry_size_quad.Low		= entry->size_low;
 		entry_size_quad.High	= entry->size_high;
@@ -4259,24 +3913,11 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 		return(0);
 
 	if(server->unicode_enabled)
-	{
-		// Tygre 2015/05/29: Size in UTF16
-		// The size is that of the bytes stored,
-		// plus the Latin1 path as prefix, not
-		// two bytes per char anymore in UTF16.
-		path_size = size_utf16le_of_latin1(server, path);
-		if(-1 == path_size)
-		{
-			// Default size
-			path_size = 2 * (len + 1);
-		}
-	}
+		path_size = 1 + 2 * (len + 1);
 	else
-	{
-		path_size = len + 1;
-	}
+		path_size = 1 + len + 1;
 
-	ASSERT( smb_payload_size(server, 8, 1 + path_size) >= 0 );
+	ASSERT( smb_payload_size(server, 8, path_size) >= 0 );
 
 	/* We cache these because if the connection needs to be
 	 * reestablished, the direntry values will all get
@@ -4315,7 +3956,7 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 
  retry:
 
-	p = smb_setup_header (server, SMBsetatr, 8, 1 + path_size);
+	p = smb_setup_header (server, SMBsetatr, 8, path_size);
 	WSET (buf, smb_vwv0, attr);
 	DSET (buf, smb_vwv1, local_time);
 	WSET (buf, smb_vwv3, 0);
@@ -4327,7 +3968,7 @@ smb_proc_setattr_core (struct smb_server *server, const char *path, int len, con
 	if(server->unicode_enabled)
 	{
 		(*p++) = 4; /* A NUL-terminated string follows. */
-		p += copy_latin1_to_utf16le(server, p, path_size, path, len);
+		p += copy_latin1_to_utf16le(p,2 * (len+1),path,len);
 	}
 	else
 	{
@@ -5047,23 +4688,22 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 				const char * s;
 				int l;
 
-				// TODO: Tygre
-				copy_latin1_to_utf16le(server, p,2 * (user_len + 1),server->mount_data.username,user_len);
+				copy_latin1_to_utf16le(p,2 * (user_len + 1),server->mount_data.username,user_len);
 				p += 2 * (user_len + 1);
 
 				s = server->mount_data.workgroup_name;
 				l = strlen(s);
-				copy_latin1_to_utf16le(server, p,2 * (l + 1),s,l);
+				copy_latin1_to_utf16le(p,2 * (l + 1),s,l);
 				p += 2 * (l + 1);
 
 				s = native_os;
 				l = strlen(s);
-				copy_latin1_to_utf16le(server, p,2 * (l + 1),s,l);
+				copy_latin1_to_utf16le(p,2 * (l + 1),s,l);
 				p += 2 * (l + 1);
 
 				s = native_lanman;
 				l = strlen(s);
-				copy_latin1_to_utf16le(server, p,2 * (l + 1),s,l);
+				copy_latin1_to_utf16le(p,2 * (l + 1),s,l);
 			}
 			/* No, just use OEM strings. */
 			else
@@ -5210,13 +4850,9 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 			(*p++) = 0;
 
 		if(server->unicode_enabled)
-		{
-			copy_latin1_to_utf16le(server, p,share_name_size,share_name,share_name_len);
-		}
+			copy_latin1_to_utf16le(p,share_name_size,share_name,share_name_len);
 		else
-		{
 			memcpy(p,share_name,share_name_size);
-		}
 
 		p += share_name_size;
 

@@ -32,6 +32,7 @@
 
 .c.o:
 	sc $(CFLAGS) $<
+	@ctags >tagfiles/$* $<
 
 .asm.o:
 	asm $(ASMFLAGS) $<
@@ -96,10 +97,9 @@ LFLAGS = \
 
 ###############################################################################
 
-# Tygre: added KVS
 OBJS = \
 	main.o cp437.o cp850.o crypt.o dump_smb.o parse-smb-url.o proc.o \
-	quad_math.o smb_abstraction.o sock.o splay.o swap_stack_and_call.o kvs.o
+	quad_math.o smb_abstraction.o sock.o splay.o swap_stack_and_call.o
 
 ###############################################################################
 
@@ -112,6 +112,9 @@ $(PROJECT): $(OBJS) system_headers.gst Assert.o
 	slink $(OBJS) to $@.debug lib $(LIBS) Assert.o $(LFLAGS) \
 		map $(PROJECT).map,fhx fwidth 32 pwidth 32 swidth 32
 	slink $@.debug to $@ noicons nodebug
+	@type tagfiles/\#? >t:tags
+	@copy t:tags ""
+	@delete >nil: t:tags
 
 system_headers.gst: system_headers.h system_headers.c
 	gst unload $@
@@ -122,7 +125,6 @@ exall-example: exall-example.c
 
 ###############################################################################
 
-# Tygre: added KVS
 assert.o : assert.c
 cp437.o : cp437.c
 cp850.o : cp850.c
@@ -130,12 +132,11 @@ crypt.o : crypt.c system_headers.h assert.h quad_math.h splay.h smbfs.h
 dump_smb.o : dump_smb.c system_headers.h assert.h quad_math.h splay.h smbfs.h dump_smb.h
 main.o : main.c system_headers.h assert.h quad_math.h splay.h smbfs.h smb_abstraction.h cp437.h cp850.h errors.h dump_smb.h parse-smb-url.h smbfs_rev.h
 parse-smb-url.o : parse-smb-url.c system_headers.h assert.h quad_math.h splay.h smbfs.h parse-smb-url.h
-proc.o : proc.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smbfs_rev.h kvs.h
+proc.o : proc.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smbfs_rev.h
 quad_math.o : quad_math.c quad_math.h
-smb_abstraction.o : smb_abstraction.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smb_abstraction.h kvs.h
+smb_abstraction.o : smb_abstraction.c system_headers.h assert.h quad_math.h splay.h smbfs.h errors.h smb_abstraction.h
 sock.o : sock.c system_headers.h assert.h quad_math.h splay.h smbfs.h smb_abstraction.h dump_smb.h errors.h
 splay.o : splay.c system_headers.h assert.h quad_math.h splay.h smbfs.h
-kvs.o : kvs.c
 
 ###############################################################################
 

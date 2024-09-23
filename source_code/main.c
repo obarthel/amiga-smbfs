@@ -35,8 +35,6 @@
  * Samba 3.0.25: smbfs debuglevel=2 debugfile=ram:samba-3.0.25.log smb://olsen:...@192.168.1.118/olsen
  *
  * diskspeed drive olsen:Documents dir seek fast byte nocpu
- * diskspeed drive ubuntu-test: dir nocpu buf1=0 buf2=0 buf3=0 buf4=0
- * diskspeed drive ubuntu-test: nocpu byte fast buf1=512
  */
 
 #include "smbfs.h"
@@ -1607,11 +1605,6 @@ main(void)
 		report_error("'UNICODE' parameter must be either 'ON' or 'OFF'.");
 		goto out;
 	}
-
-	// Tygre 2021/04/30: Mutual exclusion
-	// SMBFS should warn if options TRANSLATE
-	// and UNICODE=ON are combined, because
-	// TRANSLATE silently switches OFF UNICODE.
 
 	/* Code page based translation using a file disables
 	 * Unicode support and the built-in CP437 and CP850
@@ -10482,6 +10475,7 @@ file_system_handler(
 	 * doesn't happen).
 	 */
 	Quiet = TRUE;
+
 	done = FALSE;
 
 	if(raise_priority)

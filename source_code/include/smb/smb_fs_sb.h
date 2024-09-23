@@ -18,8 +18,6 @@
 #include <smb/smb_mount.h>
 #endif /* _SMB_MOUNT_H */
 
-#include "kvs.h"
-
 struct smb_server
 {
 	enum smb_protocol protocol;		/* The protocol this
@@ -90,10 +88,6 @@ struct smb_server
 
 	/* olsen (2018-06-11): Prefer SMB core protocol commands over NT1 commands. */
 	int prefer_core_protocol;
-
-	// Tygre 21/05/15: Stores for UTF16le strings and their sizes
-	KVSstore *latin1_to_utf16le_bytes;
-	KVSstore *latin1_to_utf16le_sizes;
 };
 
 #endif
