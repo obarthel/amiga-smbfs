@@ -61,14 +61,14 @@ Password: Domain=[ARBEITSGRUPPE] OS=[AmigaOS] Server=[Samba 2.0.7]
 
 The share name to connect to would be `ALL`.
 
-You may need to know which login name and which password are required to connect to the shared disk.
+You may need to know which login name and which password is required to connect to the shared disk.
 
 Very rarely, you would need to know the name of the work group or domain which the file server is a member of. In the example above, the name of the domain would be `ARBEITSGRUPPE`.
 
 
 ## 4. Starting and stopping the file system
 
-**smbfs** is an uncommon kind of file system in that you do not use the `Mount` command to mount it. In fact, **smbfs** is a program which can be launched from the shell, using command line parameters to tell it which disk should be used. But you can also start it from Workbench: in this case you would have to put the program's command line options into icon tool types.
+**smbfs** is an uncommon kind of file system in that you do not use the `Mount` command to mount it. In fact, **smbfs** is a program which can be launched from the shell, using command line parameters to tell it which disk should be used. But you can also start it from Workbench: in this case, you would have to put the program's command line options into icon tool types.
 
 Please note that if you start **smbfs** from Workbench, you will not be able to stop **smbfs** using the `Status` and `Break` shell commands.
 
@@ -121,7 +121,7 @@ Process 10: Loaded as command: SMBFS '//sourcery/all'
 
 Look at the last line describing process number 10: it shows the name of the file system program **smbfs** and the name of the *SMB* share it is connected to.
 
-To stop this file system and effectively unmount it, use the shell `Break` command; in this case you would enter `Break 10` to stop the file system.
+To stop this file system and effectively unmount it, use the shell `Break` command; in this case, you would enter `Break 10` to stop the file system.
 
 Note that the **smbfs** program may not quit immediately. It may have to wait until the last client has released all the resources it obtained from the file system.
 
@@ -129,7 +129,7 @@ You may have to send more than one `Break` command to stop the **smbfs** program
 
 ### 4.3. Temporarily disabling the file system
 
-If, for example, you need to temporarily shut down the network, **smbfs** will be unable to do its job, at least until the network becomes operational again. In the mean time *Workbench* and other programs will keep accessing the file system and may get stuck.
+If, for example, you need to temporarily shut down the network, **smbfs** will be unable to do its job, at least until the network becomes operational again. In the meantime, *Workbench* and other programs will keep accessing the file system and may get stuck.
 
 You can avoid most of these problems by temporarily disabling the file system until it can access the network again. For this to work, you need to start the **smbfs** program in the shell and use the `VOLUMENAME` option, which will make a disk icon appear in the *Workbench* window.
 
@@ -208,11 +208,11 @@ This parameter takes the form of `//server-name/share-name` or `//server-name:po
 For example `//sourcery/all`, `//192.168.0.1/all`, `//nas:445/files`, `//nas:microsoft-ds/files`, `smb://sourcery/all`, `smb://user@sourcery/all`
 and `smb://user:password@sourcery/all` would all be valid `SHARE` parameters.
 
-In this example `server-name` must be either the IPv4 address of the file server to connect to, or the name of the server (**note that server names cannot be longer than 16 characters**).
+In this example, `server-name` must be either the IPv4 address of the file server to connect to, or the name of the server (**note that server names cannot be longer than 16 characters**).
 
 If necessary, you can specify which port number should be used when making the connection. The port number is optional, though. In place of the port (e.g. 445) number you can also use the name of a TCP/UDP service (e.g. `microsoft-ds`).
 
-Finally, you need to tell the *SMB* server which service you want to connect to, which for the **smbfs** program should be the name of a shared network file system. In the example the name of the shared network file system would be `share-name`.
+Finally, you need to tell the *SMB* server which service you want to connect to, which for the **smbfs** program should be the name of a shared network file system. In the example, the name of the shared network file system would be `share-name`.
 
 Unless you use the `VOLUMENAME` option (e.g. `VOLUMENAME=MyData`), **smbfs** will pick a volume name identical to the share name, e.g for `//nas:445/pictures` the volume name would be `pictures` and a disk icon named **pictures** will appear in the Workbench window.
 
@@ -220,22 +220,22 @@ Unless you use the `VOLUMENAME` option (e.g. `VOLUMENAME=MyData`), **smbfs** wil
 
 In order to connect to an *SMB* share, the server requires that a user name is provided. If you omit the user name, the **smbfs** program will use `GUEST` as a replacement.
 
-If you do provide a user name, **it must not be longer than 63 characters**. Unless you use the `CHANGEUSERNAMECASE=NO` option the name you provide will be translated to all upper case characters.
+If you do provide a user name, **it must not be longer than 63 characters**. Unless you use the `CHANGEUSERNAMECASE=NO` option, the name you provide will be translated to all upper case characters.
 
-You need not provide for a user name on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
+You do not need to provide a user name on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
 
 <pre>
 SetEnv smbfs_username *your user name*
 Copy ENV:smbfs_username ENVARC:
 </pre>
 
-You may also use the `smbfs_user` environment variable in place of the `smbfs_username` variable. The two are aliases for one another, but **smbfs** will read only one of the two.
+You may also use the `smbfs_user` environment variable in place of the `smbfs_username` variable. The two are aliases for one another, but **smbfs** will read just one of the two.
 
 #### 5.1.3. `PASSWORD/K`
 
 You may not need to provide a password in order to connect to an *SMB* share. If you omit it, the **smbfs** program will use an empty password.
 
-You need not provide for a password on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
+You do need to provide a password on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
 
 <pre>
 SetEnv smbfs_password *your password*
@@ -248,15 +248,15 @@ The authentication process only works if the machine you are connecting to knows
 
 #### 5.1.4. `CHANGEUSERNAMECASE/K`
 
-Many file servers require that the user name is provided in all-upper-case characters or they will refuse to grant you access. This is why **smbfs** defaults to convert the user name to all-upper-case characters.
+Many file servers require that the user name is provided in all-upper-case characters, or they will refuse to grant you access. This is why **smbfs** defaults to convert the user name to all-upper-case characters.
 
 However, some file servers such as the **Solaris**/**OpenSolaris**/**OpenIndiana** SMB server require that the user name matches exactly and the conversion to all-upper-case characters will cause trouble.
 
-In order to disable the user name case conversion use the `CHANGEUSERNAMECASE=NO` option. If you omit the `CHANGEUSERNAMECASE` option altogether it will default to `CHANGEUSERNAMECASE=YES`.
+In order to disable the user name case-conversion, use the `CHANGEUSERNAMECASE=NO` option. If you omit the `CHANGEUSERNAMECASE` option altogether, it will default to `CHANGEUSERNAMECASE=YES`.
 
 #### 5.1.5. `CHANGEPASSWORDCASE/K`
 
-By default the password you provide with the `PASSWORD` option will not be changed before it is used for accessing the server's shared network file system.
+By default, the password you provide with the `PASSWORD` option will not be changed before it is used for accessing the server's shared network file system.
 
 However, it may be required to change the password to all-uppercase characters before it can be used. If this is necessary, you should either provide the password in this form or use the `CHANGEPASSWORDCASE=YES` option, which will cause it to be translated to all upper case characters.
 
@@ -264,7 +264,7 @@ Please note that the `CHANGEPASSWORDCASE` option will cause the `CHANGECASE` opt
 
 #### 5.1.6. `CHANGECASE/S`
 
-By default the password you provide with the `PASSWORD` option will not be changed before it is used for accessing the server's shared network file system.
+By default, the password you provide with the `PASSWORD` option will not be changed before it is used for accessing the server's shared network file system.
 
 However, it may be required to change the password to all-uppercase characters before it can be used. If this is necessary, you should either provide the password in this form or resort to the `CHANGECASE` option, which will cause it to be translated to all upper case characters.
 
@@ -274,26 +274,26 @@ This option may be omitted, in which case the **smbfs** program will ask the fil
 
 You should not need to specify the name of the work group or domain which the file server to connect to is a member of. However, if you do need to use it, you must **make sure that the name is not longer than 16 characters**. The name you provide will be translated to all upper case characters.
 
-You need not provide for a work group or domain name on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
+You do not need to provide a work group or domain name on the command line. Alternatively, you may configure an environment variable whose contents will be used instead. The variable could be set up like this:
 
 <pre>
 SetEnv smbfs_workgroup *name of domain or work group*
 Copy ENV:smbfs_workgroup ENVARC:
 </pre>
 
-You may also use the `smbfs_domain` environment variable in place of the `smbfs_workgroup` variable. The two are aliases for one another, but **smbfs** will read only one of the two.
+You may also use the `smbfs_domain` environment variable in place of the `smbfs_workgroup` variable. The two are aliases for one another, but **smbfs** will read just one of the two.
 
 #### 5.1.8. `NETBIOS/S`
 
 Older server software such as *Microsoft Windows XP* may not respond to the requests of the **smbfs** program to connect to the shared network file system.
 
-If the connection attempt fails immediately you may want to try the `NETBIOS` switch which tells the **smbfs** program to use an older protocol when trying to talk to the server.
+If the connection attempt fails immediately, you may want to try the `NETBIOS` switch which tells the **smbfs** program to use an older protocol when trying to talk to the server.
 
 #### 5.1.9. `CLIENT=CLIENTNAME/K`
 
 The **smbfs** program will attempt to connect to the file server by providing the name of the computer you connect from.
 
-In some cases this may be undesirable as the computer's name differs from what the file server expects.
+In some cases this may be undesirable, as the computer's name differs from what the file server expects.
 
 You can use the `CLIENT` parameter to tell **smbfs** under which name it should announce itself to the server.
 
@@ -305,7 +305,7 @@ Please note that the `CLIENT` parameter will be ignored unless the `NETBIOS` swi
 
 **smbfs** will attempt to connect to the file server by providing the name you specified using the `SHARE` option.
 
-In some cases this may be undesirable as the server's name differs from what you specified as the share name. You can use the `SERVER` parameter to tell **smbfs** under which name it should contact the server.
+In some cases this may be undesirable, as the server's name differs from what you specified as the share name. You can use the `SERVER` parameter to tell **smbfs** under which name it should contact the server.
 
 This parameter is optional and will be translated to all upper case characters; **it cannot be longer than 16 characters**.
 
@@ -317,7 +317,7 @@ The shared network file system may not be using the same character set as your A
 
 The built-in default translation method should cover the original Amiga character set (*ISO-8859-1*, also known as *ISO-Latin-1*), but you have a choice to use a different method.
 
-Please note that you can only pick one translation method, unless you disable translation altogether.
+Please note that you can only pick one translation method unless you disable translation altogether.
 
 Also note that file and drawer names which cannot be represented on the Amiga due to lack of a suitable translation will be treated like "hidden" files and drawers. Names which are not safe to use on the Amiga, on account of containing reserved characters, will be "hidden" as well.
 
@@ -335,7 +335,7 @@ The `CP437` switch disables Unicode support.
 
 #### 5.2.3. `CP850/S`
 
-The switch `CP850` enables a code page-based translation which works well enough with old *Samba* versions. "CP850" stands for *code page 850*, which is a variant of what the original IBM-PC would use. This variant is intended to be used in western Europe and is more compatible with the *ISO-8859-1* character set than the "CP437" variant.
+The switch `CP850` enables a code page-based translation which works well enough with old *Samba* versions. "CP850" stands for *code page 850*, which is a variant of what the original IBM-PC would use. This variant is intended to be used in Western Europe and is more compatible with the *ISO-8859-1* character set than the "CP437" variant.
 
 The `CP850` switch disables Unicode support.
 
@@ -345,9 +345,9 @@ How the individual names are to be translated is determined by the contents of a
 
 The first 256 bytes of each such file must consist of the mapping of Amiga characters (this would be the *ISO-8859-1* character set) to the different character set, and the second 256 characters must describe a mapping back from the different character set to the Amiga.
 
-In most cases the `L:FileSystem_Trans/INTL.crossdos` translation table file should be sufficient.
+In most cases, the `L:FileSystem_Trans/INTL.crossdos` translation table file should be sufficient.
 
-To specify which file contains the translation tables to use you would use the `TRANSLATIONFILE` parameter, e.g. `TRANSLATIONFILE=L:FileSystem_Trans/INTL.crossdos`. However, you might want to try the `CP850` switch instead which should produce the same effect.
+To specify which file contains the translation tables, you would use the `TRANSLATIONFILE` parameter, e.g. `TRANSLATIONFILE=L:FileSystem_Trans/INTL.crossdos`. However, you might want to try the `CP850` switch instead which should produce the same effect.
 
 The `TRANSLATE` option disables Unicode support.
 
@@ -357,9 +357,9 @@ You may be able to put the **smbfs** program to good use, but overall performanc
 
 #### 5.3.1. `CACHE=CACHESIZE/N/K`
 
-The file system attempts to optimize accesses to the file server when directory entries are being read.
+The file system attempts to optimize access to the file server when directory entries are being read.
 
-This information is stored in a cache which by default will hold up to 170 entries. Since each entry will require about 255 bytes of storage, the entire 170 entry cache will occupy more than 40 KB of memory.
+This information is stored in a cache which by default will hold up to 170 entries. Since each entry will require about 255 bytes of storage, the entire 170-entry cache will occupy more than 40 KB of memory.
 
 You may want to change this requirement, by making the cache smaller or larger using the `CACHESIZE` parameter. The size of the cache cannot be smaller than 10 entries.
 
@@ -367,11 +367,11 @@ You may want to change this requirement, by making the cache smaller or larger u
 
 The cache can be used only by one directory at a time, which can cause problems if you are trying to delete a complete directory hierarchy, with several subdirectories (and their respective subdirectories). The cache will have to be refilled for each directory currently being processed. Consequently, **smbfs** will lose track of where it was when it read from the previous directory it was dealing with and must start over again.
 
-You can mitigate these effects by increasing the number of caches which **smbfs** may use at a time. By default only a single cache, for a single directory, will be active (`CACHETABLES=1`). You can use more directory caches if you want to, but keep in mind that each cache will consume extra memory. If you want to use multiple caches, you might want to reduce the cache size.
+You can mitigate these effects by increasing the number of caches which **smbfs** may use at a time. By default, only a single cache, for a single directory, will be active (`CACHETABLES=1`). You can use more directory caches if you want to, but keep in mind that each cache will consume extra memory. If you want to use multiple caches, you might want to reduce the cache size.
 
 #### 5.3.3. `RAISEPRIORITY/S`
 
-The **smbfs** program can be run at a higher priority than it would normally do (normal would be priority 0), which might increase performance, but raise system load, too. If the `RAISEPRIORITY` switch is used, the **smbfs** program will run at the same priority as other Amiga file systems do (this would be priority 10).
+The **smbfs** program can be run at a higher priority than it would normally do (normal would be priority 0), which might increase performance, but raise the system-load, too. If the `RAISEPRIORITY` switch is used, the **smbfs** program will run at the same priority as other Amiga file systems do (this would be priority 10).
 
 #### 5.3.4. `TIMEOUT/N/K`
 
@@ -381,7 +381,7 @@ You can set the number of seconds which have to pass before the **smbfs** progra
 
 #### 5.3.5. `WRITEBEHIND/S`
 
-The **smbfs** program can try to improve write performance by not waiting for the server to confirm that all the data just transmitted has in fact been stored. There is a risk involved in that the server may not have been able to store the data and you will never know about it.
+The **smbfs** program can try to improve write performance by not waiting for the server to confirm that all the data just transmitted has in fact been stored. There is a risk involved in that the server may not have been able to store the data, and you will never know about it.
 
 Please note that the `WRITEBEHIND` switch has no effect if `PROTOCOL=nt1` is used because the **smbfs** program will then be using a different server write command which does not support the "write behind" functionality.
 
@@ -403,15 +403,15 @@ Through the `READTHRESHOLD` and `WRITETHRESHOLD` options you can control the min
 
 ### 5.4. Compatibility
 
-Both the file server and the software running on your Amiga may suffer from compatibility issues. For example, Amiga programs may be unable to deal with file names longer than 30 characters and then crash as a result. For some of these issues workarounds may be available.
+Both the file server and the software running on your Amiga may suffer from compatibility issues. For example, Amiga programs may be unable to deal with file names longer than 30 characters and then crash as a result. Workarounds may be available for some of these issues.
 
 #### 5.4.1. `CASE=CASESENSITIVE/S`
 
 Some file servers treat files and drawers as different if their names differ only in whether individual letters are using upper/lower case characters. For example, on the Amiga we can expect that names such as `Work:File1` and `Work:file1` would refer to the same file, but you cannot expect this assumption to hold true for shared network file systems.
 
-For file servers which would see `File1` and `file1` as different names you should activate the `CASESENSITIVE` switch to treat those files as being different.
+For file servers which would see `File1` and `file1` as different names, you should activate the `CASESENSITIVE` switch to treat those files as being different.
 
-There is a catch, though: the AmigaDOS file naming scheme does not follow this model and you may run into problems when you are trying to use it. For example, in case sensitive mode attempting to access a file called `FILENAME` as `filename` or `Filename` will fail; you can access it only under the original name `FILENAME`.
+There is a catch, though: the AmigaDOS file naming scheme does not follow this model, and you may run into problems when you are trying to use it. For example, in case-sensitive mode, attempting to access a file called `FILENAME` as `filename` or `Filename` will fail; you can access it only under the original name `FILENAME`.
 
 By default, the **smbfs** program does not treat file and drawer names differently which only differ with respect to the case of letters.
 
@@ -447,7 +447,7 @@ You can fine-tune the size of the transmission buffer which the **smbfs** progra
 
 The minimum transmission buffer size is 8000 bytes (this is also the default buffer size), and the maximum permitted size is 65535 bytes.
 
-Please note that the transmission buffer size you asked for need not be accepted by the file server, which may choose to use a much smaller buffer.
+Please note that the transmission buffer size you asked for may not be accepted by the file server, which may choose to use a much smaller buffer.
 
 #### 5.4.6. `PROTOCOL/K`
 
@@ -473,15 +473,15 @@ The default is `SESSIONSETUP=DELAY` which works both with *Samba*, and seems to 
 
 The file server which the **smbfs** program connects to may not share the exact system time with your Amiga. Typically, it will expect file and drawer modification time information to be recorded in Universally Coordinated Time (UTC), rather than your local time zone (and the effects of daylight savings time).
 
-You can, and should tell the **smbfs** program how far the local Amiga time deviates from UTC. By default the **smbfs** program will try to use the time zone information configured in the "Locale" preferences. This may not be sufficient, or even the wrong choice.
+You can, and should tell the **smbfs** program how far the local Amiga time deviates from UTC. By default, the **smbfs** program will try to use the time zone information configured in the "Locale" preferences. This may not be sufficient, or even the wrong choice.
 
 #### 5.5.1. `TZ=TIMEZONEOFFSET/N/K`
 
-By default the file system will use the current Locale settings to translate between the local time and the time used by the file server.
+By default, the file system will use the current Locale settings to translate between the local time and the time used by the file server.
 
-For some configurations, however, this is impractical since the server's time zone is not configured properly. For these rare cases you may want to hard code a certain time zone offset using the `TIMEZONEOFFSET` option.
+For some configurations, however, this is impractical since the server's time zone is not configured properly. For these rare cases, you may want to hard-code a certain time zone offset using the `TIMEZONEOFFSET` option.
 
-You need to provide the number of minutes to subtract from the local time in order to translate it into the corresponding UTC value. For example, in central Europe using CET, you would use `TZ=60` since CET is one hour ahead of UTC.
+You need to provide the number of minutes to subtract from the local time in order to translate it into the corresponding UTC value. For example, in Central Europe using CET, you would use `TZ=60` since CET is one hour ahead of UTC.
 
 If you use the `TIMEZONEOFFSET` option, then the **smbfs** program will ignore the time zone information configured in the "Locale" preferences.
 
@@ -495,16 +495,16 @@ Note that **smbfs** does not know when daylight savings time begins and ends. It
 
 ### 5.6. Miscellaneous
 
-#### 5.6.1. `DEVICE=DEVICENAME/K`, `ADDVOLUME/K` and  `VOLUME=VOLUMENAME/K`
+#### 5.6.1. `DEVICE=DEVICENAME/K`, `ADDVOLUME/K` and `VOLUME=VOLUMENAME/K`
 
-By default the **smbfs** program will pick a unique file system device name such as `smbfs0:` and a volume name which is identical to the share name. For example, for `//192.168.0.1/pictures` the volume name would be `pictures` and a disk icon named **pictures** will appear in the Workbench window.
+By default, the **smbfs** program will pick a unique file system device name such as `smbfs0:` and a volume name which is identical to the share name. For example, for `//192.168.0.1/pictures` the volume name would be `pictures` and a disk icon named **pictures** will appear in the Workbench window.
 
 You may override the device name which **smbfs** will use, e.g. the `DEVICE=nas:` option will try to use `nas:` if possible. Please note that a device name has to be unique and **smbfs** may refuse to use it if there is already a file system device of that name.
 
 You can tell **smbfs** not to add a volume, which may be useful because the native Amiga Samba port can hang as soon as the file system is started. In such cases, use the `ADDVOLUME=NO` option. Please note that the `ADDVOLUME=NO` option will keep **smbfs** from showing the file system's disk icon in the Workbench window. If you omit the `ADDVOLUME` option, **smbfs** will pretend that `ADDVOLUME=YES` was in effect.
 
 If you want to use a specific volume name, use the `VOLUME` option,
-e.g. `VOLUME=Sourcery:`. Otherwise a volume name derived from the share name will be used instead.
+e.g. `VOLUME=Sourcery:`. Otherwise, a volume name derived from the share name will be used instead.
 
 #### 5.6.2. `READONLY/S`
 
@@ -516,7 +516,7 @@ mounted and the protection cannot be removed with the `Lock` shell command.
 
 #### 5.6.3. `OMITHIDDEN/S`
 
-When requesting a directory listing, the file server may return some files and drawers tagged as being hidden. By default **smbfs** will not treat these "hidden" entries any different from the other directory entries, i.e. they are not hidden from view.
+When requesting a directory listing, the file server may return some files and drawers tagged as being hidden. By default, **smbfs** will not treat these "hidden" entries any different from the other directory entries, i.e. they are not hidden from view.
 
 You can request that the hidden entries should be omitted from directory listings by using the `OMITHIDDEN` switch.
 
@@ -571,11 +571,11 @@ If the file already exists, debug output will be appended to it.
 
 #### 5.7.2. `DEBUGLEVEL=DEBUG/N/K`
 
-By default the **smbfs** program operates in silent mode. It does not report what it is doing, it just tries to respond to file system requests. To obtain debugging output you may want to use the `DEBUG` option and specify a debug level greater than 0, e.g. `DEBUG=2`. The larger the number you specify the more debugging output will be created.
+By default the **smbfs** program operates in silent mode. It does not report what it is doing, it just tries to respond to file system requests. To obtain debugging output, you may want to use the `DEBUG` option and specify a debug level greater than 0, e.g. `DEBUG=2`. The larger the number you specify, the more debugging output will be created.
 
 Note that unless you state which file the debug output should be written to, all debugging output will be sent to the shell window.
 
-If you launched the **smbfs** program from *Workbench*, debug output will be produced using the operating system's debug output functionality which requires that you have a capturing program like *Sashimi* running in the background.
+If you launched the **smbfs** program from *Workbench*, debug output will be produced using the operating system's debug output functionality, which requires that you have a capturing program such as *Sashimi* running in the background.
 
 
 ## 6. Known problems
@@ -584,7 +584,7 @@ The design of **smbfs** follows the original file system concept behind the code
 
 - Single threaded design
 
-This means that it is not possible for several programs to fairly share the use of the file system. For example, a program that posts a long read request can tie up the file system almost exclusively for itself, and while it is busy all other clients will have to wait. Same goes for directory scanning.
+This means that it is not possible for several programs to fairly share the use of the file system. For example, a program that posts a long read-request can tie up the file system almost exclusively for itself, and while it is busy, all other clients will have to wait. The same goes for directory scanning.
 
 - Poor scalability
 
@@ -594,7 +594,7 @@ This is associated with the single threaded design. When several programs are ac
 
 This means that the core of the file system treats the contents of a directory and the data attached to each file inside that directory as something different. This is a common concept with Unix file systems, but it is very different with Amiga file systems. In **smbfs** this data separation can cause problems when deleting files from a directory while that directory is being scanned, such as how this is being done by the `Delete` shell command. The effects of these problems are that a directory may not be deleted even though it is empty or that for the same directory the same file may be reported twice in the listing.
 
-While there are no easy solutions for any of these problems, it does not mean that **smbfs** is unusable. You just have to be more careful when you use the file system. For example, if a directory's contents cannot be deleted due to one of the problems mentioned above, you might want to retry later.
+While there are no easy solutions for any of these problems, it does not mean that **smbfs** is unusable. You may have to be more careful when using the file system. For example, if a directory's contents cannot be deleted due to one of the problems mentioned above, you might want to try again later.
 
 It should be noted that the problems described above are not inherent to the original file system design. It's just that transferring that design to an Amiga file system created the problems.
 
@@ -607,7 +607,7 @@ Subsequent work went into modifying the code, allowing it to be used as a file s
 
 Because **smbfs** is based upon reverse-engineered code, it was always difficult to maintain it, even for minor changes needed to fix small bugs or to improve overall compatibility. How **smbfs** went about when communicating with a remote file server, and why, would remain unclear because the documentation which could shed some light on these matters was unavailable until around 2009/2012.
 
-When I picked up development of **smbfs** again in 2016 I decided that I needed to know more about how the file system is supposed to work if I were ever going to be able to make robust changes to the code.
+When I picked up development of **smbfs** again in 2016, I decided that I needed to know more about how the file system is supposed to work if I were ever going to be able to make robust changes to the code.
 
 This is what led me to collecting more than 30 MB of documentation on **SMBv1**/**CIFS**, **NetBIOS** and the way in which Microsoft operating systems implemented these over the years.
 
@@ -624,7 +624,7 @@ Versions including 1.80 and beyond incorporate changes from the *MorphOS* smbfs 
 
 The password encryption code was lifted from the *Samba* package. It was written by Andrew Tridgell and the Samba Team.
 
-The great majority of changes and bug fixes which found their way into version 2.1 are due to Hubert Maier who patiently tested the various attempts to address the problems he reported.
+The great majority of changes and bug fixes which found their way into version 2.1 are due to Hubert Maier, who patiently tested the various attempts to address the problems he reported.
 
 Renaud Schweingruber kicked off the last stretch of the version 2.1 development work during 2018, encouraging me to complete the work I had begun.
 
@@ -636,13 +636,13 @@ Robert Kidd provided detailed information on how to make the **smbfs** client/se
 
 The *Sharity-Light* source code was adapted, wrapped into an AmigaOS layer, subsequently debugged and enhanced by Olaf Barthel. If you wish to contact me, you can reach me at:
 
-    Olaf Barthel
-    Gneisenaustr. 43
-    D-31275 Lehrte
+Olaf Barthel
+Gneisenaustr. 43
+D-31275 Lehrte
 
 Or via e-mail:
 
-    obarthel [at] gmx.net
+obarthel [at] gmx.net
 
 If you want to submit a bug report or an enhancement request, please enclose sufficient information to allow me to make sense of the problem. That includes debugging logs produced using the `DEBUG` and `DEBUGFILE` options.
 
