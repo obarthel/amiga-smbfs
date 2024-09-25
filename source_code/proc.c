@@ -269,7 +269,7 @@ static void convert_time_t_to_long_date(time_t t, QUAD * long_date);
 /*****************************************************************************/
 
 /* Copy a string in ISO-Latin-1 form (8 bits per character) into a
- * buffer, converting it into a little-endian 16 bit Unicode version
+ * buffer, converting it into a little-endian 16-bit Unicode version
  * of the string. This works because the ISO-Latin-1 character sits
  * within the ASCII/BMP Latin-1 Unicode range.
  *
@@ -318,12 +318,12 @@ copy_latin1_to_utf16le(byte * to,int to_size, const byte * from,int len)
 
 /*****************************************************************************/
 
-/* Copy a string in little-endian 16 bit Unicode into a buffer, converting
+/* Copy a string in little-endian 16-bit Unicode into a buffer, converting
  * it into a ISO-Latin-1 (8 bits per character) version of the string, if
  * possible. Code points beyond the ASCII/BMP Latin-1 character set are
  * replaced by the control character 0x80.
  *
- * Note that the length is given as the number of 16 bit Unicode
+ * Note that the length is given as the number of 16-bit Unicode
  * characters, not the number of bytes required to store the string.
  *
  * This function creates a NUL-terminated ISO-Latin-1 string and
@@ -403,7 +403,7 @@ static size_t strnlen(const char * s,size_t max_size)
 
 /*****************************************************************************/
 
-/* Works just like strnlen(), but operates on 16 bit characters. */
+/* Works just like strnlen(), but operates on 16-bit characters. */
 static size_t strnlen_utf16(const char * s,size_t max_size)
 {
 	size_t result = 0;
@@ -483,7 +483,7 @@ smb_encode_smb_length (byte * p, int len)
 	/* 0x00 = NetBIOS session message */
 	p[0] = 0;
 
-	/* Length is a 17 bit integer, the most significant
+	/* Length is a 17-bit integer, the most significant
 	 * bit of which goes into bit #0. The other 7 bits
 	 * are reserved.
 	 */
@@ -2736,7 +2736,7 @@ convert_long_date_to_time_t(const char * p)
 	ULONG underflow;
 	time_t result;
 
-	/* Extract the 64 bit time value. */
+	/* Extract the 64-bit time value. */
 	long_date.Low	= DVAL(p,0);
 	long_date.High	= DVAL(p,4);
 
@@ -3694,7 +3694,7 @@ smb_query_path_information(
 
 		/* Let's show what the name of the object in
 		 * question is supposed to look like. The
-		 * text is provided as 16 bit characters,
+		 * text is provided as 16-bit characters,
 		 * even if Unicode mode is not enabled.
 		 */
 		copy_utf16le_to_latin1(name, sizeof(name), file_name, file_name_length / sizeof(word));
@@ -4245,7 +4245,7 @@ smb_proc_reconnect (struct smb_server *server, int * error_ptr)
 	 * transmit may vary.
 	 *
 	 * What follows the 4 byte NetBIOS session header must not be
-	 * larger than that an unsigned 17 bit integer can hold. It should
+	 * larger than that an unsigned 17-bit integer can hold. It should
 	 * not be much larger than 65535 bytes, though, since the transmission
 	 * buffer only has some extra 1024 bytes of room at the end.
 	 */

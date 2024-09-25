@@ -636,13 +636,13 @@ Robert Kidd provided detailed information on how to make the **smbfs** client/se
 
 The *Sharity-Light* source code was adapted, wrapped into an AmigaOS layer, subsequently debugged and enhanced by Olaf Barthel. If you wish to contact me, you can reach me at:
 
-Olaf Barthel
-Gneisenaustr. 43
-D-31275 Lehrte
+    Olaf Barthel
+    Gneisenaustr. 43
+    D-31275 Lehrte
 
 Or via e-mail:
 
-obarthel [at] gmx.net
+    obarthel [at] gmx.net
 
 If you want to submit a bug report or an enhancement request, please enclose sufficient information to allow me to make sense of the problem. That includes debugging logs produced using the `DEBUG` and `DEBUGFILE` options.
 

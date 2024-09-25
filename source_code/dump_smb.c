@@ -2324,7 +2324,7 @@ print_smb_contents(const struct smb_header * header,int command,enum smb_packet_
 
 				FPrintf(dump_smb_file,"system time = 0x%08lx%08lx\n",system_time[0],system_time[1]);
 				FPrintf(dump_smb_file,"              %s\n",convert_filetime_to_string(system_time));
-				FPrintf(dump_smb_file,"server time zone = %ld\n",(signed short)next_data_word(parameters,&offset));	/* ZZZ this is a signed 16 bit integer */
+				FPrintf(dump_smb_file,"server time zone = %ld\n",(signed short)next_data_word(parameters,&offset));	/* ZZZ this is a signed 16-bit integer */
 
 				challenge_length = next_data_byte(parameters,&offset);
 				FPrintf(dump_smb_file,"challenge length = %ld\n",challenge_length);

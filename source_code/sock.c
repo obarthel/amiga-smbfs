@@ -69,7 +69,7 @@ smb_encode_smb_length (byte * p, int len)
 	/* 0x00 = NetBIOS session message */
 	p[0] = 0;
 
-	/* Length is a 17 bit integer, the most significant
+	/* Length is a 17-bit integer, the most significant
 	 * bit of which goes into bit #0. The other 7 bits
 	 * are reserved.
 	 */

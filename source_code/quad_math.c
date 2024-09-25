@@ -67,7 +67,7 @@ static ULONG mulhu (ULONG u, ULONG v)
 	return u1 * v1 + w2 + (w1 >> 16);
 }
 
-/* Multiply two 32-bit numbers, yielding a 64 bit result value. */
+/* Multiply two 32-bit numbers, yielding a 64-bit result value. */
 void
 multiply_32_by_32_to_64(ULONG ab,ULONG cd,QUAD * product)
 {
@@ -75,9 +75,9 @@ multiply_32_by_32_to_64(ULONG ab,ULONG cd,QUAD * product)
 	product->Low	= ab * cd;
 }
 
-/* Multiply an unsigned 64 bit quantity by a 32 bit quantity, yielding a 64
- * bit product. Returns the most significant component of the product, which
- * is effectively the 32 bit overflow from the 96 bit product.
+/* Multiply an unsigned 64-bit quantity by a 32-bit quantity, yielding a
+ * 64-bit product. Returns the most significant component of the product,
+ * which is effectively the 32-bit overflow from the 96-bit product.
  */
 ULONG
 multiply_64_by_32_to_64(const QUAD * const abcd,ULONG ef,QUAD * abcdef)
@@ -111,7 +111,7 @@ multiply_64_by_32_to_64(const QUAD * const abcd,ULONG ef,QUAD * abcdef)
 
 /****************************************************************************/
 
-/* Divide a 64-bit integer by a 32-bit integer, filling in a 64 bit quotient
+/* Divide a 64-bit integer by a 32-bit integer, filling in a 64-bit quotient
  * and returning a 32-bit remainder.
  */
 ULONG
@@ -134,14 +134,14 @@ divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient)
 		quotient->Low = (quotient->Low << 1);
 
 		/* Shift the dividend left by one bit. We start
-		 * with the most significant 32 bit portion.
+		 * with the most significant 32-bit portion.
 		 */
 		dividend_ab = (dividend_ab << 1);
 
 		if((dividend_cdef.High & 0x80000000UL) != 0)
 			dividend_ab |= 1;
 
-		/* Now for the middle 32 bit portion. */
+		/* Now for the middle 32-bit portion. */
 		dividend_cdef.High = (dividend_cdef.High << 1);
 
 		if((dividend_cdef.Low & 0x80000000UL) != 0)
@@ -169,8 +169,8 @@ divide_64_by_32(const QUAD * const dividend,ULONG divisor,QUAD * quotient)
 
 /****************************************************************************/
 
-/* Add an unsigned 32 bit quantity to a 64 bit quantity, yielding a
- * 64 bit sum.
+/* Add an unsigned 32-bit quantity to a 64-bit quantity, yielding a
+ * 64-bit sum.
  */
 ULONG
 add_64_plus_32_to_64(const QUAD * const a,ULONG b,QUAD * ab)
@@ -185,8 +185,8 @@ add_64_plus_32_to_64(const QUAD * const a,ULONG b,QUAD * ab)
 
 /****************************************************************************/
 
-/* Add an unsigned 64 bit quantity to a 64 bit quantity, yielding a
- * 64 bit sum.
+/* Add an unsigned 64-bit quantity to a 64-bit quantity, yielding a
+ * 64-bit sum.
  */
 ULONG
 add_64_plus_64_to_64(const QUAD * const a,const QUAD * const b,QUAD * ab)
