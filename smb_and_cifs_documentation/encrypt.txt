@@ -1,0 +1,82 @@
+Extract from  'Protocols for X/Open PC Internetworking: SMB, Version 2'
+X/Open CAE Specification (1992).
+ 
+ 
+Appendix D
+ 
+SMB Encryption Techniques
+ 
+D.1 SMB Authentication
+ 
+The SMB authentication scheme is based upon the server knowing a
+particular encrypted form of the users password, the client system
+constructing that same encrypted form based upon user input, and the
+client passing that encrypted form in a secure fashion to the server so
+that it can verify the clients knowledge.
+ 
+The scheme uses the DES encryption function in block mode; that is,
+there is a function E(K,D) which accepts a 7 byte key (K) and 8-byte
+data block (D) and produces an 8-byte encrypted data block as its
+value. If the data to be encrypted is longer than 8 bytes, the
+encryption function is applied to each block of 8 bytes in sequence and
+the results appended together. If the key is longer than 7 bytes, the
+data is first completely encrypted using the first 7 bytes of the key,
+then the second 7 bytes, etc., appending the results each time. In
+other words:
+ 
+        E(K0 K1, D0 D1) = E(K0,D0)E(K0,D1)E(K1,D0)E(K1D1)
+ 
+D.1.1 SMB negprot response
+ 
+The SMBnegprot response field smb_crtpykey is the result of computing:
+ 
+        C8 = E(P7,S8)
+ 
+where:
+        P7 is a 7 byte string which is non-repeating. This is usually a
+        combination of the time (in seconds since January 1, 1970) and
+        a counter which is incremented after each use.
+ 
+        S8 is an 8-byte string whose value is ???????? (eight question marks).
+ 
+D.1.2 SMBtcon, SMBtconX, SMBsesssetupX Requests
+ 
+The client system may send an encrypted password in any one of these
+requests. The server must validate that encrypted password by
+performing the same computations the client did to create it, and
+ensuring the strings match. The server must compute :
+ 
+        P16 = E(P14,S8)
+ 
+and:
+ 
+        P24 = E(P21,C8)
+ 
+where:
+        P14 is a 14-byte string containing the users password in
+        cleartest, padded with spaces.
+ 
+        S8 is the 8-byte well-known string (see above).
+ 
+        P21 is a 21-byte string obtained by appending 5 null (0) bytes
+        to the string P16, just computed.
+ 
+        C8 is the value of smb_cyptkey send in the SMBnegprot response
+        for this connection.
+ 
+The final string, P24, should be compared to the encrypted string in
+the request :
+ 
+        the smb_passwd field in SMBtcon
+ 
+        the smb_spasswd field in SMBtconX
+ 
+        the smb_apasswd field in SMBsessetupX
+ 
+If they do not match, it is possible the client system was incapable of
+encryption; if so, the string should be the users password in
+cleartest. The server should try to validate the strin, treating is as
+the users unencrypted password. If this validation fails as well, the
+password (and the request) should be rejected.
+ 
+

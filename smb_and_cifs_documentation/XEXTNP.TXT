@@ -1,0 +1,3246 @@
+
+
+
+
+
+
+
+
+
+                 OOOOppppeeeennnnNNNNEEEETTTT////MMMMiiiiccccrrrroooossssoooofffftttt NNNNeeeettttwwwwoooorrrrkkkkssss
+
+              FFFFIIIILLLLEEEE SSSSHHHHAAAARRRRIIIINNNNGGGG PPPPRRRROOOOTTTTOOOOCCCCOOOOLLLL EEEEXXXXTTTTEEEENNNNSSSSIIIIOOOONNNNSSSS
+
+
+                  IIIINNNNTTTTEEEELLLL PPPPaaaarrrrtttt NNNNuuuummmmbbbbeeeerrrr 111133338888444444447777
+
+
+
+                        VVVVeeeerrrrssssiiiioooonnnn 1111....9999
+
+
+
+
+
+
+                     SSSSeeeepppptttteeeemmmmbbbbeeeerrrr 5555,,,, 1111999988886666
+
+
+                     Intel Corporation
+                   Microsoft Corporation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 2 -          September 5, 1986
+
+
+_1.  _I_N_T_R_O_D_U_C_T_I_O_N
+
+This   document    defines    the    extensions    to    the
+OpenNET/Microsoft  Networks  File Sharing Protocol (Intel PN
+136329-001) that are required to support  Operating  Systems
+richer  in  function  than  MS-DOS, and with user based file
+protection schemes.  The primary goal of these extensions is
+to  allow fully transparent access to remote files for UNIX.
+However, they are not intended to be specific to  UNIX.   It
+is  anticipated  that other Operating Systems will have many
+similar requirements and that they will use  the  same  ser-
+vices and protocols to meet them.
+
+This extension, when combined with the core protocol, allows
+all  file  oriented UNIX functions to be performed on remote
+files.
+
+The extended protocol defined in this document  is  selected
+by  the dialect string "xenix1.1" in the core protocol nego-
+tiate command.
+
+_2.  _M_E_S_S_A_G_E _F_O_R_M_A_T
+
+All messages sent while using the  extended  protocol  (both
+the  core  messages used and the additional messages defined
+in this document) will have the following format.
+
+BYTE   smb_idf[4];   /*contains 0xFF,'SMB' */
+BYTE   smb_com;      /*command code */
+BYTE   smb_rcls;     /*error class */
+BYTE   smb_reh;      /*reserved for future */
+WORD   smb_err;      /*error code */
+BYTE   smb_flg;      /*flags */
+WORD   smb_res[6];   /*reserved for future */
+WORD   smb_gid;      /*unauthenticated group id */
+WORD   smb_tid;      /*authenticated user/group */
+WORD   smb_pid;      /*caller's process id */
+WORD   smb_uid;      /*unauthenticated user id */
+WORD   smb_mid;      /*multiplex id */
+BYTE   smb_wct;      /*count of 16-bit words that follow */
+WORD   smb_vwv[];    /*variable number of 16-bit words */
+WORD   smb_bcc;      /*count of bytes that follow */
+BYTE   smb_buf[];    /*variable number of bytes */
+
+
+NOTES:
+
+1.   smb.flg can have the following values:
+
+     bit0
+7               When on, all pathnames in  the  protocol  must  be
+               treated  as caseless.  When off, the pathnames are
+               case sensitive.
+     bits1-7   reserved (MBZ)
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 3 -          September 5, 1986
+
+
+2.   smb_uid is the user identifier.  It will be used by the
+     server when determining file access permissions.  It is
+     used only when the TID is hex  FFFF.   A  null  UID  is
+     indicated by a value of hex FFFE.
+
+3.   smb_gid is the group identifier for the user identified
+     by  smb_uid.  It will be used by the server when deter-
+     mining file access permissions.  It is used  only  when
+     TID is hex FFFF.  A null GID is indicated by a value of
+     hex FFFE.
+
+4.   The semantics of smb_tid when interfacing with a server
+     with  user based file protection are outlined here.  In
+     this environment the tid represents an instance  of  an
+     authenticated  user.   smb_tid  must  either  contain a
+     valid tid, or contain hex  FFFF  to  indicate  that  an
+     unauthenticated  user  ID  and group ID are to be used.
+     If a server chooses to accept a request of this  latter
+     type,  the  user ID will be passed in the smb_uid field
+     and the group ID will be in the smb_gid field.
+
+5.   As in the core, smb_pid uniquely identifies a  consumer
+     process.  Consumers inform servers of the creation of a
+     new process either with a fork command (for  a  process
+     that  is  a  copy of an existing process), or by simply
+     introducing a  new  PID  into  the  dialogue  (for  new
+     processes).   Process  destruction  must  be explicitly
+     indicated to the server.  The "Process Exit" command is
+     used for this.
+
+6.   Systems using the extended protocol will  typically  be
+     multi-tasked, multi-user systems, therefore a multiplex
+     ID (smb_mid) is added to allow multiplexing the  single
+     consumer/server   VC   among  the  consumer's  multiple
+     processes.  The consumer is  responsible  for  ensuring
+     that  every  request includes a system unique MID.  The
+     server is responsible for ensuring that every  response
+     contains the same MID as its request.  The consumer may
+     then use the MID for associating requests and responses
+     and  may have any number of requests outstanding at any
+     time on any file server VC.
+
+7.   The extended protocol enhances  the  semantics  of  the
+     pathname.  Two pathname component delimiters are recog-
+     nized -- "\" and "/" -- and a second pathname format is
+     added  --  one  incorporating a bind id (BID).  The BID
+     identifies a location in  a  server's  file  hierarchy.
+     Pathnames  associated  with  a  BID will be relative to
+     that BID, i.e., a full pathname must not be passed with
+     a  BID, only that portion of the pathname not addressed
+     by the BID.  The pathname portion may or may  not  com-
+     mence  with  a  delimiter.  BIDs may be used to qualify
+     any pathname.
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 4 -          September 5, 1986
+
+
+     A pathname of this format is indicated by the  presence
+     of  hex  FF in the first byte of the pathname.  In this
+     case the following two bytes are the BID and the  path-
+     name  portion commences in the fourth byte.  A null BID
+     is indicated by a value of -1 (hex FFFF) and is exactly
+     equivalent to no BID present in the pathname.  BIDs are
+     completely independent of PIDs and are thus  unaffected
+     by  the  termination  of  processes.  BIDs will only be
+     destroyed  when  an  appropriate  UNBIND   command   is
+     received.
+
+     All possible combinations of valid and  null  BIDs  and
+     pathnames  are  valid.   A  null BID indicates that the
+     pathname is relative to  the  server's  root.   A  null
+     pathname  indicates  that the BID references the target
+     file directly.  A null BID and a null pathname indicate
+     the  server's root.  A valid BID and valid pathname are
+     combined to indicate the  target  file.   The  pathname
+     portion  may  not  be  null  in  commands  that require
+     specific access permissions on the target file's parent
+     (e.g., Delete Directory and Rename directory).
+
+     In addition two special pathname  component  values  --
+     "."  and ".." -- must be recognized.  There may be mul-
+     tiple of these components in a path name, but they must
+     all  precede  all  "non-dot" components.  They have the
+     standard UNIX meanings -- "." points to its own  direc-
+     tory, ".." points to its directory's parent.  Hence the
+     path "BID/." is identical to "BIDnull",  and  the  path
+     "BID/.." identifies the directory containing the direc-
+     tory identified by "BID".
+
+
+These semantic changes apply to all "core" requests used  by
+the  extended protocol.  Where there are additional changes,
+they are documented with the new  requests.   The  following
+core  requests are included in the extended protocol without
+further changes.
+
+        TREE CONNECT
+        TREE DISCONNECT
+        CLOSE FILE
+        FLUSH FILE
+        WRITE
+        SEEK
+        RENAME FILE
+        CREATE TEMPORARY FILE
+        PROCESS EXIT
+        CHECK PATH
+        GET SERVER ATTRIBUTES
+
+Support of the following core requests within  the  extended
+protocol  is not mandatory.  They may be rejected as invalid
+commands.
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 5 -          September 5, 1986
+
+
+
+        FILE_SEARCH
+        CREATE PRINT FILE
+        WRITE PRINT FILE
+        CLOSE PRINT FILE
+        GET PRINT QUEUE
+        NEGOTIATE (always performed within the core protocol)
+
+
+_3.  _A_R_C_H_I_T_E_C_T_U_R_A_L _M_O_D_E_L
+
+_3._1.  _U_S_E_R _A_D_M_I_N_I_S_T_R_A_T_I_O_N
+
+Systems using the Extended File Sharing Protocol will  typi-
+cally  support  user  based protection models.  Two forms of
+user administration are accommodated -- consumer  based  and
+server  based.   A consumer based system is one in which the
+file servers depend on, and trust, the  consumer  processors
+to  authenticate users.  In a server based system the server
+processors authenticate their own  users.   Essentially  the
+difference  is  that  in a consumer based approach the LAN's
+security envelope is  drawn  around  the  LAN  as  a  single
+entity,  whereas  in  the  server  based approach the LAN is
+viewed as a collection of autonomous systems each  with  its
+own security envelope.
+
+If the server accepts consumer  based  authentication  on  a
+given consumer/server connection, it may still accept server
+based authentication requests across that connection.   How-
+ever,  if the server requires server based authentication on
+a connection, it cannot accept requests  based  on  consumer
+performed authentications on that connection.
+
+The following paragraphs give a brief overview  of  the  two
+schemes.
+
+1.   Server Based.
+
+     The server based approach is similar  to  the  consumer
+     authentication scheme used by the core protocol.  It is
+     based on the principle  that  the  consumer  processors
+     cannot  be  trusted  to authenticate users.  It assumes
+     that the LAN connects autonomous systems that are  wil-
+     ling to make some subset of their local files available
+     to remote users.
+
+     In this environment it is necessary for the consumer to
+     log  on  to every server which the user intends to use.
+     Each server therefore maintains a list of  valid  users
+     and  verifies  every  access  by  these  users.  It can
+     therefore accept  any  and  all  transport  connections
+     offered.
+
+     When a user logs on (or is logged on by his  OS)  to  a
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 6 -          September 5, 1986
+
+
+     server  he  receives  an  identifier  from that server.
+     This server unique ID is used to both identify the user
+     on all subsequent requests and prove to the server that
+     this user has been authenticated. The  consumer  system
+     must  remember  the identifier for each of its users at
+     each server that they use and determine and include the
+     appropriate  identifier  for  all network file accesses
+     made.
+
+     The identifier is therefore associated with a  particu-
+     lar  user  ID  and  group  ID  on both the consumer and
+     server sides and this mapping must be synchronized.
+
+     The following environments  exist  in  a  server  based
+     environment:
+
+     a)   Virtual Circuit Environment.  This consists of one
+          VC  established  between  a  consumer  system  and
+          server system.  A VC  is  formed  using  transport
+          services.
+
+     b)   Logon Environment.  This is represented by a  Tree
+          ID  (TID).  A TID uniquely identifies an authenti-
+          cated user (UID+GID) within a VC.  The  TID  field
+          in  a  message  must  always  contain  a valid TID
+          (except for Tree Connect).
+
+     c)   Bind Environment.  This is represented by  a  bind
+          ID  (BID).   A  BID  identifies  a location in the
+          server's file hierarchy.  It is  unique  within  a
+          given VC environment.
+
+     d)   Process Environment.  This  is  represented  by  a
+          process  ID  (PID).   A  PID uniquely identifies a
+          consumer process within a given VC environment.
+
+     e)   File Environment.  This is represented by  a  File
+          Handle  (FID).   A FID identifies an open file and
+          is unique within a given VC+PID environment.  FIDs
+          are  obtained  by  the  Open, Create and Fork com-
+          mands.
+
+     When one  of  these  environments  is  terminated,  all
+     environments  contained  within  it will be terminated.
+     For example, if a VC is terminated all PIDs, TIDs, BIDs
+     and  FIDs  within  it  will be invalidated.  When a PID
+     terminates all FIDs within it are closed.
+
+
+2.   Consumer Based.
+
+     In this approach a LAN (or "logical LAN") is viewed  as
+     a single system.  There is a single logical file system
+     and a single user identity for each user throughout the
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 7 -          September 5, 1986
+
+
+     LAN.   When  a user logs on to a participating consumer
+     system, that system verifies his identity  and  obtains
+     his  user  ID.  All subsequent file accesses (local and
+     remote) use this user ID to identify the user.
+
+     There is no user "log on" to a  server  processor,  the
+     server simply accepts requests from valid consumers and
+     uses the user ID  and  group  ID  presented  with  each
+     request  to  determine  that user's file access permis-
+     sions.
+
+     The server can authenticate consumer systems to  ensure
+     that only trusted consumers are allowed to participate.
+
+     The key to this scheme  is  that  it  is  the  consumer
+     "machine"  that  is  validated by the server.  Once the
+     consumer is authenticated the server  accepts  all  the
+     user  IDs  it  receives as authenticated, but may still
+     select which ones it will perform work for.
+
+     The following environments exist in  a  consumer  based
+     environment:
+
+     a)   Virtual Circuit Environment.  This consists of one
+          VC  established  between  a  consumer  system  and
+          server system.  A VC  is  formed  using  transport
+          services.
+
+     b)   User Environment.  This is represented by  a  user
+          ID (UID) and a group ID (GID).  A UID+GID uniquely
+          identifies a user within an administrative  domain
+          (or "Logical LAN").
+
+     c)   Bind Environment.  This is represented by  a  bind
+          ID  (BID).   A  BID  identifies  a location in the
+          server's file hierarchy.  It is  unique  within  a
+          given VC environment.
+
+     d)   Process Environment.  This  is  represented  by  a
+          process  ID  (PID).   A  PID uniquely identifies a
+          consumer process within a given VC environment.
+
+     e)   File Environment.  This is represented by  a  File
+          Handle  (FID).   A FID identifies an open file and
+          is unique within a given VC+PID environment.  FIDs
+          are  obtained  by  the  Open, Create and Fork com-
+          mands.
+
+     When one  of  these  environments  is  terminated,  all
+     environments  contained  within  it will be terminated.
+     For example, if a VC is terminated all PIDs,  BIDs  and
+     FIDs  within  it  will be invalidated.  When a PID ter-
+     minates all FIDs within it are closed.
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 8 -          September 5, 1986
+
+
+     Generally it will only  be  practical  for  a  node  to
+     belong  to  one consumer based network.  Connections to
+     servers of other networks will typically use the server
+     based user authentication technique.
+
+     Use of the consumer based system is indicated by a  tid
+     of  hex FFFF.  In this case, if the request is accepted
+     by the server, the user ID and group  ID  are  obtained
+     from the smb_uid and smb_gid fields.
+
+_3._2.  _F_I_L_E _P_R_O_T_E_C_T_I_O_N
+
+The file protection model  enforced  by  the  server  is  an
+expanded  version  of  the  standard  Unix protection model.
+Files may have specific access permissions  for  the  file's
+owner,  three  specified users or groups, and a fifth set of
+permissions for at least all users and groups not covered by
+the first four.   Xenix will always use the first user/group
+set of permissions to indicate the  file's  group's  permis-
+sions, the second and third sets will always be null.
+
+The following permissions will be supported for each set  of
+permissions  (owner,  user/group1,  user/group2, user/group3
+and other).
+
+_R_E_A_D
+
+READ provides read access to the file.   A  user  must  have
+this access in order to open the file for read or update.
+
+Read permission may be given to the owner of the file, three
+other users or groups, and all other users.
+
+Support of READ permission is mandatory.
+
+_W_R_I_T_E
+
+WRITE provides write access to the file.  A user  must  have
+this  access  to  a  data file in order to open the file for
+write or update, or to create (truncate) an  existing  file.
+Write  permission  is  required  to  a directory in order to
+create new files  or  destroy  existing  files  within  that
+directory.   Write permission is required to both the source
+and destination directories when renaming a file.
+
+Write permission may be given to  the  owner  of  the  file,
+three other users or groups, and to all other users.
+
+Support of WRITE permission is mandatory.
+
+_S_E_A_R_C_H
+
+SEARCH allows a user to traverse the directory.   This  per-
+mission may only be given on a directory.  Search permission
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 9 -          September 5, 1986
+
+
+may be given to the owner  of  the  directory,  three  other
+users or groups, and to all other users.
+
+Support for SEARCH is optional.  Where SEARCH  is  not  sup-
+ported  it  will  appear  to  be set ON for all users in all
+directories.  Any attempt to reset the SEARCH attribute will
+be rejected.
+
+_E_X_E_C_U_T_E
+
+EXECUTE allows a user to execute the file.  This  permission
+may only be given on a data file.  Execute permission may be
+given to the owner of the file, three other users or groups,
+and to all other users.
+
+Support of EXECUTE is optional.  Where EXECUTE is  not  sup-
+ported  it  must  be  associated  with READ in the following
+manner.  EXECUTE will be always set to  the  same  value  as
+READ.   Any attempt to set EXECUTE to a value different from
+the READ attribute will be rejected.
+
+The EXECUTE permission  is  only  recorded  by  the  server,
+enforcement is the consumer system's responsibility.
+
+_3._2._1.  _R_E_P_R_E_S_E_N_T_A_T_I_O_N
+
+File access permissions have the following representation in
+all protocol messages where they appear.
+
+The access permissions -- READ, WRITE and SEARCH/EXECUTE  --
+are  held  for the file owner, three users or groups and all
+other users. The four sets of permissions are carried  in  a
+single  word with the following format (bit0 is least signi-
+ficant bit):
+
+        bit0  -  OTHER_SEARCH/EXECUTE
+        bit1  -  OTHER_WRITE
+        bit2  -  OTHER_READ
+        bit3  -  USER/GROUP1_SEARCH/EXECUTE
+        bit4  -  USER/GROUP1_WRITE
+        bit5  -  USER/GROUP1_READ
+        bit6  -  OWNER_SEARCH/EXECUTE
+        bit7  -  OWNER_WRITE
+        bit8  -  OWNER_READ
+        bit9  -  USER/GROUP2_SEARCH/EXECUTE
+        bit10 -  USER/GROUP2_WRITE
+        bit11 -  USER/GROUP2_READ
+        bit12 -  USER/GROUP3_SEARCH/EXECUTE
+        bit13 -  USER/GROUP3_WRITE
+        bit14 -  USER/GROUP3_READ
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 10 -          September 5, 1986
+
+
+_3._3.  _F_I_L_E _A_T_T_R_I_B_U_T_E_S
+
+The Extended File Sharing Protocol  may  support  additional
+attributes  to those specified in the Core File Sharing Pro-
+tocol.  The following attributes will be  supported  by  the
+Xenix implementation.
+
+_S_T_I_C_K_Y
+
+STICKY indicates that a file should be retained  in  execut-
+able  format  to prevent the overhead of re-loading it every
+time it is used.
+
+Support for STICKY is optional.  Where it is  not  supported
+attempts  to  set  it  will  be rejected, and it will always
+appear to be set off.
+
+The STICKY  permission  is  only  recorded  by  the  server,
+enforcement is the consumer system's responsibility.
+
+_S_E_T_U_I_D
+
+SETUID indicates that the file must  be  executed  with  the
+process's user ID changed to the file's owner's user ID.
+
+Support of SETUID is optional.  Where it  is  not  supported
+attempts  to  set  it  will  be rejected, and it will always
+appear to be set off.
+
+The SETUID  permission  is  only  recorded  by  the  server,
+enforcement is the consumer system's responsibility.
+
+_S_E_T_G_I_D
+
+SETGID indicates that the file must  be  executed  with  the
+process's group ID changed to the file's group ID.
+
+Support of SETGID is optional.  Where it  is  not  supported
+attempts  to  set  it  will  be rejected, and it will always
+appear to be set off.
+
+The SETGID  permission  is  only  recorded  by  the  server,
+enforcement is the consumer system's resonsibility.
+
+_3._3._1.  _R_E_P_R_E_S_E_N_T_A_T_I_O_N
+
+The file attributes STICKY,  SETUID  and  SETGID  are  Xenix
+specific  and  are  carried  in  the smb_attribute word.  On
+Extended Protocol servers the attribute field has  the  fol-
+lowing format (bit0 is least significant bit).
+
+     Generic Attributes:
+     bit4    - DIRECTORY
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 11 -          September 5, 1986
+
+
+     Xenix Attributes:
+     bits0-3    - reserved (MBZ)
+     bits5-8    - reserved (MBZ)
+     bit9       - STICKY
+     bit10      - SETGID
+     bit11      - SETUID
+     bit12-15   - File Type (support is optional)
+                     If it is not supported MBZ
+                     1 - FIFO (named pipe)
+                     2 - Character Special
+                     3 - Multiplexed Character
+                     4 - Directory
+                     5 - Semaphore/Message System
+                     6 - Block Special
+                     7 - Multiplexed Block
+                     8 - Regular
+                    10 - Symbolic Link
+
+
+_4.  _E_X_T_E_N_D_E_D _P_R_O_T_O_C_O_L
+
+The format of enhanced and new commands is defined  commenc-
+ing  at  the  smb_wct  field.  All messages will include the
+standard header defined in section 1.0.  When  an  error  is
+encountered  a  server  may choose to return only the header
+portion of the response (i.e., smb_wct and smb_bcc both con-
+tain zero).
+
+_4._1.  _C_O_R_E _S_E_R_V_I_C_E _E_N_H_A_N_C_E_M_E_N_T_S
+
+The extended protocol includes  functional  enhancements  to
+some  core  services, and these are defined in this section.
+Enhancements to services  can  only  add  to  the  service's
+existing  semantics,  i.e., additional values for parameters
+may be introduced and new parameters added,  but  parameters
+cannot  be  removed  or  used  for a different purpose.  All
+"core" requests must continue to function with the  enhanced
+command.   If  these  rules cannot be followed a new command
+must be defined.
+
+_4._1._1.  _O_P_E_N
+
+No Message Format Changes
+
+Service Enhancement:
+
+The open command's scope is extended to include  directories
+as  well  as  data files.  A directory must be opened before
+the Read command can be used with it.   File  Writes,  Locks
+and  Unlocks  are  never allowed on directories. Attempts to
+open directories in modes  other  than  read/deny_none  will
+fail.
+
+The "mode" field for open, referenced as  r/w/share  in  the
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 12 -          September 5, 1986
+
+
+core  protocol  document,  is enhanced to allow open without
+delay, append and forced write modes for the  file,  and  to
+allow an open for execute.  Systems that do not support exe-
+cute mode should treat the execute  mode  as  equivalent  to
+read mode.  This word has the following format:
+
+        smb_mode format:  ---- -das rxxx yyyy
+
+
+
+where:      d   -   if open cannot be completed immediately, return with error (optional).
+9            a   -   open file in append mode (optional).
+9            s   -   complete writes before returning (optional).
+9            r   -   reserved.
+9          xxx   -   0 -- MS-DOS compatibility mode.
+                    1 -- Deny read/write/execute (exclusive).
+                    2 -- Deny write.
+                    3 -- Deny read/execute (optional).
+                    4 -- Deny none.
+9         yyyy   -   0 -- Open for reading.
+                    1 -- Open for writing.
+                    2 -- Open for reading and writing.
+                    3 -- Open for execute
+
+
+The following additional errors may be generated by Open.
+
+        Error Class ERRDOS
+
+          ERRbadfiletype
+          ERRbadaccess
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRpathsyntax
+          ERRbadbid
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+9
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 13 -          September 5, 1986
+
+
+_4._1._2.  _D_E_L_E_T_E
+
+No Message Format Changes
+
+Service Enhancement:
+
+When used within the extended protocol, Delete will not des-
+troy  the  contents of a file until all FIDs associated with
+it have been closed and all its names deleted.  When  Delete
+references  a file with active FIDs or other names, only the
+referenced name is destroyed.
+
+The following additional errors may be generated by Delete.
+
+        Error Class ERRDOS
+
+          ERRbadfiletype
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRpathsyntax
+          ERRbadbid
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          EREADONLY
+          <implementation specific>
+
+
+_4._1._3.  _D_E_L_E_T_E _D_I_R_E_C_T_O_R_Y
+
+No Message Format Changes
+
+Service Enhancement:
+
+When used within the  extended  protocol,  Delete  Directory
+will  not  destroy  a  directory until it is empty, all FIDs
+associated with it  have  been  closed  and  all  its  names
+deleted.   When Delete Directory references a directory that
+has active FIDs or other names, only the referenced name  is
+destroyed.   An attempt to delete a non-empty directory will
+be rejected.
+
+The following additional errors may be generated  by  Delete
+Directory.
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 14 -          September 5, 1986
+
+
+
+        Error Class ERRDOS
+
+          ERRbadfiletype
+          ERRnoaccess
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRpathsyntax
+          ERRbadbid
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          EREADONLY
+          <implementation specific>
+
+
+_4._1._4.  _C_R_E_A_T_E
+
+Enhanced Request Format:
+
+  BYTE   smb_wct;         /* value = 5 */
++ WORD   smb_mode;        /* access and sharing modes for open */
+  WORD   smb_attribute;   /* STICKY, SETUID, SETGID */
+  WORD   smb_time[2];     /* modification time */
++ WORD   smb_access;      /* the file's access permissions:
+                          OTHER_SEARCH/EXECUTE
+                          OTHER_WRITE
+                          OTHER_READ
+                          USER/GROUP1_SEARCH/EXECUTE
+                          USER/GROUP1_WRITE
+                          USER/GROUP1_READ
+                          OWNER_SEARCH/EXECUTE
+                          OWNER_WRITE
+                          OWNER_READ
+                          USER/GROUP2_SEARCH/EXECUTE
+                          USER/GROUP2_WRITE
+                          USER/GROUP2_READ
+                          USER/GROUP3_SEARCH/EXECUTE
+                          USER/GROUP3_WRITE
+                          USER/GROUP3_READ */
+  WORD   smb_bcc;         /* minimum value = 2 */
+  BYTE   smb_ident1;      /* value = ASCII */
+  BYTE   smb_path[];      /* [bid+]pathname */
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 15 -          September 5, 1986
+
+
++ Additional parameters
+
+Response Format (unchanged):
+
+  BYTE   smb_wct;   /* value = 1
+  WORD   smb_fid;   /* file handle for created file */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service Enhancement:
+
+The file's access permissions may be specified (any combina-
+tion).  The OWNER permissions must be specified, the owner's
+group's permissions must be  specified  in  the  USER/GROUP1
+permissions  and  OTHER permissions must be specified.  Sup-
+port of permissions specified in USER/GROUP2 and USER/GROUP3
+is optional.
+
+When a new file is created this command will open  the  file
+in  the  mode  specified by the smb_mode field regardless of
+the access mode specified for  the  owner.   This  field  is
+identical to the Open command's mode field.
+
+Support of the READ and WRITE attributes is mandatory.  Sup-
+port  of  all  other attributes is optional.  The rules con-
+trolling the supported permissions are specified in  section
+3.2.
+
+The access field is ignored if the CREATE request references
+an  existing  file  (i.e.,  the  file is truncated to length
+zero). The file's permissions are  left  unchanged  and  the
+file is opened in the specified mode.
+
+Create may generate the following additional errors.
+
+        Error Class ERRDOS
+
+          ERRnoaccess
+          ERRbadaccess
+          ERRfilexists
+          ERRbadshare
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRbadpermits
+          ERRbadbid
+          ERRpathsyntax
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 16 -          September 5, 1986
+
+
+
+        Error Class ERRXOS
+
+          ENOSPC
+          <implementation specific>
+
+
+_4._1._5.  _M_A_K_E _N_E_W _F_I_L_E
+
+Enhanced Request Format:
+
+  BYTE   smb_wct;         /* value = 5 */
++ WORD   smb_mode;        /* access and sharing modes for open */
+  WORD   smb_attribute;   /* STICKY, SETUID, SETGID */
+  WORD   smb_time[2];     /* moddification time */
++ WORD   smb_access;      /* the file's access permissions:
+                          OTHER_SEARCH/EXECUTE
+                          OTHER_WRITE
+                          OTHER_READ
+                          USER/GROUP1_SEARCH/EXECUTE
+                          USER/GROUP1_WRITE
+                          USER/GROUP1_READ
+                          OWNER_SEARCH/EXECUTE
+                          OWNER_WRITE
+                          OWNER_READ
+                          USER/GROUP2_SEARCH/EXECUTE
+                          USER/GROUP2_WRITE
+                          USER/GROUP2_READ
+                          USER/GROUP3_SEARCH/EXECUTE
+                          USER/GROUP3_WRITE
+                          USER/GROUP3_READ */
+  WORD   smb_bcc;         /* minimum value = 2 */
+  BYTE   smb_ident1;      /* value = ASCII */
+  BYTE   smb_path[];      /* [bid+]pathname */
+
++ Additional parameters
+
+Response Format (unchanged):
+
+  BYTE   smb_wct;   /* value = 1
+  WORD   smb_fid;   /* file handle for created file */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service Enhancement:
+
+As in the Core File Sharing Protocol Make New File is  func-
+tionally identical to Create except that it cannot reference
+an existing file.  Any attempt to do so will  result  in  an
+error response.  The file's access permissions may be speci-
+fied (any  combination).   The  OWNER  permissions  must  be
+specified, the owner's group's permissions must be specified
+in the USER/GROUP1 permissions and OTHER permissions must be
+specified.   Support of permissions specified in USER/GROUP2
+and USER/GROUP3 is optional.
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 17 -          September 5, 1986
+
+
+When a new file is created this command will open  the  file
+in  the  mode  specified by the smb_mode field regardless of
+the access mode specified for  the  owner.   This  field  is
+identical to the Open command's mode field.
+
+Support of the READ and WRITE attributes is mandatory.  Sup-
+port  of  all  other attributes is optional.  The rules con-
+trolling the supported permissions are specified in  section
+3.2.
+
+Make New File may generate the following additional errors.
+
+        Error Class ERRDOS
+
+          ERRfilexists
+          ERRbadaccess
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRbadpermits
+          ERRbadbid
+          ERRpathsyntax
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          ENOSPC
+          <implementation specific>
+
+
+_4._1._6.  _C_R_E_A_T_E _D_I_R_E_C_T_O_R_Y
+
+Enhanced Request Format:
+
+  BYTE   smb_wct;      /* value = 1 */
++ WORD   smb_access;   /* the directory's access permissions:
+                       OTHER_SEARCH/EXECUTE
+                       OTHER_WRITE
+                       OTHER_READ
+                       USER/GROUP1_SEARCH/EXECUTE
+                       USER/GROUP1_WRITE
+                       USER/GROUP1_READ
+                       OWNER_SEARCH/EXECUTE
+                       OWNER_WRITE
+                       OWNER_READ
+                       USER/GROUP2_SEARCH/EXECUTE
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 18 -          September 5, 1986
+
+
+                       USER/GROUP2_WRITE
+                       USER/GROUP2_READ
+                       USER/GROUP3_SEARCH/EXECUTE
+                       USER/GROUP3_WRITE
+                       USER/GROUP3_READ */
+  WORD   smb_bcc;      /* minimum value = 2 */
+  BYTE   smb_ident1;   /* value = ASCII */
+  BYTE   smb_path[];   /* [bid+]pathname */
+
++ Additional Parameters
+
+Response Format (unchanged):
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service Enhancement:
+
+The directory's access permissions  may  be  specified  (any
+combination).  The  OWNER permissions must be specified, the
+owner's  group's  permissions  must  be  specified  in   the
+USER/GROUP1 permissions and OTHER permissions must be speci-
+fied.  Support of permissions specified in  USER/GROUP2  and
+USER/GROUP3 is optional.
+
+Support of the READ and WRITE attributes is mandatory.  Sup-
+port  of  all  other attributes is optional.  The rules con-
+trolling the supported permissions are  defined  in  section
+3.2.
+
+Create  Directory  may  generate  the  following  additional
+errors.
+
+        Error Class ERRDOS
+
+          ERRfilexists
+          ERRpathsyntax
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRbadbid
+          ERRbadpermits
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 19 -          September 5, 1986
+
+
+
+        Error Class ERRXOS
+
+          ENOSPC
+          <implementation specific>
+
+
+_4._1._7.  _R_E_A_D
+
+No Message Format Enhancement
+
+Service Enhancement:
+
+The Read command's scope is extended to directories.  A Read
+of  a  directory  will  return an array of directory entries
+with the following format:
+
+        WORD  empty_flag;     /* null entry indicator
+                                               0 = EMPTY
+                                     non-zero = VALID_ENTRY */
+        BYTE  file_name[14];  /* the name of the file
+                                       (left justified, null padded) */
+
+
+If the offset and length specified by a read  do  not  align
+with  complete  directory entries, then the appropriate par-
+tial entries must be returned.
+
+The offset and count request parameters indicate the  offset
+and number of bytes in this array to be read.  If a server's
+actual directory format differs from  the  above,  then  the
+server must make the appropriate transformations.
+
+_4._1._8.  _L_O_C_K
+
+Enhanced Request Format:
+
+  BYTE   smb_wct;         /* value = 6 */
+  WORD   smb_fid;         /* file handle */
+  WORD   smb_count[2];    /* length to be locked */
+  WORD   smb_offset[2];   /* offset to be locked */
++ WORD   smb_mode;        /* specifies the mode of the lock
+                          bit0  - READ_ONLY_LOCK
+                          bit1  - SUSPEND_ON_LOCK */
+  WORD   smb_bcc;         /* value = 0 */
+
++ Additional Parameters
+
+Response Format (unchanged):
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service Enhancement:
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 20 -          September 5, 1986
+
+
+The core Lock function prevents reads, writes and  locks  to
+the  locked  portion of the file and if an attempted lock is
+not possible indication is returned to the user immediately.
+The "mode" field allows the user to choose between this type
+of lock (the default) and a lock that prevents  only  writes
+and   locks   to   the   locked   area   but   allows  reads
+(READ_ONLY_LOCK).    In   addition   a   mode    is    added
+(SUSPEND_ON_LOCK)  to allow the consumer to block on a lock.
+When this option is specified, the server will not  generate
+a  response until the requested lock is obtained.   The mode
+options may be specified in  any  combination;  the  default
+prevails when a zero mode is specified.
+
+More than one byte range may be  locked  in  a  given  file.
+Locks  are  coercive  in  nature.   They prevent attempts to
+lock, read (optional)  or  write  (including  truncate)  the
+locked  portion  of  the  file.   File  addresses beyond the
+current end of file may be  locked.   Such  locks  will  not
+cause  allocation  of file space.  If the end of the file is
+locked, the file may not be extended by users other than the
+holder of the lock.
+
+Locks may in whole or in part, contain or be contained by  a
+previously  locked  region  for the same process.  When this
+occurs, or when adjacent regions are locked, the regions are
+combined  into  a  single area if the modes of the locks are
+the same (i.e., either read permitted or regular lock).   If
+the  modes  of the overlapping locks differ, the locked area
+will be assigned assuming that the most recent request  must
+be  satisfied.   Thus  if  a  read only lock is applied to a
+region, or part of a region, that had been previously locked
+by  the  same  process against both reading and writing, the
+area of the file specified by the new lock  will  be  locked
+for  read  only,  while  the  remaining region, if any, will
+remain locked against reading and writing.
+
+Locks may only be unlocked by the process  (pid)  that  per-
+formed  the  lock.  The ability to perform locks is not tied
+to any file access permission.
+
+Lock may generate the following additional errors.
+
+        Error Class ERRDOS
+
+          ERRbadfiletype
+          ERRbadaccess
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          <implementation specific>
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 21 -          September 5, 1986
+
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._1._9.  _U_N_L_O_C_K
+
+No Message Format Changes
+
+Service Enhancement:
+
+Unlock requests may, in whole or in  part,  release  one  or
+more  locked  regions controlled by the process (PID).  When
+regions are not fully  released,  the  remaining  areas  are
+still  locked  by the process. Only the process which locked
+the file region may unlock it.   An  unlock  request  for  a
+region  that the process does not have locked, or is already
+unlocked, has no effect.  When  a  process  terminates,  all
+locked regions controlled by that process are unlocked.
+
+If a process has done more than one  open  on  a  file,  all
+locks  put  on  the file by that process will be released on
+the first close of the file.
+
+Locks may not be applied to a directory.
+
+_4._1._1_0.  _G_E_T _F_I_L_E _A_T_T_R_I_B_U_T_E_S
+
+Enhanced Request Format:
+
+  BYTE   smb_wct;      /* value = 1 */
++ WORD   smb_fid;      /* file handle */
+  WORD   smb_bcc;      /* minimum value = 0 */
+  BYTE   smb_ident1;   /* value = ASCII */
+  BYTE   smb_path[];   /* [bid+]pathname */
+
++ Additional Parameters
+
+Enhanced Response Format:
+
+  BYTE   smb_wct;              /* value = 17 */
+ *WORD   smb_attribute;        /* DIR, STICKY, SETUID, SETGID */
++*WORD   smb_owner;            /* user ID of file owner */
++*WORD   smb_id1;              /* group/user ID associated with access1 */
++ WORD   smb_id2;              /* group/user ID associated with access2 */
++ WORD   smb_id3;              /* group/user ID associated with access3 */
++*WORD   smb_access;           /* access permissions */
++*WORD   smb_links;            /* number of current links (names) to file */
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 22 -          September 5, 1986
+
+
++*WORD   smb_create_time[2];   /* file's creation time */
+ *WORD   smb_mod_time[2];      /* file's last modification time */
++*WORD   smb_access_time[2];   /* file's last access time */
+ *WORD   smb_file_size[2];     /* file size in bytes */
++*WORD   smb_file_num[2];      /* server unique file identifier */
+  WORD   smb_bcc;              /* minimum value = 0 */
+
++  Additional Parameters
+ * Support of these fields is mandatory.
+
+Service Enhancement:
+
+Get File Attributes is enhanced to return  more  information
+about  the  queried  file.   The  current values of the file
+attributes listed as output parameters are returned  to  the
+requester.  If a server does not support one of the optional
+attributes, a null value (hex FFFF) is returned.
+
+The file interrogated may be specified by  either  the  file
+handle  (FID)  or its pathname ([bid+]pathname).  If neither
+or both of these is specified,  the  request  is  considered
+invalid.   A  null  FID is indicated by a value of hex FFFF.
+An omitted pathname is indicated  by  an  smb_bcc  field  of
+zero.
+
+If multiple groups have access to the file and one of  these
+groups  is  the owner's group, then that group's permissions
+must be returned in access1.
+
+The sets of access permissions in  smb_access  only  contain
+valid data if the corresponding smb_id field is not null.  A
+null ID is indicated by a value of hex FFFF.  Access permis-
+sions for "other" are always returned.
+
+The field smb_file_num is a file  identifier  unique  within
+the server.  Word 0 indicates the device containing the file
+and word 1 indicates the file number within that device.
+
+If a symbolic link is referenced by this command the  attri-
+butes  of  the  ultimate  target  file are returned.  If the
+attributes of the link itself are  required,  the  Get  Link
+Attributes command should be used.
+
+The contents of response parameters is not guaranteed in the
+case of an error return.
+
+Get File Attributes may generate  the  following  additional
+errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          ERRbadfid
+          <implementation specific>
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 23 -          September 5, 1986
+
+
+
+        Error Class ERRSRV
+
+          ERRbadbid
+          ERRfilespecs
+          ERRpathsyntax
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._1._1_1.  _S_E_T _F_I_L_E _A_T_T_R_I_B_U_T_E_S
+
+Enhanced Request Format:
+
+  BYTE   smb_wct;              /* value = 15 */
+  WORD   smb_mode;             /* request mode: bit0 - ATTRIBUTES
+                                          bit1 - ACCESS
+                                          bit2 - ID
+                                          bit3 - TIME */
+  WORD   smb_attribute;        /* DIR, STICKY, SETUID, SETGID */
++*WORD   smb_owner;            /* user ID of file owner */
++*WORD   smb_id1;              /* group/user ID associated with access1 */
++ WORD   smb_id2;              /* group/user ID associated with access2 */
++ WORD   smb_id3;              /* group/user ID associated with access3 */
++*WORD   smb_access;           /* access permissions */
++*WORD   smb_create_time[2];   /* file's creation time */
+ *WORD   smb_mod_time[2];      /* file's last modification time */
++*WORD   smb_access_time[2];   /* file's last access time */
+  WORD   smb_reserved[2];      /* reserved */
+  WORD   smb_bcc;              /* minimum value = 2 */
+ *BYTE   smb_ident1;           /* value = ASCII */
+ *BYTE   smb_path[];           /* [bid+]pathname */
+
++  Additional Parameters
+ * Support of these fields is mandatory
+
+Enhanced Response Format:
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* minimum value = 0 */
+
++  Additional Parameters
+ * Support of these fields is mandatory.
+
+Service Enhancement:
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 24 -          September 5, 1986
+
+
+Set File Attributes will manipulate additional  file  attri-
+butes.   The  attributes  of the file identified by smb_path
+that are selected by the smb_mode field and are supported by
+the server, are changed to the values specified by the input
+parameters.
+
+Attributes are  changed  in  groups  selected  by  smb_mode.
+These groups may be selected in any combination.
+
+The smb_mode "ATTRIBUTE" will replace the  files  attributes
+with the set of attributes specified by smb_attribute in the
+request message. Attributes cannot be changed  individually.
+The DIRECTORY attribute cannot be changed.
+
+The smb_mode "ACCESS" will replace the access permissions of
+the file with the access permissions specified by smb_access
+in  the  request  message.   Access  permissions  cannot  be
+changed individually.
+
+The smb_mode "ID" replaces the user and group IDs associated
+with  the  file  to  those specified in the request message.
+The  IDs  that  can  be  changed  are  owner,   user/group1,
+user/group2  and  user/group3.  Only IDs containing non-null
+values are changed.  A null ID is indicated by hex FFFF.
+
+The smb_mode "TIME" replaces the times associated  with  the
+file  to  those specified in the request message.  The times
+that  can  be  changed   are   create_time,   mod_time   and
+access_time.   Only  times  containing  non-null  values are
+changed.  A null time is indicated by hex FFFFFFFF.
+
+Some attempts to add user permissions or modify access  per-
+missions  may fail due to server resource limitations, e.g.,
+length of Access Control Lists.
+
+The owner of a file may modify all attributes. Other legiti-
+mate modifications will be server OS dependent.
+
+Set File Attributes may generate  the  following  additional
+errors.
+
+        Error Class ERRDOS
+
+          ERRbadfunc
+          ERRbadfile
+          ERRnoaccess
+          ERRnotables
+          <implementation specific>
+
+
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 25 -          September 5, 1986
+
+
+
+        Error Class ERRSRV
+
+          ERRbadbid
+          ERRpathsyntax
+          ERRbadpermits
+          ERRsetattrmode
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2.  _A_D_D_I_T_I_O_N_A_L _S_E_R_V_I_C_E_S
+
+The Basic Extension Set includes  all  functions  considered
+necessary  to provide transparency for all essential or fre-
+quently used file access functions.  UNIX requirements  have
+been  used  as  a  guide for selecting the services included
+here; when other common operating systems are considered  in
+more detail it may prove necessary to expand this set.
+
+_4._2._1.  _C_O_N_S_U_M_E_R _L_O_G_O_N
+
+Request Format:
+
+  BYTE   smb_wct;          /* value = 0 */
+  WORD   smb_bcc;          /* minimum value = 4 */
+  BYTE   smb_ident1;       /* value = ASCII */
+  BYTE   smb_consumer[];   /* consumer system's name */
+  BYTE   smb_ident2;       /* value = ASCII */
+  BYTE   smb_password[];   /* consumer system's password */
+
+Response Format:
+
+  BYTE   smb_wct;             /* value = 1 */
+  WORD   smb_max_xmit_size;   /* maximum server buffer size */
+  WORD   smb_bcc;             /* value = 0 */
+
+Service:
+
+This function allows a server to verify the  identity  of  a
+consumer  system.   It  will  typically  be used by networks
+using consumer based user authentication to ensure that only
+trusted  consumer  systems  are  allowed to access a server.
+Once the consumer system has been validated, the server will
+trust  the  consumer to verify its users.  This command will
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 26 -          September 5, 1986
+
+
+normally be the first  sent  following  negotiation  of  the
+extended  protocol.   Use  of the Consumer Logon function is
+not mandatory in the protocol, but servers may insist on its
+use.
+
+The smb_max_xmit_size field indicates the maximum size  mes-
+sage that the server can handle.  The consumer must not gen-
+erate messages, nor expect responses, larger than this.
+
+Consumer Logon may generate the following errors.
+
+        Error Class ERRDOS
+
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRbadpw
+          ERRsrverror
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._2.  _B_I_N_D
+
+Request Format:
+
+  BYTE   smb_wct;      /* value = 0 */
+  WORD   smb_bcc;      /* minimum value = 2 */
+  BYTE   smb_ident1;   /* value = ASCII */
+  BYTE   smb_path[];   /* [bid+]pathname */
+
+Response Format:
+
+  BYTE   smb_wct;           /* value = 5 */
+  WORD   smb_bid;           /* identifier to the file specified by input [bid+]pathname */
+  WORD   smb_file_num[2];   /* server unique file number */
+  WORD   smb_attribute;     /* DIR, STICKY, SETUID, SETGID */
+  WORD   smb_owner;         /* user ID of file's owner (consumer based systems only) */
+  WORD   smb_bcc;           /* value = 0 */
+
+Service:
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 27 -          September 5, 1986
+
+
+Any point in the file system can be represented by an  iden-
+tifier  (bid). A NULL bid indicates the root of the server's
+file system. The bind service returns a  bid  for  the  file
+represented by [bid+]pathname.
+
+Upon receiving a [bid+]pathname, the server begins the path-
+name translation from the position in the file system speci-
+fied by bid.  A bid is used only for addressing a  file,  it
+is not associated with file access permissions.
+
+A bid references a file, not the file  name.   If  the  file
+name  changes  or is deleted, the bid is unaffected.  When a
+file is deleted, any bids referencing it are invalidated for
+all functions except UNBIND.
+
+Bind may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          ERRbadpath
+          ERRnotables
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          ERRpathsyntax
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._3.  _U_N_B_I_N_D
+
+Request Format:
+
+  BYTE   smb_wct;   /* value = 1 */
+  WORD   smb_bid;   /* pathname prefix */
+  WORD   smb_bcc;   /* value = 0 */
+
+Response Format:
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 28 -          September 5, 1986
+
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service:
+
+Unbind removes the relationship between  the  specified  bid
+and  its associated position in the file system.  A NULL bid
+may not be UNBINDed.
+
+Unbind may generate the following errors.
+
+        Error Class ERRDOS
+
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._4.  _G_E_T _P_A_T_H_N_A_M_E
+
+Request Format:
+
+  BYTE   smb_wct;    /* value = 2 */
+  WORD   smb_mode;   /* request mode: bit0 - last component only
+                                bits1-7 - MBZ */
+  WORD   smb_bid;    /* pathname prefix */
+  WORD   smb_bcc;    /* value = 0 */
+
+Response Format:
+
+  BYTE   smb_wct;      /* value = 0 */
+  WORD   smb_bcc;      /* minimum value = 2 */
+  BYTE   smb_ident1;   /* value = ASCII */
+  BYTE   smb_path[];   /* pathname */
+
+Service:
+
+Get  Pathname  translates  a  BID  into  the  server   local
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 29 -          September 5, 1986
+
+
+pathname.   The default response is the pathname relative to
+the server's root.  If the "last component" option is speci-
+fied,  only  the last component of the pathname is returned.
+If the BID represents the server's  root,  the  response  is
+"/".
+
+Get Pathname may generate the following errors.
+
+        Error Class ERRDOS
+
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._5.  _M_A_K_E _N_O_D_E
+
+Request Format:
+
+  BYTE   smb_wct;          /* value = 3 */
+  WORD   smb_access;       /* the file's access permissions:
+                           OTHER_SEARCH/EXECUTE
+                           OTHER_WRITE
+                           OTHER_READ
+                           USER/GROUP1_SEARCH/EXECUTE
+                           USER/GROUP1_WRITE
+                           USER/GROUP1_READ
+                           OWNER_SEARCH/EXECUTE
+                           OWNER_WRITE
+                           OWNER_READ
+                           USER/GROUP2_SEARCH/EXECUTE
+                           USER/GROUP2_WRITE
+                           USER/GROUP2_READ
+                           USER/GROUP3_SEARCH/EXECUTE
+                           USER/GROUP3_WRITE
+                           USER/GROUP3_READ */
+  WORD   smb_attribute;    /* the type of file to be created:
+                           FIFO (named pipe)
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 30 -          September 5, 1986
+
+
+                           Character Special
+                           Multiplexed Character File
+                           Directory
+                           Named Special File -- Semaphore or Shared Memory
+                           Block Special
+                           Multiplexed Block File
+                           Regular
+                           Symbolic Link
+  WORD   smb_dev;          /* the device for this file,
+                             for named special files:
+                               0 = shared memory
+                               1 = semaphore */
+  WORD   smb_bcc;          /* minimum value = 2 */
+  BYTE   smb_ident1;       /* value = ASCII */
+  BYTE   smb_path[];       /* [bid+]pathname */
+  BYTE   smb_ident2;       /* value = ASCII (symbolic link only) */
+  BYTE   smb_new_path[];   /* new [bid+]pathname for symbolic link */
+
+Response Format:
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service:
+
+Make Node creates a new file of the type  specified.   If  a
+symbolic  link  is  created  then  both  pathnames  must  be
+present.  All other file types require only a  single  path-
+name.
+
+The file's access permissions may be specified (any combina-
+tion).  The OWNER permissions must be specified, the owner's
+group's permissions must be  specified  in  the  USER/GROUP1
+permissions  and  OTHER permissions must be specified.  Sup-
+port of permissions specified in USER/GROUP2 and USER/GROUP3
+is optional.
+
+Support of the READ and WRITE attributes is mandatory.  Sup-
+port  of  all  other attributes is optional.  The rules con-
+trolling the supported permissions are  defined  in  section
+3.2.
+
+the field smb_dev identifies the  device  for  character  or
+block  files  and indicates the type for named special file.
+It is ignored for other file types.
+
+Support of Make Node is optional.
+
+Make Node may generate the following errors.
+
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 31 -          September 5, 1986
+
+
+
+        Error Class ERRDOS
+
+          ERRbadpath
+          ERRnoaccess
+          ERRfilexists
+          ERRpathsyntax
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRaccess
+          ERRinvnid
+          ERRbadbid
+          ERRbadpermits
+          ERRnosupport
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          ENOSPC
+          <implementation specific>
+
+
+_4._2._6.  _R_E_A_D _A_N_D _H_I_D_E
+
+Request Format:
+
+  BYTE   smb_wct;         /* value = 5 */
+  WORD   smb_fid;         /* file handle */
+  WORD   smb_count;       /* number of bytes to be read */
+  WORD   smb_offset[2];   /* offset in file to begin read */
+  WORD   smb_left;        /* count of additional bytes to be read */
+  WORD   smb_bcc;         /* value = 0 */
+
+Response Format:
+
+  BYTE   smb_wct;           /* value = 5 */
+  WORD   smb_count;         /* number of bytes read */
+  WORD   smb_reserved[4];   /* reserved */
+  WORD   smb_bcc;           /* minimum value = 4 */
+  BYTE   smb_ident1;        /* value = DATA_BLOCK */
+  BYTE   smb_size[2];       /* length of data returned */
+  BYTE   smb_data[];        /* data */
+
+Service:
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 32 -          September 5, 1986
+
+
+The read and  hide  request  is  a  variation  of  the  read
+request.   When  used with data files it is identical to the
+read request.  When used to read directories it  differs  in
+its handling of hidden files.
+
+Each operating system has  its  own  convention  for  hiding
+files,  e.g., XENIX prefixes the files with ".", DOS holds a
+separate attribute.   As the read command returns all  files
+in  a  directory  and  the consumer cannot know the server's
+hiding convention, the consumer has no means of distinguish-
+ing  these  files.   The  read  and hide command masks these
+differences by removing such files from its  responses  when
+directories are read.  The empty_flag field of all directory
+entries for hidden files must be set to zero.
+
+"Hidden" directory entries  will  only  be  dropped  if  the
+directory  read  commences  on  an  entry boundary and reads
+entire entries.  If any partial entries are  referenced  the
+results will be server dependent.
+
+Read and hide may generate the following errors:
+
+        Error Class ERRDOS:
+
+          ERRnoaccess
+          ERRbadfid
+
+
+        Error Class ERRSRV:
+
+          ERRerror
+          ERRinvdevice
+          ERRinvnid
+          <implementation specific>
+
+
+        Error Class ERRHRD:
+
+          <implementation specific>
+
+
+        Error Class ERRXOS:
+
+          <implementation specific>
+
+
+_4._2._7.  _R_E_A_D _W_I_T_H _O_P_T_I_O_N_S
+
+Request Format:
+
+  BYTE   smb_wct;           /* value = 12 */
+  WORD   smb_fid;           /* file handle */
+  WORD   smb_timeout;       /* number of seconds to wait for completion */
+  WORD   smb_rmode;         /* read mode
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 33 -          September 5, 1986
+
+
+                               bit0 - READ_AND_LOCK
+                               bit1 - HIDE_FILES
+  WORD   smb_count[2];      /* number of bytes to be read */
+  WORD   smb_offset[2];     /* offset in file to begin read */
+  WORD   smb_left[2];       /* count of additional bytes to be read */
+  WORD   smb_lmode;         /* lock mode
+                               bit0 - READ_ONLY_LOCK
+                               bit1 - SUSPEND_ON_LOCK */
+  WORD   smb_reserved[2];   /* reserved */
+  WORD   smb_bcc;           /* value = 0 */
+
+Response Format:
+
+  BYTE   smb_wct;           /* value = 5 */
+  WORD   smb_count;         /* number of bytes read */
+  WORD   smb_reserved[4];   /* reserved */
+  WORD   smb_bcc;           /* minimum value = 4 */
+  BYTE   smb_ident1;        /* value = DATA_BLOCK */
+  BYTE   smb_size[2];       /* length of data returned */
+  BYTE   smb_data[];        /* data */
+
+Service:
+
+The read with options command allows reads to be timed  out,
+allows  record reading and locking to be accomplished with a
+single command, and offers a generalized alternative to  the
+other read commands.
+
+When no smb_rmode options  are  specified,  the  command  is
+identical  in  function  to  the  read  command.   When  the
+HIDE_FILES options is specified and a directory is read, the
+command  is  identical in function to the read and hide com-
+mand.
+
+When the smb_timeout field is  non-zero,  it  specifies  the
+maximum  time  the  server  is to wait for a response to its
+read command.  This feature is useful when accessing  remote
+devices,  such  as terminals, where indeterminate delays are
+possible.
+
+When the READ_AND_LOCK option is  specified,  the  specified
+data  is  both locked and read.  The type of lock applied is
+controlled by the smb_lmode  field.   The  options  in  this
+field  are  as described for the mode field in the lock com-
+mand.  The server must always complete the requested locking
+function before reading the data.
+
+Read with options may generate the following errors:
+
+
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 34 -          September 5, 1986
+
+
+
+        Error Class ERRDOS:
+
+          ERRnoaccess
+          ERRbadfid
+          ERRlock
+          ERRbadfiletype
+          ERRbadaccess
+
+
+        Error Class ERRSRV:
+
+          ERRerror
+          ERRinvdevice
+          ERRinvnid
+          <implementation specific>
+
+
+        Error Class ERRHRD:
+
+          <implementation specific>
+
+
+        Error Class ERRXOS:
+
+          <implementation specific>
+
+
+_4._2._8.  _G_E_T _A_C_C_E_S_S _R_I_G_H_T_S
+
+Request Format:
+
+  BYTE   smb_wct;      /* value = 0 */
+  WORD   smb_bcc;      /* minimum value = 2 */
+  BYTE   smb_ident1;   /* value = ASCII */
+  BYTE   smb_path[];   /* [bid+]pathname */
+
+Response Format:
+
+  BYTE   smb_wct;      /* value = 1 */
+  WORD   smb_access;   /* the requester's access rights
+                       bit0 - Requester is owner
+                       bit1 - Requester is group/user id1
+                       bit2 - Requester is group/user id2
+                       bit3 - Requester is group/user id3
+                       bit4 - Requester is other user
+                       bit5 - Requester is superuser
+                       bit6 - EXECUTE/SEARCH
+                       bit7 - WRITE
+                       bit8 - READ */
+  WORD   smb_bcc;      /* value = 0 */
+
+Service:
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 35 -          September 5, 1986
+
+
+The requestor's effective access rights on  the  named  data
+file or directory are calculated from the file's permissions
+and returned.  The response also indicates why  the  permis-
+sions  are  available,  e.g.,  because  the user is the file
+owner or the superuser.
+
+This command is necessary to accommodate variations  in  the
+algorithms servers use to calculate these rights.
+
+Get Access Rights may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          ERRbadpath
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          ERRpathsyntax
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._9.  _L_I_N_K
+
+Request Format:
+
+  BYTE   smb_wct;          /* value = 1 */
+  WORD   smb_reserved;     /* MBZ */
+  WORD   smb_bcc;          /* minimum value = 4 */
+  BYTE   smb_ident1;       /* value = ASCII */
+  BYTE   smb_path[];       /* [bid+]pathname */
+  BYTE   smb_ident2;       /* value = ASCII */
+  BYTE   smb_new_path[];   /* [bid+]pathname to be added to file */
+
+Response Format:
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 36 -          September 5, 1986
+
+
+Service:
+
+smb_new_path is an alternative path to the  file  referenced
+by  smb_path.  All components in the new pathname except the
+last must exist; the last component must not exist.   Direc-
+tory links may be rejected due to security violations.
+
+There may be variations between server types on what consti-
+tutes a valid link, including no support of links.
+
+The new pathname will be reflected in the structure  of  the
+file  system  and  will  be  available  to  all users of the
+server.
+
+Link may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          ERRbadpath
+          ERRfilexists
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          ERRpathsyntax
+          ERRbadlink
+          ERRnosupport
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          EMLINK
+          <implementation specific>
+
+
+_4._2._1_0.  _C_O_P_Y
+
+Request Format:
+
+  BYTE   smb_wct;          /* value = 1 */
+  WORD   smb_reserved;     /* MBZ */
+  WORD   smb_bcc;          /* minimum value = 4 */
+  BYTE   smb_ident1;       /* value = ASCII */
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 37 -          September 5, 1986
+
+
+  BYTE   smb_path[];       /* [bid+]pathname of source file */
+  BYTE   smb_ident2;       /* value = ASCII */
+  BYTE   smb_new_path[];   /* [bid+]pathname of destination file */
+
+Response Format:
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service:
+
+The file referenced by smb_path is copied  to  smb_new_path.
+All  components  in the destination pathname except the last
+must exist; the last component may or may  not  exist.   The
+destination  file  is  "created" using the rules defined for
+the "Create" protocol.
+
+Support of this command is optional.
+
+Copy may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          ERRbadpath
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          ERRpathsyntax
+          ERRnosupport
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._1_1.  _M_O_V_E
+
+Request Format:
+
+  BYTE   smb_wct;          /* value = 1 */
+  WORD   smb_reserved;     /* MBZ */
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 38 -          September 5, 1986
+
+
+  WORD   smb_bcc;          /* minimum value = 4 */
+  BYTE   smb_ident1;       /* value = ASCII */
+  BYTE   smb_path[];       /* [bid+]pathname of source file */
+  BYTE   smb_ident2;       /* value = ASCII */
+  BYTE   smb_new_path[];   /* [bid+]pathname of destination file */
+
+Response Format:
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service:
+
+The file referenced by smb_path is  moved  to  smb_new_path.
+All  components  in the destination pathname except the last
+must exist; the last component may or may  not  exist.   The
+destination  file  is  "created" using the rules defined for
+the "Create" protocol.  The source file is deleted.
+
+Support of this command is optional.
+
+Move may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          ERRbadpath
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          ERRpathsyntax
+          ERRnosupport
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._1_2.  _F_O_R_K
+
+Request Format:
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 39 -          September 5, 1986
+
+
+  BYTE   smb_wct;       /* value = 1 */
+  WORD   smb_new_pid;   /* pid assigned to the new process */
+  WORD   smb_bcc;       /* value = 0 */
+
+Response Format:
+
+  BYTE   smb_wct;   /* value = 0 */
+  WORD   smb_bcc;   /* value = 0 */
+
+Service:
+
+This command  informs  the  server  that  the  consumer  has
+created  a  new  process with the same characteristics (open
+files, uid and gid) as the process specified  by  PID.   The
+new  process has been assigned the PID specified by new_pid.
+The server ensures that the new PID has FIDs  equivalent  to
+its  parent's.  The  tid,  uid and gid fields in the request
+message  are  ignored.   Following  the  request,  all  file
+accesses  to the affected files on behalf of the new process
+must be honoured.
+
+Fork may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRnotables
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRbadpid
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._1_3.  _R_E_A_D _C_H_E_C_K
+
+Request Format:
+
+  BYTE   smb_wct;   /* value = 1 */
+  WORD   smb_fid;   /* file handle */
+  WORD   smb_bcc;   /* value = 0 */
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 40 -          September 5, 1986
+
+
+Response Format:
+
+  BYTE   smb_wct;      /* value = 1 */
+  WORD   smb_status;   /* This may have the following values:
+                         0 = file is empty
+                         1 = file has data
+  WORD   smb_bcc;      /* value = 0 */
+
+Service:
+
+Read Check checks to see if  a  process  will  block  if  it
+attempts to read the file designated by the fid.  The status
+field in  the response indicates if there is data to read --
+a zero value indicates that there is no data, non-zero indi-
+cates that there is data.
+
+Support of this command is optional.
+
+Read Check may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRnosupport
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+_4._2._1_4.  _I_O_C_T_L
+
+Request Format:
+
+  BYTE   smb_wct;         /* value = 1 */
+  WORD   smb_fid;         /* file handle */
+  WORD   smb_bcc;         /* minimum value = 6 */
+  BYTE   smb_ident1;      /* value = ASCII */
+  BYTE   smb_path[];      /* [bid+]pathname */
+  BYTE   smb_ident2;      /* value = DATA_BLOCK */
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 41 -          September 5, 1986
+
+
+  BYTE   smb_size[2];     /* length of IOCTL request */
+  BYTE   smb_request[];   /* the server/device/file specific request */
+
+Response Format:
+
+  BYTE   smb_wct;          /* value = 0 */
+  WORD   smb_bcc;          /* minimum value = 4 */
+  BYTE   smb_ident1;       /* value = DATA_BLOCK */
+  BYTE   smb_size[2];      /* length of IOCTL response */
+  BYTE   smb_response[];   /* the server/device/file/request specific response */
+
+Service:
+
+This function delivers a device/file specific request  to  a
+server, and the device/file specific response to the reques-
+ter.   The  target  file  may  be   identified   by   either
+[bid+]pathname  or  fid.   If  both  or  neither of these is
+specified an error occurs.   The  request  field  defines  a
+function  specific to a particular device type on a particu-
+lar server type.  Therefore the functions supported are  not
+defined by the protocol, but by server implementations.  The
+protocol simply provides a means of delivering them.
+
+IOCTL may generate the following errors.
+
+        Error Class ERRDOS
+
+          ERRbadfile
+          ERRbadpath
+          ERRbadfid
+          ERRbaddata
+          <implementation specific>
+
+
+        Error Class ERRSRV
+
+          ERRerror
+          ERRinvnid
+          ERRbadbid
+          ERRpathsyntax
+          ERRfilespecs
+          <implementation specific>
+
+
+        Error Class ERRHRD
+
+          <implementation specific>
+
+
+        Error Class ERRXOS
+
+          <implementation specific>
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 42 -          September 5, 1986
+
+
+_5.  _D_A_T_A _D_E_F_I_N_I_T_I_O_N_S
+
+_5._1.  _C_O_M_M_A_N_D _C_O_D_E_S
+
+The command codes are unchanged for commands that are common
+with  the Core File Sharing Protocol.  The commands added by
+the Extended File Sharing Protocol have the  following  com-
+mand codes.
+
+#define SMBlogon       0x60   /* Consumer Logon */
+#define SMBbind        0x61   /* Bind */
+#define SMBunbind      0x62   /* Unbind */
+#define SMBgetaccess   0x63   /* Get Access Rights */
+#define SMBlink        0x64   /* Link */
+#define SMBfork        0x65   /* Fork */
+#define SMBioctl       0x66   /* IOCTL */
+#define SMBcopy        0x67   /* copy */
+#define SMBgetpath     0x68   /* get pathname */
+#define SMBreadh       0x69   /* read and hide */
+#define SMBmove        0x6A   /* move */
+#define SMBrdchk       0x6B   /* read check */
+#define SMBmknod       0x6C   /* make node */
+#define SMBreadopt     0x6F   /* read with options */
+
+
+_5._2.  _E_R_R_O_R _C_L_A_S_S_E_S _A_N_D _C_O_D_E_S
+
+The error class and code lists in the  section  include  all
+classes  and codes generated by the Core File Sharing Proto-
+col. Errors listed here are  intended  to  provide  a  finer
+granularity  of  error conditions.  These lists are not com-
+plete.
+
+The following error classes may be returned by the  protocol
+elements defined in this document.
+
+SUCCESS      0   The request was successful.
+ERRDOS    0x01   Error is generated by the server operating system.
+ERRSRV    0x02   Error is generated by the server network file manager.
+ERRHRD    0x03   Error is an hardware error (MSDOS int 24).
+ERRXOS    0x04   Error is from extended operating system set.
+ERRRMX1   0xE1   Reserved for iRMX
+ERRRMX2   0xE2   Reserved for iRMX
+ERRRMX3   0xE3   Reserved for iRMX
+ERRCMD    0xFF   Command was not in the "SMB" format.
+
+
+The following error codes may be generated with the  SUCCESS
+error class.
+
+SUCCESS   0   The request was successful.
+
+
+The following error codes may be generated with  the  ERRDOS
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 43 -          September 5, 1986
+
+
+error  class.   The Xenix errors equivalent to each of these
+errors are noted at the end of the error description.
+
+ERRbadfunc       1
+7                     Invalid function.  The server OS did not recognize or could not  perform
+                     a system call generated by the server, e.g., set the DIRECTORY attribute
+                     on a data file, invalid seek mode. [EINVAL]
+ERRbadfile       2
+7                     File not found.  The last component of a file's pathname  could  not  be
+                     found.
+ERRbadpath       3
+7                     Directory invalid.  A directory component in a  pathname  could  not  be
+                     found.  [ENOENT]
+ERRnofids        4
+7                     Too many open files.  The server has no file handles  (fids)  available.
+                     [EMFILE]
+ERRnoaccess      5
+7                     Access denied, the requester's context does  not  permit  the  requested
+                     function.  This includes the following conditions.  [EPERM]
+9                         invalid rename command
+                         write to fid open for read only
+                         read on fid open for write only
+                         Attempt to delete a non-empty directory
+9ERRbadfid        6
+7                     Invalid file handle.  The file handle specified was  not  recognized  by
+                     the server.  [EBADF]
+ERRbadmcb        7   Memory control blocks destroyed.  [EREMOTEIO]
+ERRnomem         8   Insufficient server memory to perform the requested function.  [ENOMEM]
+ERRbadmem        9   Invalid memory block address.  [EFAULT]
+ERRbadenv       10   Invalid environment.  [EREMOTEIO]
+ERRbadformat    11   Invalid format.  [EREMOTEIO]
+ERRbadaccess    12   Invalid open mode.
+ERRbaddata      13   Invalid data (generated only by IOCTL calls within the server).  [E2BIG]
+ERR             14   reserved
+ERRbaddrive     15   Invalid drive specified.  [ENXIO]
+ERRremcd        16
+7                     A Delete Directory request attempted  to  remove  the  server's  current
+                     directory.  [EREMOTEIO]
+ERRdiffdevice   17   Not same device (e.g., a cross volume rename was attempted)  [EXDEV]
+ERRnofiles      18
+7                     A File Search command can find no more files matching the specified cri-
+                     tera.
+ERRbadshare     21
+7                     The sharing mode specified for an Open conflicts with existing  FIDs  on
+                     the file.  [ETXTBSY]
+ERRlock         22
+7                     A Lock request conflicted with an existing lock or specified an  invalid
+                     mode,  or an Unlock requested attempted to remove a lock held by another
+                     process.  [EDEADLOCK]
+ERRfilexists    80
+7                     The file named in a Create Directory, Make  New  File  or  Link  request
+                     already exists. The error may also be generated in the Create and Rename
+                     transaction.  [EEXIST]
+
+
+The following error codes may be generated with  the  ERRSRV
+error class.
+
+ERRerror              1   Non-specific error code.  It is returned under the following conditions:
+9                              first command on VC was not negotiate
+                              multiple negotiates attempted
+9
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 44 -          September 5, 1986
+
+
+ERRbadpw              2
+7                          Bad password - name/password pair in a Tree Connect or Consumer Logon  are
+                          invalid.
+ERRbadtype            3   reserved
+ERRaccess             4
+7                          The requester does not have the necessary access rights within the  speci-
+                          fied context for the requested function. The context is defined by the TID
+                          (for server based protection) or by the uid and gid  (for  consumer  based
+                          protection, where TID is -1).  [EACCES]
+ERRinvnid             5   The tree ID (tid) specified in a command was invalid.
+ERRinvnetname         6   Invalid network name in tree connect.
+ERRinvdevice          7
+7                          Invalid device - printer request made to non-printer  connection  or  non-
+                          printer request made to printer connection.
+ERRqfull             49   Print queue full (files) -- returned by open print file.
+ERRqtoobig           50   Print queue full -- no space.
+ERRqeof              51   EOF on print queue dump.
+ERRsmbcmd            64   The server did not recognize the command received.
+ERRsrverror          65
+7                          The server encountered an internal error, e.g., system file unavailable.
+ERRbadbid            66   The bid supplied does not reference a file in the server's file hierarchy.
+ERRfilespecs         67
+7                          The file handle (FID), BID and pathname parameters  contained  an  invalid
+                          combination of values.
+ERRbadlink           68   The server cannot perform the requested LINK function.
+ERRbadpermits        69
+7                          The access permissions specified for a file or directory are not  a  valid
+                          combination.   The  server  cannot  set  the  requested  attribute.   This
+                          includes the following conditions.
+9                              EXECUTE cannot be set independently of READ
+                              SEARCH cannot be reset
+                              STICKY cannot be set
+                              SETUID cannot be set
+                              SETGID cannot be set
+9ERRbadpid            70   The new pid specified in a Fork request is already assigned.
+ERRsetattrmode       71   The attribute mode in the Set File Attribute request is invalid.
+ERRpaused            81   Server is paused. (reserved for messaging)
+ERRmsgoff            82   Not receiving messages. (reserved for messaging).
+ERRnoroom            83   No room to buffer message. (reserved for messaging).
+ERRrmuns             87   Too many remote user names. (reserved for messaging).
+ERRnosupport     0xFFFF   Function not supported.
+
+
+The following error codes may be generated with  the  ERRHRD
+error  class.   The Xenix errors equivalent to each of these
+errors are noted at the end of the error description.
+
+ERRnowrite     19   Attempt to write on write-protected diskette.  [EROFS]
+ERRbadunit     20   Unknown unit.  [ENODEV]
+ERRnotready    21   Drive not ready.  [EUCLEAN]
+ERRbadcmd      22   Unknown command.
+ERRdata        23   Data error (CRC).  [EIO]
+ERRbadreq      24   Bad request structure length.  [ERANGE]
+ERRseek        25   Seek error.
+ERRbadmedia    26   Unknown media type.
+ERRbadsector   27   Sector not found.
+ERRnopaper     28   Printer out of paper.
+ERRwrite       29   Write fault.
+ERRread        30   Read fault.
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 45 -          September 5, 1986
+
+
+ERRgeneral     31   General failure.
+ERRbadshare    32   A compatibility mode open conflicts with an existing open. [ETXTBSY]
+
+The following error codes may be generated with  the  ERRXOS
+error class.
+
+ESRCH           3   No such process.
+EINTR           4   Interrupted system call.
+ENOEXEC         8   Bad executable file format.
+ECHILD         10   Wait executed for a process with no "unwaited-for" children.
+EAGAIN         11   Server's process table is full.
+ENOTBLK        15   An ordinary file was designated where a block device is required.
+EBUSY          16   Device cannot be MOUNTed or UMOUNTed.
+ENOTDIR        20   A directory must be specified for this request.
+EISDIR         21   An attempt to write on a directory.
+ENFILE         23   Internal table overflow, e.g., file table.
+ENOTTY         25   A terminal device is required.
+EFBIG          27   File size exceeded maximum supported.
+ENOSPC         28   No space left on device.
+ESPIPE         29   A seek was issued to a pipe.
+EMLINK         31   Too many links.
+EPIPE          32   Write to a pipe for which there is no process to read the data.
+EDOM           33   Bad math argument.
+ENOTNAM        37   Invalid semaphore identifier.
+ENAVAIL        38   Semaphore not available.
+EISNAM         39   File is a semaphore
+EREMOTEIO      40   Remote I/O error.
+EINIT          41   The network could not be initialized.
+EREMDEV        42   The referenced device is remote.
+EPATHSYNTAX   256   A pathname contained a syntax error.
+ENOTFILE      257   A data file must be specified for this request.
+Ereserved     258   reserved
+EREADONLY     259   Invalid access to read only file, e.g., open for write, delete, set attributes.
+EACL          260   Access Control List full.
+
+
+_6.  _E_X_C_E_P_T_I_O_N _H_A_N_D_L_I_N_G
+
+Exception handling within the extended protocol  environment
+is  an  extension  to the core techniques.  It is built upon
+the various environments supported by the file sharing  pro-
+tocol.  When any environment is dissolved (in either an ord-
+erly or disorderly fashion) all contained  environments  are
+dissolved.   The  hierarchy  of  environments  is summarized
+below:
+
+
+
+
+
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 46 -          September 5, 1986
+
+
+
+        Consumer Based User Authentication:
+
+          Virtual Circuit
+              UID+GID
+              BID
+              PID
+                  FID
+
+        Server Based User Authentication:
+
+          Virtual Circuit
+              TID
+              BID
+              PID
+                  FID
+
+
+As can be seen from these  summaries,  the  Virtual  Circuit
+(VC)  is  the  key  environment.  When a VC is dissolved the
+server processes (or equivalent) is  terminated;  the  TIDs,
+BIDs  and  FIDs  are  invalidated,  and outstanding requests
+(MIDs) are dropped -- responses will not be generated.
+
+The termination of a PID will cause the closing of all  FIDs
+it  contains.  The destruction of TIDs, BIDs and FIDs has no
+affect on other environments.
+
+The rules for VC establishment and dissolution are identical
+to those enforced by the core file sharing protocol with the
+following exceptions.
+
+If a server receives a VC establishment request from a  con-
+sumer with which it already conversing, the existing VC will
+be dropped, invalidating all its  enclosed  TIDs,  PIDs  and
+FIDs, and the new request accepted.
+
+A server may drop the VC to a consumer at any  time  if  the
+consumer  is  generating illogical requests.  However, wher-
+ever possible the server should first return an  error  code
+to the consumer indicating the cause of the VC abort.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 47 -          September 5, 1986
+
+
+                        _A_P_P_E_N_D_I_X _A
+
+                    _S_U_P_P_O_R_T_I_N_G _F_U_N_C_T_I_O_N_S
+
+
+In order to implement a product using the file sharing  pro-
+tocol  defined  in  this  and the core protocol documents, a
+system must support a number of functions not  addressed  by
+the protocols.  The approaches that will be supported by the
+protocol developers in some of these areas are outlined here
+as  examples.   There  is not intended to be any implication
+that any other developer must support these approaches.
+
+
+_F_I_L_E _N_A_M_I_N_G
+
+Implementations of the file sharing  protocol  will  usually
+involve  extending file names in such a manner that consumer
+systems can deduce the server containing  the  file.   Typi-
+cally  this will consist of the addition of one or more file
+name components to indicate the server.
+
+This extended naming system is  strictly  a  consumer  local
+issue as it is used only to inform the consumer which server
+to address, and only the portion of the pathname  for  which
+the server is responsible is passed to it.
+
+We will add a pathname component to identify the file server
+node.   The  presence  of  this additional component will be
+indicated by beginning the pathname with "//".  Thus a  net-
+work pathname has the form:
+
+            //server_name/server_local_pathname
+
+
+If the server_name component is not present in  a  pathname,
+the file is assumed to be local.
+
+It is anticipated that in future additional components  will
+be added to the pathname to allow identification of the net-
+work containing the server.
+
+
+_N_A_M_E _S_E_R_V_E_R
+
+The nameserver provides mappings between network objects and
+their properties, e.g., logical names and network addresses.
+There are two components to the nameserver -- the nameserver
+database  which  contains  the necessary mapping information
+for the network and the nameserver procedure which uses  the
+database to perform translations.
+
+The nameserver database is  a  globally  accessible  network
+file.   The nameserver procedure may execute on the consumer
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 48 -          September 5, 1986
+
+
+systems requiring the  translations  or  may  execute  on  a
+"nameserver  system" and receive its requests from consumers
+through a separate "nameserver  protocol".   The  nameserver
+procedure  will  access  the  file  using normal file access
+functions, thus, when the database is remote, the NFS proto-
+cols  will  automatically  and  transparently  be invoked to
+access the file.
+
+If  accessed  directly  by  consumers,  the  name   of   the
+nameserver  database  file  must  be  globally known.  It is
+anticipated that this will typically be held in a local file
+by each consumer.
+
+Most networks will also wish to backup the nameserver  data-
+base.   This  can  be done either on a per consumer basis --
+where each consumer makes a local copy of the file  periodi-
+cally  to  guarantee  the availability of a not too outdated
+version of the file -- or globally where a  single  copy  of
+the  file  is  made  on  a "reliable" system other than that
+holding the primary file.  In either case the  name  of  the
+backup  file must be known to the consumers -- probably with
+the same technique used for the primary file.
+
+Example:  A consumer might have a local file containing  the
+following information
+
+        --------------------------------------------------------------------
+        bigsys:12345 (the name and address of the server containing
+                      the nameserver database)
+        //bigsys/net/global.names (the file name of the nameserver
+                                   database)
+        /net/global.backup (the file name of the nameserver
+                            database local backup file)
+        --------------------------------------------------------------------
+
+        //bigsys/net/global.names contains:  a long list of names
+                                             and addresses.
+
+        /net/global.backup contains:  a long list of names
+                                      and addresses, possibly
+                                      not as current as
+                                      //bigsys/net/global.names.
+
+
+
+_U_S_E_R _A_D_M_I_N_I_S_T_R_A_T_I_O_N
+
+As the architectural model outlined, the file sharing proto-
+col accommodates both consumer and server based user authen-
+tication. In a server based network each user will  have  an
+identity  on  each  server  with which he communicates.  The
+server will maintain a local User Definition File (UDF) con-
+taining  the  profile  of  its users. When a Tree Connect is
+received the name and password supplied are verified, by the
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
+
+
+
+File Sharing Protocol Extensions- 49 -          September 5, 1986
+
+
+server,  against  the contents of this file.  If the user is
+valid a Tree ID (TID) is generated for him and used  as  the
+key  identifier  in  all  further communication between that
+instance of the user and the server.
+
+In networks using consumer  based  user  authentication  the
+network will support a single community of users.  Each user
+will have a single identity (name and  user  ID)  throughout
+the  network.   Groups  also will have a network wide scope.
+The users view of the network  will  be  that  of  a  single
+multi-user system.  There will be a single superuser defini-
+tion and that superuser will have network  wide  privileges,
+i.e.,  will  have  superuser  privileges on all systems con-
+nected to the network.
+
+There will be a single User  Definition  File  (UDF).   This
+file  will  be  replicated at every node in the network, and
+this local copy will be used by all  commands  that  do  not
+modify it.  When the UDF is updated it is the user's respon-
+sibility to ensure that all copies are synchronized.
+
+One copy of the UDF is named the "master".  This  copy  will
+be  identified by a pathname in a local file (presumably the
+same file that names the  nameserver  files).   All  updates
+must  be  made  to  this  copy.   Update  utilities, such as
+passwd, will be modified to update both the local  copy  and
+the master copy. The users are responsible for ensuring that
+the master copy is periodically copied to all nodes  in  the
+network.
+
+This approach will support most system  functions  when  the
+system  is  in  standalone  mode.  All users will be able to
+login using the local UDF copy, but no UDF modification  can
+be  allowed.   Therefore in standalone mode passwords cannot
+be changed and users cannot be added or deleted.
+
+
+_N_O_D_E _A_D_M_I_N_I_S_T_R_A_T_I_O_N
+
+In a network with consumer based user authentication  it  is
+necessary  for  servers  to be able to authenticate consumer
+systems before trusting their user identifications.   To  do
+this  each  consumer  system  will  have a name and password
+which it uses with  the  Consumer  Logon  command.   When  a
+server  receives  such  a  command  it  validates  the  data
+presented against a Node Definition File (NDF).
+
+The NDF is maintained in a manner  similar  to  the  current
+UNIX   Password  File.   It  may  be  updated  only  by  the
+superuser.  When the network configuration changes  the  NDF
+must be updated.  NDF update may be performed without inter-
+rupting network operation.
+
+
+
+
+
+Copyright Microsoft Corp., 1985              Intel PN 138447
+
+
